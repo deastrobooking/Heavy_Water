@@ -11,6 +11,11 @@
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
+    "@babylonjs/core": "^8.42.0",
+    "@babylonjs/gui": "^8.42.0",
+    "@babylonjs/loaders": "^8.42.0",
+    "@babylonjs/materials": "^8.42.0",
+    "@babylonjs/procedural-textures": "^8.42.0",
     "@fontsource/inter": "^5.2.5",
     "@jridgewell/trace-mapping": "^0.3.25",
     "@radix-ui/react-accordion": "^1.2.1",
