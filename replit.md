@@ -43,8 +43,16 @@ client/
 - **EnemyUnit**: Implements IDamageable, FSM-driven AI with Patrol→Chase→Attack→Stunned→Dead states
 - **EnemySystem**: Wave spawner with type selection based on wave number, difficulty scaling
 
-### City
-- **CityGenerator**: Zones (Downtown, Industrial, Residential, Spaceport, Highway), cell-shaded shader materials, animated water shader river, neon lights, street lights
+### City & Environment
+- **CityGenerator**: Expanded 1200x1200 world with multiple biomes
+  - City Zones: Downtown, Industrial, Residential, Spaceport, Highway, Outer Districts
+  - Sky Cities: 12 floating platforms at heights 40-250 with buildings, towers, beacons
+  - Sky Bridges: Segmented walkways connecting platforms with glowing rails
+  - Stairways: Ground-to-sky stepping stone ramps with glow strips
+  - Mountains: 4 mountain ranges with peaks, snow caps, boulders, ridges
+  - Nature: 4 nature zones with trees, bushes, grass, ponds, rocks
+  - Apex Platform: Highest point (y=250) with animated rings and energy orb
+  - Cell-shaded shader materials, animated water shader river, neon lights, street lights
 
 ## Features
 
@@ -129,6 +137,18 @@ client/
 - Note: All mesh positioning must use height/2 to rest on ground
 
 ## Recent Changes
+- February 2026: Environment expansion
+  - Expanded world from 500x500 to 1200x1200
+  - Added 12 sky city platforms at heights 40-250 with buildings and towers
+  - Added sky bridges with segmented walkways and glowing rails
+  - Added ground-to-sky stairways with stepping stones
+  - Added 4 mountain ranges with peaks, snow caps, boulders, ridges
+  - Added 4 nature zones with trees, bushes, grass, ponds, rocks
+  - Added apex platform with animated rings and energy orb
+  - Added 5 outer city districts
+  - Upgraded jetpack (200 fuel, stronger thrust, faster regen)
+  - Added platform landing detection via raycasting
+  - Extended highways and river to span full world
 - February 2026: Major systems upgrade
   - Added EventBus, StateMachine, DamageSystem core architecture
   - Enhanced PlayerController with dodge, parry, sprint, jetpack, stamina

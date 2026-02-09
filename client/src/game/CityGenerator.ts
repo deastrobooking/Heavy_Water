@@ -232,10 +232,12 @@ export class CityGenerator {
         lampMat.diffuseColor = color;
         lamp.material = lampMat;
 
-        const light = new BABYLON.PointLight("streetLight", new BABYLON.Vector3(x, poleHeight + 0.5, z), this.scene);
-        light.diffuse = color;
-        light.intensity = 0.4;
-        light.range = 15;
+        if ((x + z) % 90 === 0) {
+          const light = new BABYLON.PointLight("streetLight", new BABYLON.Vector3(x, poleHeight + 0.5, z), this.scene);
+          light.diffuse = color;
+          light.intensity = 0.6;
+          light.range = 25;
+        }
       }
     }
   }
@@ -452,14 +454,16 @@ export class CityGenerator {
       neonMat.diffuseColor = color;
       neonSign.material = neonMat;
 
-      const neonLight = new BABYLON.PointLight(
-        `neonLight_${i}`,
-        new BABYLON.Vector3(x, y, z),
-        this.scene
-      );
-      neonLight.diffuse = color;
-      neonLight.intensity = 0.3;
-      neonLight.range = 20;
+      if (i % 5 === 0) {
+        const neonLight = new BABYLON.PointLight(
+          `neonLight_${i}`,
+          new BABYLON.Vector3(x, y, z),
+          this.scene
+        );
+        neonLight.diffuse = color;
+        neonLight.intensity = 0.5;
+        neonLight.range = 30;
+      }
     }
   }
 

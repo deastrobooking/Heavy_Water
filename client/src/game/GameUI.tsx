@@ -26,8 +26,8 @@ export const GameUI: React.FC<GameUIProps> = ({
   waveNumber,
   chestCount,
   showMessage,
-  jetpackFuel = 100,
-  maxJetpackFuel = 100,
+  jetpackFuel = 200,
+  maxJetpackFuel = 200,
   playerState = "idle",
   comboInfo = null,
 }) => {

@@ -62,11 +62,11 @@ export class PlayerController implements IDamageable {
   private parryCooldownTimer: number = 0;
 
   private isJetpacking: boolean = false;
-  private jetpackFuel: number = 100;
-  private maxJetpackFuel: number = 100;
-  private jetpackForce: number = 0.04;
-  private jetpackFuelCost: number = 25;
-  private jetpackFuelRegen: number = 15;
+  private jetpackFuel: number = 200;
+  private maxJetpackFuel: number = 200;
+  private jetpackForce: number = 0.06;
+  private jetpackFuelCost: number = 20;
+  private jetpackFuelRegen: number = 30;
 
   private invulnerabilityTimer: number = 0;
 
@@ -338,10 +338,37 @@ export class PlayerController implements IDamageable {
       this.velocity.y -= this.gravity;
     }
 
+    const maxFallSpeed = 0.8;
+    if (this.velocity.y < -maxFallSpeed) {
+      this.velocity.y = -maxFallSpeed;
+    }
+
     this.mesh.position.addInPlace(this.velocity);
 
-    if (this.mesh.position.y <= this.groundY) {
-      this.mesh.position.y = this.groundY;
+    let surfaceY = this.groundY;
+    const rayLength = Math.max(8, Math.abs(this.velocity.y) * 20 + 5);
+    const ray = new BABYLON.Ray(
+      new BABYLON.Vector3(this.mesh.position.x, this.mesh.position.y + 1, this.mesh.position.z),
+      BABYLON.Vector3.Down(),
+      rayLength
+    );
+    const hit = this.scene.pickWithRay(ray, (mesh) => {
+      if (mesh.name === "player") return false;
+      const n = mesh.name;
+      return n === "ground" || n.startsWith("skyPlat_") || n.startsWith("bridge_seg") ||
+        n.startsWith("step_") || n === "mainHighway" || n === "crossHighway" ||
+        n === "spaceport";
+    });
+
+    if (hit && hit.hit && hit.pickedPoint) {
+      const platSurface = hit.pickedPoint.y;
+      if (platSurface > surfaceY) {
+        surfaceY = platSurface;
+      }
+    }
+
+    if (this.mesh.position.y <= surfaceY + 1) {
+      this.mesh.position.y = surfaceY + 1;
       this.velocity.y = 0;
       this.isGrounded = true;
     } else {
