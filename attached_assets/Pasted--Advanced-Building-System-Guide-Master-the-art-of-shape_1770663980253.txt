@@ -1,0 +1,247 @@
+# Advanced Building System Guide
+
+Master the art of shape creation and morphing to build anything you can imagine in HeavyWater.
+
+## 🎨 Shape Building Overview
+
+The Advanced Building System allows you to create custom structures using procedural shapes that you can modify in real-time. Unlike traditional building systems, you have complete creative freedom to design unique architecture.
+
+### System Components
+- **Shape Creator** - Generates basic geometric shapes
+- **Shape Morpher** - Modifies shapes with various tools
+- **Material System** - Applies colors, gradients, and textures
+- **Placement System** - Finalizes and places shapes in the world
+
+## 🚀 Getting Started
+
+### Accessing the System
+- **Primary Method**: Press **V** to toggle the shape building interface
+- **Quick Access**: Press **T** for instant access (for testing)
+- **UI Location**: Top-right corner of screen when active
+
+### Interface Layout
+```
+┌─────────────────┬─────────────────┐
+│ Shape Selection │ Morphing Tools  │
+├─────────────────┼─────────────────┤
+│ Color Controls │ Action Buttons  │
+└─────────────────┴─────────────────┘
+```
+
+## 🔧 Shape Creation
+
+### Available Shapes
+- **Cube** - Basic rectangular prism
+- **Sphere** - Perfect sphere with UV mapping
+- **Cylinder** - Rounded column shape
+- **Cone** - Tapered conical shape
+- **Torus** - Donut-shaped ring
+- **Prism** - Triangular prism
+
+### Creating a Shape
+1. Click **"Create Shape"** button
+2. Select desired shape from the grid
+3. Shape appears as a **preview object** (semi-transparent)
+4. Preview can be modified before placement
+
+### Shape Properties
+- **Default Size**: 2x2x2 units (configurable)
+- **Material**: Basic diffuse material
+- **Physics**: Includes collision mesh
+- **Performance**: Optimized for real-time editing
+
+## 🛠️ Morphing Tools
+
+### Tool Selection
+Click any tool button to activate it. Active tools are highlighted in yellow.
+
+### Basic Tools
+
+#### 1. Select Tool
+- **Purpose**: Default selection and navigation
+- **Usage**: Click on shapes to select them
+- **Hotkey**: None (default tool)
+
+#### 2. Scale Tool
+- **Purpose**: Resize shapes in any dimension
+- **Usage**: Click and drag on the shape
+- **Effect**: Uniform or directional scaling
+- **Tips**: Hold Shift for uniform scaling
+
+#### 3. Rotate Tool
+- **Purpose**: Rotate shapes around any axis
+- **Usage**: Click and drag to rotate
+- **Effect**: Free-form rotation
+- **Tips**: Use world axes for precise rotation
+
+### Advanced Tools
+
+#### 4. Extrude Tool
+- **Purpose**: Pull faces outward to create depth
+- **Usage**: Click on a face to extrude it
+- **Effect**: Creates new geometry from selected face
+- **Tips**: Combine with scale for complex shapes
+
+#### 5. Bevel Tool
+- **Purpose**: Smooth edges and corners
+- **Usage**: Click on edges to bevel them
+- **Effect**: Rounds sharp edges
+- **Tips**: Use for architectural details
+
+#### 6. Color Paint Tool
+- **Purpose**: Apply colors to shape surfaces
+- **Usage**: Click on surfaces to paint them
+- **Effect**: Direct color application
+- **Tips**: Use with color picker for precision
+
+#### 7. Gradient Tool
+- **Purpose**: Apply height-based color gradients
+- **Usage**: Click to apply gradient mapping
+- **Effect**: Color transitions based on Y-axis
+- **Tips**: Great for terrain and organic shapes
+
+#### 8. Texture Tool
+- **Purpose**: Apply texture mapping
+- **Usage**: Click to apply texture coordinates
+- **Effect**: UV unwrapping for texturing
+- **Tips**: Use with custom materials
+
+## 🎨 Color and Material System
+
+### Color Picker
+- **RGB Sliders**: Red, Green, Blue (0-255)
+- **Real-time Preview**: See colors instantly
+- **Color History**: Quick access to recent colors
+
+### Gradient System
+- **Height-based**: Colors change with elevation
+- **Customizable**: Define start/end colors
+- **Smooth Transitions**: Automatic interpolation
+
+### Material Properties
+- **Base Color**: Primary surface color
+- **Secondary Color**: For gradients and effects
+- **Emission**: Glowing effects
+- **Metallic/Smoothness**: PBR properties
+
+## ⚙️ Action Controls
+
+### Shape Actions
+- **Confirm** - Place shape permanently in world
+- **Cancel** - Delete preview and start over
+- **Reset** - Return shape to original state
+
+### Workflow Tips
+1. **Start Simple** - Begin with basic shapes
+2. **Iterate Quickly** - Use Reset to try variations
+3. **Combine Shapes** - Place multiple shapes together
+4. **Save Good Designs** - Note successful combinations
+
+## 🏗️ Building Strategies
+
+### Basic Structures
+1. **Walls**: Use scaled cubes with beveling
+2. **Floors**: Thin extruded planes
+3. **Roofs**: Angled shapes with gradients
+4. **Pillars**: Tall cylinders with details
+
+### Advanced Techniques
+- **Boolean Operations**: Combine shapes creatively
+- **Symmetry**: Mirror shapes for balance
+- **Modular Design**: Create reusable components
+- **Procedural Details**: Add complexity with extrusions
+
+### Performance Considerations
+- **Shape Count**: Limit to 50-100 shapes per area
+- **Complexity**: Use simpler shapes for large structures
+- **LOD System**: Distant shapes can be simplified
+- **Batching**: Similar materials batch automatically
+
+## 🌟 Creative Examples
+
+### Simple House
+1. Create a large cube (base)
+2. Extrude top face for roof
+3. Add smaller cubes for windows/doors
+4. Apply color gradient to roof
+
+### Complex Tower
+1. Start with tall cylinder
+2. Add extruded details around base
+3. Create balcony with beveled edges
+4. Apply stone-like texture
+
+### Organic Structure
+1. Use sphere as base
+2. Extrude and bevel for natural look
+3. Apply green gradient
+4. Add smaller spheres for details
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+#### Shapes Not Appearing
+- **Check**: ShapeCreator component in scene
+- **Fix**: Add ShapeBuildingTest component
+- **Verify**: UI toggles with 'V' key
+
+#### Tools Not Working
+- **Check**: Tool selection in UI
+- **Fix**: Click tool button to activate
+- **Verify**: Button highlights when selected
+
+#### Colors Not Applying
+- **Check**: Material supports color changes
+- **Fix**: Use basic diffuse material
+- **Verify**: RGB sliders affect preview
+
+#### Performance Issues
+- **Check**: Shape count and complexity
+- **Fix**: Reduce detail or merge shapes
+- **Verify**: Monitor frame rate
+
+### Debug Information
+- Press **F1** to show debug info
+- Check console for error messages
+- Use Unity Profiler for performance analysis
+
+## 🎯 Advanced Tips
+
+### Keyboard Shortcuts
+- **V** - Toggle building UI
+- **T** - Quick test access
+- **Mouse Wheel** - Adjust tool strength
+- **Ctrl+Z** - Undo (if implemented)
+
+### Best Practices
+- **Plan Ahead**: Sketch designs before building
+- **Start Small**: Master basic tools first
+- **Save Iterations**: Note what works well
+- **Share Designs**: Document successful builds
+
+### Integration with Other Systems
+- **Inventory**: Building costs consume resources
+- **Crafting**: Create custom materials
+- **Terrain**: Shapes can modify terrain
+- **Physics**: Collision detection included
+
+## 🚀 Future Features
+
+### Planned Enhancements
+- **Multi-shape Selection**: Edit multiple shapes together
+- **Shape Templates**: Save and reuse designs
+- **Advanced Materials**: PBR, normal maps, emission
+- **Animation**: Moving and interactive shapes
+- **Networking**: Share shapes with other players
+
+### Community Features
+- **Shape Library**: Shared user creations
+- **Tutorials**: Interactive building guides
+- **Competitions**: Building challenges
+- **Marketplace**: Buy/sell custom shapes
+
+---
+
+**The only limit is your imagination!** 🎨✨</content>
+<parameter name="filePath">/Users/home/Desktop/HeavyWater/docs/user-guides/building-system.md

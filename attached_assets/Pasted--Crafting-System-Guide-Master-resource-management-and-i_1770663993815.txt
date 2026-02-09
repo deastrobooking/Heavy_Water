@@ -1,0 +1,274 @@
+# Crafting System Guide
+
+Master resource management and item creation to build your empire in HeavyWater.
+
+## 🛠️ Crafting Overview
+
+The crafting system provides a comprehensive resource management and production pipeline. Collect raw materials, craft intermediate items, and build complex structures using a multi-station approach.
+
+### System Components
+- **Inventory Management** - Track all resources and items
+- **Recipe System** - Define crafting requirements
+- **Production Stations** - Specialized crafting locations
+- **Resource Gathering** - Collection mechanics
+
+## 📦 Inventory System
+
+### Accessing Inventory
+- **Primary Method**: Press **I** to open inventory
+- **Quick Transfer**: Drag items between slots
+- **Stack Limits**: Items stack up to 99 units
+
+### Inventory Layout
+```
+┌─────────────────┬─────────────────┐
+│ Main Inventory  │ Hotbar (1-9)    │
+├─────────────────┼─────────────────┤
+│ Equipment       │ Crafting Grid   │
+└─────────────────┴─────────────────┘
+```
+
+### Item Categories
+- **Raw Materials**: Wood, Stone, Metal, Crystal
+- **Processed Items**: Planks, Ingots, Gems
+- **Tools**: Pickaxes, Axes, Hammers
+- **Buildings**: Structures and components
+- **Consumables**: Food, potions, resources
+
+## 🔨 Crafting Mechanics
+
+### Basic Crafting
+1. Open crafting interface (press **C**)
+2. Select recipe from category tabs
+3. Place required items in crafting grid
+4. Click **Craft** to produce item
+
+### Recipe Categories
+- **Basic Materials**: Wood → Planks, Ore → Ingots
+- **Tools**: Weapons, mining tools, building tools
+- **Buildings**: Walls, floors, furniture
+- **Advanced**: Machinery, magical items
+
+### Multi-Station Crafting
+Some items require specialized stations:
+
+#### Workbench Station
+- **Location**: Player-built workbench
+- **Purpose**: Basic tool and item crafting
+- **Requirements**: Wood and stone materials
+
+#### Furnace Station
+- **Location**: Stone furnace structure
+- **Purpose**: Metal smelting and processing
+- **Requirements**: Ore and fuel (coal/wood)
+
+#### Anvil Station
+- **Location**: Metal anvil setup
+- **Purpose**: Weapon and armor crafting
+- **Requirements**: Metal ingots and tools
+
+#### Alchemy Station
+- **Location**: Laboratory setup
+- **Purpose**: Potion and magical item creation
+- **Requirements**: Herbs, crystals, containers
+
+## 🌾 Resource Gathering
+
+### Collection Methods
+
+#### Mining
+- **Tools**: Pickaxe (stone), Hammer (ore)
+- **Locations**: Mountains, caves, quarries
+- **Resources**: Stone, Iron, Gold, Crystal
+- **Tips**: Use appropriate tool for efficiency
+
+#### Woodcutting
+- **Tools**: Axe (wood), Saw (precision)
+- **Locations**: Forests, jungles
+- **Resources**: Wood, Branches, Leaves
+- **Tips**: Different trees yield different wood types
+
+#### Farming
+- **Tools**: Hoe (tilling), Watering can (growth)
+- **Locations**: Farm plots (player-created)
+- **Resources**: Wheat, Vegetables, Herbs
+- **Tips**: Water regularly for faster growth
+
+#### Fishing
+- **Tools**: Fishing rod, Bait
+- **Locations**: Rivers, lakes, oceans
+- **Resources**: Fish, Pearls, Coral
+- **Tips**: Different times yield different catches
+
+### Resource Quality
+- **Common**: Basic materials (50% drop rate)
+- **Uncommon**: Better materials (25% drop rate)
+- **Rare**: Premium materials (10% drop rate)
+- **Epic**: Special materials (2% drop rate)
+
+## 🏭 Production Pipeline
+
+### Raw Materials → Processed Items
+```
+Wood → Planks → Furniture
+Ore → Ingots → Tools
+Herbs → Potions → Elixirs
+```
+
+### Crafting Chain Example
+1. **Gather**: Mine iron ore
+2. **Process**: Smelt ore into iron ingots (furnace)
+3. **Craft**: Make iron tools (workbench)
+4. **Use**: Tools for more efficient gathering
+
+### Efficiency Tips
+- **Bulk Processing**: Craft large quantities
+- **Station Placement**: Build near resource areas
+- **Tool Upgrades**: Better tools = faster gathering
+- **Automation**: Future feature for continuous production
+
+## 📊 Recipe Management
+
+### Recipe Discovery
+- **Automatic**: Basic recipes unlocked by default
+- **Exploration**: Find recipes in chests/ruins
+- **Research**: Unlock through experimentation
+- **Trading**: Buy from NPCs (future feature)
+
+### Recipe Format
+Each recipe includes:
+- **Name**: Item being crafted
+- **Requirements**: Materials needed
+- **Station**: Required crafting station
+- **Time**: Production duration
+- **Yield**: Items produced
+
+### Example Recipe: Iron Sword
+```
+Name: Iron Sword
+Requirements:
+  - 2x Iron Ingot
+  - 1x Wood Plank (handle)
+Station: Anvil
+Time: 30 seconds
+Yield: 1x Iron Sword
+```
+
+## 🏗️ Building Integration
+
+### Construction Materials
+- **Basic**: Wood planks, stone blocks
+- **Advanced**: Metal beams, crystal panels
+- **Special**: Magical materials, enchanted wood
+
+### Building Process
+1. **Gather Materials**: Collect required resources
+2. **Craft Components**: Make building parts
+3. **Assemble Structure**: Use building system
+4. **Place and Connect**: Final positioning
+
+### Integration with Shape Building
+- **Material Supply**: Crafting provides materials for shapes
+- **Custom Items**: Craft unique building components
+- **Tool Creation**: Make specialized building tools
+
+## 💰 Economy and Trading
+
+### Resource Value
+- **Base Value**: Determined by rarity and utility
+- **Market Fluctuation**: Supply and demand changes
+- **Quality Multipliers**: Better materials = higher value
+
+### Trading System (Planned)
+- **Player Markets**: Buy/sell with other players
+- **NPC Merchants**: Trade for special items
+- **Auction House**: Bid on rare materials
+- **Bulk Deals**: Discount for large quantities
+
+## 📈 Progression and Upgrades
+
+### Skill Development
+- **Gathering Skills**: Increase resource yield
+- **Crafting Skills**: Unlock better recipes
+- **Efficiency Skills**: Faster production times
+
+### Tool Progression
+```
+Basic Tool → Improved Tool → Advanced Tool → Master Tool
+  ↑              ↑              ↑              ↑
+Efficiency   +25%         +50%         +75%         +100%
+```
+
+### Station Upgrades
+- **Basic Station**: Standard production
+- **Improved Station**: Faster crafting
+- **Advanced Station**: Multiple recipes
+- **Master Station**: Automated production
+
+## 🎯 Advanced Strategies
+
+### Resource Optimization
+- **Mining Routes**: Plan efficient gathering paths
+- **Farm Planning**: Maximize crop yield per area
+- **Production Chains**: Set up material flow
+- **Storage Solutions**: Organize inventory effectively
+
+### Economic Strategies
+- **Bulk Gathering**: Collect resources in large quantities
+- **Specialization**: Focus on specific crafting types
+- **Trading**: Buy low, sell high on market fluctuations
+- **Investment**: Save rare materials for future value
+
+### Time Management
+- **Queue System**: Craft multiple items simultaneously
+- **Background Processing**: Continue crafting while exploring
+- **Batch Production**: Make large quantities efficiently
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+#### Can't Craft Item
+- **Check**: Required materials in inventory
+- **Fix**: Gather missing resources
+- **Verify**: Recipe requirements met
+
+#### Station Not Working
+- **Check**: Station properly built and powered
+- **Fix**: Rebuild or repair station
+- **Verify**: All components connected
+
+#### Low Resource Yield
+- **Check**: Appropriate tool being used
+- **Fix**: Upgrade to better tools
+- **Verify**: Tool effectiveness
+
+#### Inventory Full
+- **Check**: Available space in inventory
+- **Fix**: Use storage containers or sell items
+- **Verify**: Space freed up
+
+### Debug Commands
+- **/inventory clear** - Clear all items
+- **/recipes list** - Show all unlocked recipes
+- **/resources spawn** - Add test resources
+
+## 🚀 Future Features
+
+### Planned Enhancements
+- **Automated Workshops**: Self-running production
+- **Recipe Research**: Discover new crafting methods
+- **Quality System**: Item quality affects performance
+- **Enchanting**: Add magical properties
+- **Mass Production**: Factory-style manufacturing
+
+### Community Features
+- **Recipe Sharing**: Exchange crafting knowledge
+- **Guild Workshops**: Group production facilities
+- **Crafting Competitions**: Show off creations
+- **Market Analytics**: Track price trends
+
+---
+
+**Master the art of creation and build your legacy!** 🛠️✨</content>
+<parameter name="filePath">/Users/home/Desktop/HeavyWater/docs/user-guides/crafting-system.md

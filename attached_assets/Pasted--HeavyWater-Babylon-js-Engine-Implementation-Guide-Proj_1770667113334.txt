@@ -1,0 +1,3757 @@
+# HeavyWater — Babylon.js Engine Implementation Guide
+
+> **Project**: HeavyWater  
+> **Source Engine**: Unity 2022+ (URP)  
+> **Target Engine**: Babylon.js 7.x  
+> **Date**: February 2026  
+
+---
+
+## Table of Contents
+
+1. [Architecture Overview](#1-architecture-overview)
+2. [Project Scaffolding & Build Pipeline](#2-project-scaffolding--build-pipeline)
+3. [Scene Graph & Game Object Equivalence](#3-scene-graph--game-object-equivalence)
+4. [Game Manager & Singleton Pattern](#4-game-manager--singleton-pattern)
+5. [Input System](#5-input-system)
+6. [Player Controller](#6-player-controller)
+7. [Player State Machine](#7-player-state-machine)
+8. [Camera Controller](#8-camera-controller)
+9. [Combat System — Combo & Weapons](#9-combat-system--combo--weapons)
+10. [Player Stats & Damage](#10-player-stats--damage)
+11. [Enemy System — Stats, State Machine, AI](#11-enemy-system--stats-state-machine-ai)
+12. [Enemy Spawn Trigger](#12-enemy-spawn-trigger)
+13. [Solar System — N-Body Simulation](#13-solar-system--n-body-simulation)
+14. [Celestial Bodies & Gravity Objects](#14-celestial-bodies--gravity-objects)
+15. [Ship Piloting System](#15-ship-piloting-system)
+16. [Floating Origin (Endless Manager)](#16-floating-origin-endless-manager)
+17. [Star Dome](#17-star-dome)
+18. [Ship HUD & Lock-On UI](#18-ship-hud--lock-on-ui)
+19. [Procedural Terrain Generation](#19-procedural-terrain-generation)
+20. [Shaders — Terrain, Water, Vegetation](#20-shaders--terrain-water-vegetation)
+21. [Jetpack & Multi-Jump System](#21-jetpack--multi-jump-system)
+22. [Robot Transformation System](#22-robot-transformation-system)
+23. [Inventory System](#23-inventory-system)
+24. [UI Manager](#24-ui-manager)
+25. [Audio Manager](#25-audio-manager)
+26. [Physics Mapping](#26-physics-mapping)
+27. [Animation System](#27-animation-system)
+28. [Performance & Optimisation](#28-performance--optimisation)
+29. [Testing Strategy](#29-testing-strategy)
+30. [Migration Checklist](#30-migration-checklist)
+
+---
+
+## 1. Architecture Overview
+
+### Unity Architecture (Current)
+```
+GameManager (Singleton, DontDestroyOnLoad)
+ ├── InputManager          (ScriptableObject, polled every frame)
+ ├── PlayerController      (CharacterController + hybrid input)
+ │    ├── PlayerStateMachine
+ │    ├── PlayerCombat
+ │    ├── ComboSystem
+ │    ├── WeaponSystem
+ │    └── PlayerStats
+ ├── CameraController      (3rd-person orbit + lock-on)
+ ├── UIManager             (Unity UI / TMP)
+ ├── AudioManager
+ ├── Inventory             (ScriptableObject)
+ └── EnemySpawnTrigger     (per-zone)
+      └── EnemyStateMachine + EnemyStats (per enemy)
+
+Solar System Scene
+ ├── NBodySimulation       (gravitational sim, FixedUpdate)
+ ├── CelestialBody[]       (Rigidbody, orbital velocity)
+ ├── Ship                  (Rigidbody, 6DOF thrust)
+ ├── EndlessManager        (floating origin)
+ ├── StarDome              (skybox particle field)
+ ├── ShipHUD / LockOnUI
+ └── SolarSystemSpawner    (procedural planet generation)
+```
+
+### Babylon.js Target Architecture
+```
+GameEngine (ES module singleton)
+ ├── InputController       (ActionManager + DeviceSourceManager)
+ ├── PlayerController      (mesh + physics impostor / Havok body)
+ │    ├── PlayerStateMachine
+ │    ├── CombatSystem
+ │    ├── WeaponSystem
+ │    └── PlayerStats
+ ├── CameraRig             (ArcRotateCamera / FollowCamera)
+ ├── UILayer               (Babylon.GUI AdvancedDynamicTexture)
+ ├── AudioEngine           (Babylon Sound / SpatialSound)
+ ├── InventoryStore        (plain TypeScript Map)
+ └── EnemySpawnZone        (trigger volume per zone)
+      └── EnemyFSM + EnemyStats
+
+Solar System Scene
+ ├── NBodySimulation       (beforeRender observable, custom physics)
+ ├── CelestialBody[]       (TransformNode + custom velocity)
+ ├── ShipController        (6DOF with physics aggregate)
+ ├── FloatingOrigin        (LateUpdate via onAfterRender)
+ ├── StarDome              (SolidParticleSystem or PointsCloudSystem)
+ ├── ShipHUD               (GUI overlay)
+ └── PlanetGenerator       (procedural mesh via VertexData)
+```
+
+---
+
+## 2. Project Scaffolding & Build Pipeline
+
+### Recommended Stack
+
+| Concern | Tool |
+|---|---|
+| Language | TypeScript 5.x |
+| Bundler | Vite 5+ |
+| 3D Engine | `@babylonjs/core` 7.x |
+| GUI | `@babylonjs/gui` |
+| Physics | Havok Physics Plugin (`@babylonjs/havok`) |
+| Loaders | `@babylonjs/loaders` (glTF) |
+| Inspector | `@babylonjs/inspector` (dev only) |
+| Testing | Vitest + Playwright |
+| Linting | ESLint + Prettier |
+
+### Directory Layout
+
+```
+heavywater-babylon/
+├── public/
+│   ├── assets/
+│   │   ├── models/          # .glb/.gltf exported from Unity
+│   │   ├── textures/
+│   │   ├── audio/
+│   │   └── data/            # JSON configs (enemy templates, combos)
+│   └── index.html
+├── src/
+│   ├── main.ts              # Entry point
+│   ├── engine/
+│   │   ├── GameEngine.ts
+│   │   ├── SceneManager.ts
+│   │   └── Constants.ts
+│   ├── input/
+│   │   └── InputController.ts
+│   ├── player/
+│   │   ├── PlayerController.ts
+│   │   ├── PlayerStateMachine.ts
+│   │   ├── PlayerCombat.ts
+│   │   ├── PlayerStats.ts
+│   │   └── ComboSystem.ts
+│   ├── camera/
+│   │   └── CameraRig.ts
+│   ├── enemies/
+│   │   ├── EnemyFSM.ts
+│   │   ├── EnemyStats.ts
+│   │   ├── EnemySpawnZone.ts
+│   │   └── BossAI.ts
+│   ├── combat/
+│   │   ├── WeaponSystem.ts
+│   │   ├── DamageSystem.ts
+│   │   └── Projectile.ts
+│   ├── solar/
+│   │   ├── NBodySimulation.ts
+│   │   ├── CelestialBody.ts
+│   │   ├── GravityObject.ts
+│   │   ├── ShipController.ts
+│   │   ├── FloatingOrigin.ts
+│   │   ├── StarDome.ts
+│   │   ├── Universe.ts
+│   │   └── ShipHUD.ts
+│   ├── terrain/
+│   │   ├── ProceduralTerrain.ts
+│   │   └── QuadTreeTerrain.ts
+│   ├── systems/
+│   │   ├── InventoryStore.ts
+│   │   ├── AudioEngine.ts
+│   │   └── TransformationSystem.ts
+│   ├── shaders/
+│   │   ├── terrain.fragment.glsl
+│   │   ├── terrain.vertex.glsl
+│   │   ├── water.fragment.glsl
+│   │   ├── water.vertex.glsl
+│   │   └── ShaderMaterialFactory.ts
+│   ├── ui/
+│   │   ├── UIManager.ts
+│   │   ├── HUDOverlay.ts
+│   │   └── ShipHUDOverlay.ts
+│   └── utils/
+│       ├── MathUtility.ts
+│       └── PRNG.ts
+├── tsconfig.json
+├── vite.config.ts
+└── package.json
+```
+
+### package.json (key deps)
+
+```json
+{
+  "name": "heavywater-babylon",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@babylonjs/core": "^7.0.0",
+    "@babylonjs/gui": "^7.0.0",
+    "@babylonjs/havok": "^1.3.0",
+    "@babylonjs/loaders": "^7.0.0",
+    "@babylonjs/materials": "^7.0.0"
+  },
+  "devDependencies": {
+    "@babylonjs/inspector": "^7.0.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.0.0",
+    "vitest": "^1.0.0"
+  }
+}
+```
+
+### Entry Point — `main.ts`
+
+```typescript
+import { GameEngine } from "./engine/GameEngine";
+
+const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+const game = new GameEngine(canvas);
+await game.initialize();
+game.run();
+```
+
+---
+
+## 3. Scene Graph & Game Object Equivalence
+
+| Unity Concept | Babylon.js Equivalent |
+|---|---|
+| `GameObject` | `TransformNode` (no mesh) or `Mesh` |
+| `Transform` | `node.position`, `node.rotation`, `node.scaling` |
+| `MonoBehaviour` | Class composition attached via metadata / maps |
+| `GetComponent<T>()` | `node.metadata.get("componentName")` or a `ComponentStore` |
+| `Find…` / `FindObjectOfType` | `scene.getMeshByName()`, `scene.getTransformNodeByName()`, or custom registry |
+| `Instantiate(prefab)` | `prefab.clone()` or `prefab.instantiateModelsToScene()` |
+| `Destroy(go, delay)` | `node.dispose()` with `setTimeout` |
+| `DontDestroyOnLoad` | Keep reference across scene switches in the `GameEngine` singleton |
+| `Coroutine / IEnumerator` | `async`/`await` + `scene.onBeforeRenderObservable` |
+| `Invoke(name, delay)` | `setTimeout` / `scene.onBeforeRenderObservable` with timer |
+| `tag` / `CompareTag` | `node.metadata.tag` string comparison |
+| `layer` / `LayerMask` | `node.layerMask` (bitmask, same concept) |
+
+### Component System Pattern
+
+Since Babylon.js has no built-in component system like Unity's `MonoBehaviour`, implement a lightweight one:
+
+```typescript
+// src/engine/Component.ts
+import { TransformNode, Scene } from "@babylonjs/core";
+
+export abstract class GameComponent {
+  node: TransformNode;
+  scene: Scene;
+  private _enabled = true;
+
+  constructor(node: TransformNode) {
+    this.node = node;
+    this.scene = node.getScene();
+  }
+
+  get enabled(): boolean { return this._enabled; }
+  set enabled(v: boolean) {
+    if (this._enabled !== v) {
+      this._enabled = v;
+      v ? this.onEnable() : this.onDisable();
+    }
+  }
+
+  /** Called once after construction */
+  awake(): void {}
+  /** Called once before first update */
+  start(): void {}
+  /** Called every frame */
+  update(dt: number): void {}
+  /** Called at fixed physics rate */
+  fixedUpdate(dt: number): void {}
+  /** Called after all updates */
+  lateUpdate(dt: number): void {}
+
+  onEnable(): void {}
+  onDisable(): void {}
+  dispose(): void {}
+}
+
+// Registry on every node
+export function addComponent<T extends GameComponent>(
+  node: TransformNode,
+  ComponentClass: new (node: TransformNode) => T
+): T {
+  const comp = new ComponentClass(node);
+  if (!node.metadata) node.metadata = {};
+  if (!node.metadata.components) node.metadata.components = new Map<string, GameComponent>();
+  node.metadata.components.set(ComponentClass.name, comp);
+  comp.awake();
+  return comp;
+}
+
+export function getComponent<T extends GameComponent>(
+  node: TransformNode,
+  ComponentClass: new (node: TransformNode) => T
+): T | undefined {
+  return node.metadata?.components?.get(ComponentClass.name) as T | undefined;
+}
+```
+
+### Tick Loop Registration
+
+```typescript
+// In GameEngine.ts
+scene.onBeforeRenderObservable.add(() => {
+  const dt = engine.getDeltaTime() / 1000;
+  for (const comp of allComponents) {
+    if (comp.enabled) comp.update(dt);
+  }
+});
+
+// Fixed timestep (for physics / NBody)
+const FIXED_DT = 0.01; // 100 Hz, matching Universe.physicsTimeStep
+let accumulator = 0;
+scene.onBeforePhysicsObservable.add(() => {
+  accumulator += engine.getDeltaTime() / 1000;
+  while (accumulator >= FIXED_DT) {
+    for (const comp of allComponents) {
+      if (comp.enabled) comp.fixedUpdate(FIXED_DT);
+    }
+    accumulator -= FIXED_DT;
+  }
+});
+```
+
+---
+
+## 4. Game Manager & Singleton Pattern
+
+The Unity `GameManager` is a singleton `MonoBehaviour` with `DontDestroyOnLoad`. In Babylon.js, use a plain TypeScript singleton that owns the engine and scene lifecycle.
+
+### Unity Source Reference
+```
+GameManager : MonoBehaviour
+  ├── InputManager inputManager
+  ├── PlayerController player
+  ├── CameraController cameraController
+  ├── UIManager uiManager
+  ├── AudioManager audioManager
+  ├── Inventory inventory
+  ├── GameState { Playing, Paused, GameOver, Victory, Cutscene }
+  └── TogglePause(), ChangeGameState()
+```
+
+### Babylon.js Implementation — `GameEngine.ts`
+
+```typescript
+import {
+  Engine, Scene, HavokPlugin, Vector3,
+} from "@babylonjs/core";
+import HavokPhysics from "@babylonjs/havok";
+import { InputController } from "../input/InputController";
+import { UIManager } from "../ui/UIManager";
+import { AudioEngine as GameAudio } from "../systems/AudioEngine";
+import { InventoryStore } from "../systems/InventoryStore";
+
+export enum GameState {
+  Playing,
+  Paused,
+  GameOver,
+  Victory,
+  Cutscene,
+}
+
+export class GameEngine {
+  private static _instance: GameEngine;
+  static get Instance(): GameEngine { return GameEngine._instance; }
+
+  engine: Engine;
+  scene!: Scene;
+  input!: InputController;
+  ui!: UIManager;
+  audio!: GameAudio;
+  inventory!: InventoryStore;
+
+  state: GameState = GameState.Playing;
+  isPaused = false;
+
+  // Registered player / camera (set by their own init)
+  player: /* PlayerController */ any = null;
+  cameraRig: /* CameraRig */ any = null;
+
+  constructor(private canvas: HTMLCanvasElement) {
+    GameEngine._instance = this;
+    this.engine = new Engine(canvas, true, {
+      preserveDrawingBuffer: true,
+      stencil: true,
+      antialias: true,
+    });
+  }
+
+  async initialize(): Promise<void> {
+    // Physics
+    const havokInstance = await HavokPhysics();
+    const havokPlugin = new HavokPlugin(true, havokInstance);
+
+    // Scene
+    this.scene = new Scene(this.engine);
+    this.scene.enablePhysics(new Vector3(0, -9.81, 0), havokPlugin);
+    this.scene.collisionsEnabled = true;
+
+    // Sub-systems
+    this.input = new InputController(this.scene);
+    this.ui = new UIManager(this.scene);
+    this.audio = new GameAudio(this.scene);
+    this.inventory = new InventoryStore();
+
+    // Escape → pause
+    this.scene.onKeyboardObservable.add((kbInfo) => {
+      if (kbInfo.type === 1 && kbInfo.event.key === "Escape") {
+        this.togglePause();
+      }
+    });
+  }
+
+  run(): void {
+    this.engine.runRenderLoop(() => {
+      if (this.state === GameState.Playing) {
+        this.input.poll();   // per-frame input snapshot
+      }
+      this.scene.render();
+    });
+
+    window.addEventListener("resize", () => this.engine.resize());
+  }
+
+  togglePause(): void {
+    this.isPaused = !this.isPaused;
+    this.state = this.isPaused ? GameState.Paused : GameState.Playing;
+
+    // Freeze/unfreeze scene
+    if (this.isPaused) {
+      this.scene.paused = true;
+      this.engine.stopRenderLoop();
+      // Show pause UI ...
+    } else {
+      this.scene.paused = false;
+      this.run();
+    }
+    this.ui.togglePauseMenu(this.isPaused);
+  }
+
+  changeState(newState: GameState): void {
+    this.state = newState;
+    switch (newState) {
+      case GameState.GameOver:
+        this.ui.showGameOverScreen();
+        break;
+      case GameState.Victory:
+        this.ui.showVictoryScreen();
+        break;
+    }
+  }
+}
+```
+
+---
+
+## 5. Input System
+
+### Unity Source Reference
+The `InputManager` is a `ScriptableObject` using `UnityEngine.InputSystem`. It exposes:
+- `moveAction`, `lookAction`, `attackAction`, `heavyAttackAction`, `dodgeAction`, `sprintAction`, `jumpAction`, `lockOnAction`
+- Per-frame state: `moveInput`, `attackPressed`, `sprintHeld`, `jumpPressed`, `jumpHeld`, etc.
+- Events: `OnAttackPressed`, `OnDodgePressed`, `OnJumpPressed`, `OnLockOnPressed`
+
+### Babylon.js Implementation — `InputController.ts`
+
+Babylon.js provides `KeyboardEventTypes`, `PointerEventTypes`, and the `DeviceSourceManager` for gamepad support. We mirror the Unity approach: poll once per frame, expose state booleans and fire events.
+
+```typescript
+import {
+  Scene, KeyboardEventTypes, PointerEventTypes,
+  DeviceType, DeviceSourceManager, DeviceInput,
+  Vector2,
+} from "@babylonjs/core";
+
+type VoidCallback = () => void;
+
+export class InputController {
+  // --- Movement ---
+  moveInput = Vector2.Zero();
+  lookInput = Vector2.Zero();
+
+  // --- Button state ---
+  attackPressed = false;
+  attackHeld = false;
+  heavyAttackPressed = false;
+  dodgePressed = false;
+  sprintHeld = false;
+  jumpPressed = false;
+  jumpHeld = false;
+  lockOnPressed = false;
+
+  // --- Events ---
+  onAttackPressed: VoidCallback[] = [];
+  onHeavyAttackPressed: VoidCallback[] = [];
+  onDodgePressed: VoidCallback[] = [];
+  onJumpPressed: VoidCallback[] = [];
+  onLockOnPressed: VoidCallback[] = [];
+
+  // Internal key state
+  private keys = new Map<string, boolean>();
+  private prevKeys = new Map<string, boolean>();
+  private mouseButtons = new Map<number, boolean>();
+  private prevMouseButtons = new Map<number, boolean>();
+  private mouseDelta = Vector2.Zero();
+
+  private dsm: DeviceSourceManager;
+
+  constructor(private scene: Scene) {
+    this.dsm = new DeviceSourceManager(scene.getEngine());
+
+    // Keyboard
+    scene.onKeyboardObservable.add((info) => {
+      const key = info.event.key.toLowerCase();
+      if (info.type === KeyboardEventTypes.KEYDOWN) {
+        this.keys.set(key, true);
+      } else {
+        this.keys.set(key, false);
+      }
+    });
+
+    // Mouse buttons
+    scene.onPointerObservable.add((info) => {
+      if (info.type === PointerEventTypes.POINTERDOWN) {
+        this.mouseButtons.set(info.event.button, true);
+      } else if (info.type === PointerEventTypes.POINTERUP) {
+        this.mouseButtons.set(info.event.button, false);
+      } else if (info.type === PointerEventTypes.POINTERMOVE) {
+        this.mouseDelta.x = info.event.movementX;
+        this.mouseDelta.y = info.event.movementY;
+      }
+    });
+  }
+
+  /** Call once per frame before game logic */
+  poll(): void {
+    // --- WASD → moveInput ---
+    let mx = 0, my = 0;
+    if (this.isHeld("d")) mx += 1;
+    if (this.isHeld("a")) mx -= 1;
+    if (this.isHeld("w")) my += 1;
+    if (this.isHeld("s")) my -= 1;
+
+    // Gamepad left stick (if available)
+    const gp = this.dsm.getDeviceSource(DeviceType.DualShock);
+    if (gp) {
+      mx += gp.getInput(DeviceInput.LeftStickXAxis) ?? 0;
+      my += gp.getInput(DeviceInput.LeftStickYAxis) ?? 0;
+    }
+    this.moveInput.set(mx, my);
+
+    // --- Look ---
+    this.lookInput.set(this.mouseDelta.x, this.mouseDelta.y);
+    this.mouseDelta.set(0, 0); // reset after read
+
+    // --- Buttons ---
+    this.attackPressed  = this.wasMousePressed(0);
+    this.attackHeld     = this.isMouseHeld(0);
+    this.heavyAttackPressed = this.wasMousePressed(2);
+    this.dodgePressed   = this.wasPressed(" ");     // Space
+    this.sprintHeld     = this.isHeld("shift");
+    this.jumpPressed    = this.wasPressed(" ");
+    this.jumpHeld       = this.isHeld(" ");
+    this.lockOnPressed  = this.wasPressed("tab");
+
+    // --- Fire events ---
+    if (this.attackPressed)      this.onAttackPressed.forEach(cb => cb());
+    if (this.heavyAttackPressed) this.onHeavyAttackPressed.forEach(cb => cb());
+    if (this.dodgePressed)       this.onDodgePressed.forEach(cb => cb());
+    if (this.jumpPressed)        this.onJumpPressed.forEach(cb => cb());
+    if (this.lockOnPressed)      this.onLockOnPressed.forEach(cb => cb());
+
+    // Snapshot current → previous for next frame
+    this.prevKeys = new Map(this.keys);
+    this.prevMouseButtons = new Map(this.mouseButtons);
+  }
+
+  // --- Helpers ---
+  isHeld(key: string): boolean {
+    return this.keys.get(key) ?? false;
+  }
+
+  wasPressed(key: string): boolean {
+    return (this.keys.get(key) ?? false) && !(this.prevKeys.get(key) ?? false);
+  }
+
+  isMouseHeld(button: number): boolean {
+    return this.mouseButtons.get(button) ?? false;
+  }
+
+  wasMousePressed(button: number): boolean {
+    return (this.mouseButtons.get(button) ?? false) &&
+           !(this.prevMouseButtons.get(button) ?? false);
+  }
+}
+```
+
+### Key Mapping Table (Unity → Babylon)
+
+| Unity Action | Unity Binding | Babylon Key/Button |
+|---|---|---|
+| Move | WASD / Left Stick | `w`/`a`/`s`/`d` / `LeftStickXAxis`+`YAxis` |
+| Look | Mouse Delta | `PointerEventTypes.POINTERMOVE` `.movementX/.Y` |
+| Attack | Left Mouse | mouseButton `0` |
+| Heavy Attack | Right Mouse | mouseButton `2` |
+| Dodge | Space | `" "` |
+| Sprint | Left Shift / Left Stick Press | `"shift"` / `LeftStickButton` |
+| Jump | Space / Gamepad South | `" "` / `ButtonA` |
+| Lock On | Tab | `"tab"` |
+| Pause | Escape | `"escape"` |
+
+---
+
+## 6. Player Controller
+
+### Unity Source Reference
+
+The `PlayerController` is the merged controller with:
+- `CharacterController`-based movement
+- Camera-relative movement with gravity-up projection
+- Solar System mode: `NBodySimulation.CalculateAcceleration()` for gravity alignment, jetpack, jump
+- Dodge with invincibility
+- Parry system
+- Lock-on targeting
+- Ship camera attach/detach
+- Hybrid input: InputManager (InputSystem) with legacy `Input` fallback
+
+### Babylon.js Implementation — `PlayerController.ts`
+
+```typescript
+import {
+  TransformNode, Scene, Mesh, Vector3, Quaternion,
+  PhysicsAggregate, PhysicsShapeType, Ray,
+  MeshBuilder,
+} from "@babylonjs/core";
+import { GameEngine, GameState } from "../engine/GameEngine";
+import { InputController } from "../input/InputController";
+import { PlayerStateMachine, PlayerState } from "./PlayerStateMachine";
+import { CameraRig } from "../camera/CameraRig";
+import { NBodySimulation } from "../solar/NBodySimulation";
+
+export interface PlayerControllerConfig {
+  moveSpeed: number;         // 6
+  sprintSpeed: number;       // 9
+  rotationSpeed: number;     // 15
+  gravity: number;           // -9.81
+  jumpForce: number;         // 20
+  jetpackForce: number;      // 10
+  jetpackDuration: number;   // 2
+  jetpackRefuelTime: number; // 2
+  jetpackRefuelDelay: number;// 2
+  stickToGroundForce: number;// 8
+  dodgeSpeed: number;        // 15
+  dodgeDuration: number;     // 0.3
+  dodgeCooldown: number;     // 1
+  parryWindow: number;       // 0.2
+  parryCooldown: number;     // 1
+  enableSolarSystemMovement: boolean;
+}
+
+export class PlayerController {
+  node: TransformNode;
+  capsule: Mesh;
+  aggregate!: PhysicsAggregate;
+
+  // Config
+  cfg: PlayerControllerConfig;
+
+  // Sub-systems (set externally)
+  stateMachine!: PlayerStateMachine;
+  input!: InputController;
+  cameraRig!: CameraRig;
+  nBodySim: NBodySimulation | null = null;
+
+  // Movement vectors
+  private velocity = Vector3.Zero();
+  private gravityVelocity = Vector3.Zero();
+  private externalVelocity = Vector3.Zero();
+  private dodgeVelocity = Vector3.Zero();
+  private moveDirection = Vector3.Zero();
+  private gravityUp = Vector3.Up();
+
+  // State
+  isGrounded = false;
+  isSprinting = false;
+  isDodging = false;
+  private dodgeTimer = 0;
+  private dodgeCooldownTimer = 0;
+
+  // Lock-on
+  isLockedOn = false;
+  lockOnTarget: TransformNode | null = null;
+
+  // Parry
+  isParrying = false;
+  private parryTimer = 0;
+  private parryCooldownTimer = 0;
+
+  // Jetpack
+  private usingJetpack = false;
+  jetpackFuelPercent = 1;
+  private lastJetpackUseTime = 0;
+
+  // Camera reparenting state
+  private cameraOriginalParent: TransformNode | null = null;
+  private cameraOriginalLocalPos = Vector3.Zero();
+
+  constructor(scene: Scene, cfg: Partial<PlayerControllerConfig> = {}) {
+    this.cfg = {
+      moveSpeed: 6,
+      sprintSpeed: 9,
+      rotationSpeed: 15,
+      gravity: -9.81,
+      jumpForce: 20,
+      jetpackForce: 10,
+      jetpackDuration: 2,
+      jetpackRefuelTime: 2,
+      jetpackRefuelDelay: 2,
+      stickToGroundForce: 8,
+      dodgeSpeed: 15,
+      dodgeDuration: 0.3,
+      dodgeCooldown: 1,
+      parryWindow: 0.2,
+      parryCooldown: 1,
+      enableSolarSystemMovement: false,
+      ...cfg,
+    };
+
+    // Root transform
+    this.node = new TransformNode("Player", scene);
+
+    // Collision capsule
+    this.capsule = MeshBuilder.CreateCapsule("PlayerCapsule", {
+      height: 2, radius: 0.5,
+    }, scene);
+    this.capsule.parent = this.node;
+    this.capsule.isVisible = false; // render a loaded model instead
+
+    // Havok physics body (kinematic character)
+    // Alternatively use scene.collisionsEnabled with moveWithCollisions
+    // For character controller feel, use kinematic approach:
+    this.node.metadata = { tag: "Player" };
+
+    // Input
+    this.input = GameEngine.Instance.input;
+
+    // Subscribe to dodge
+    this.input.onDodgePressed.push(() => this.onDodge());
+    this.input.onLockOnPressed.push(() => this.toggleLockOn());
+  }
+
+  /** Called every frame from the game loop */
+  update(dt: number): void {
+    const ge = GameEngine.Instance;
+    if (ge.state !== GameState.Playing) return;
+
+    this.updateGravityData(dt);
+    this.handleGroundCheck();
+    this.handleMovement(dt);
+    this.handleRotation(dt);
+    this.handleDodge(dt);
+    this.handleParry(dt);
+    this.handleGravity(dt);
+    this.applyMovement(dt);
+  }
+
+  // ─── Ground Check ──────────────────────────────────
+  private handleGroundCheck(): void {
+    // Raycast downward relative to gravityUp
+    const ray = new Ray(
+      this.node.position,
+      this.gravityUp.negate(),
+      1.2 // slightly longer than half capsule height
+    );
+    const hit = this.node.getScene().pickWithRay(ray, (m) => m !== this.capsule);
+    this.isGrounded = hit?.hit ?? false;
+
+    if (this.isGrounded) {
+      const downDot = Vector3.Dot(this.gravityVelocity, this.gravityUp.negate());
+      if (downDot > 0) {
+        this.gravityVelocity = this.gravityUp.negate().scale(2); // stick
+      }
+    }
+  }
+
+  // ─── Movement ──────────────────────────────────────
+  private handleMovement(dt: number): void {
+    if (!this.stateMachine.canMove() || this.isDodging) return;
+
+    const inp = this.input.moveInput;
+    this.isSprinting = this.input.sprintHeld;
+    const speed = this.isSprinting ? this.cfg.sprintSpeed : this.cfg.moveSpeed;
+
+    // Camera-relative directions projected onto the gravity plane
+    const cam = this.cameraRig?.camera;
+    let forward = cam ? cam.getForwardRay().direction : this.node.forward;
+    let right = cam ? cam.getDirection(Vector3.Right()) : this.node.right;
+
+    // Project onto gravity plane
+    forward = forward.subtract(
+      this.gravityUp.scale(Vector3.Dot(forward, this.gravityUp))
+    ).normalize();
+    right = right.subtract(
+      this.gravityUp.scale(Vector3.Dot(right, this.gravityUp))
+    ).normalize();
+
+    this.moveDirection = forward.scale(inp.y).add(right.scale(inp.x));
+    if (this.moveDirection.length() > 0.01) {
+      this.moveDirection.normalize();
+    }
+
+    this.velocity = this.moveDirection.scale(speed);
+
+    // Update state
+    if (this.moveDirection.length() > 0.1) {
+      this.stateMachine.changeState(PlayerState.Moving);
+    } else {
+      this.stateMachine.changeState(PlayerState.Idle);
+    }
+  }
+
+  // ─── Rotation ──────────────────────────────────────
+  private handleRotation(dt: number): void {
+    if (this.isDodging) return;
+
+    let targetDir: Vector3 | null = null;
+    if (this.isLockedOn && this.lockOnTarget) {
+      targetDir = this.lockOnTarget.position.subtract(this.node.position);
+    } else if (this.moveDirection.length() > 0.1) {
+      targetDir = this.moveDirection.clone();
+    }
+
+    if (targetDir) {
+      // Remove gravity component
+      targetDir = targetDir.subtract(
+        this.gravityUp.scale(Vector3.Dot(targetDir, this.gravityUp))
+      );
+      if (targetDir.lengthSquared() < 0.001) return;
+
+      const targetQ = Quaternion.FromLookDirectionLH(targetDir.normalize(), this.gravityUp);
+      const currentQ = this.node.rotationQuaternion ?? Quaternion.Identity();
+      this.node.rotationQuaternion = Quaternion.Slerp(
+        currentQ, targetQ, this.cfg.rotationSpeed * dt
+      );
+    }
+  }
+
+  // ─── Dodge ─────────────────────────────────────────
+  private handleDodge(dt: number): void {
+    if (this.isDodging) {
+      this.dodgeTimer -= dt;
+      if (this.dodgeTimer <= 0) {
+        this.isDodging = false;
+        this.dodgeVelocity.setAll(0);
+      } else {
+        const dir = this.moveDirection.length() > 0.1
+          ? this.moveDirection : this.node.forward;
+        this.dodgeVelocity = dir.scale(this.cfg.dodgeSpeed);
+      }
+    } else {
+      this.dodgeVelocity.setAll(0);
+    }
+    if (this.dodgeCooldownTimer > 0) this.dodgeCooldownTimer -= dt;
+  }
+
+  private onDodge(): void {
+    if (this.cfg.enableSolarSystemMovement) return; // block dodge in solar mode
+    if (!this.stateMachine.canMove() || this.dodgeCooldownTimer > 0) return;
+    this.isDodging = true;
+    this.dodgeTimer = this.cfg.dodgeDuration;
+    this.dodgeCooldownTimer = this.cfg.dodgeCooldown;
+    this.stateMachine.changeState(PlayerState.Dodging);
+  }
+
+  // ─── Parry ─────────────────────────────────────────
+  private handleParry(dt: number): void {
+    if (this.isParrying) {
+      this.parryTimer -= dt;
+      if (this.parryTimer <= 0) this.isParrying = false;
+    }
+    if (this.parryCooldownTimer > 0) this.parryCooldownTimer -= dt;
+  }
+
+  // ─── Gravity ───────────────────────────────────────
+  private handleGravity(dt: number): void {
+    const gravAccel = this.getGravityAcceleration();
+    const down = this.gravityUp.negate();
+
+    if (this.isGrounded) {
+      if (this.cfg.enableSolarSystemMovement && this.input.jumpPressed) {
+        this.gravityVelocity = this.gravityUp.scale(this.cfg.jumpForce);
+      } else if (Vector3.Dot(this.gravityVelocity, down) > 0) {
+        this.gravityVelocity = down.scale(this.cfg.stickToGroundForce);
+      }
+    } else {
+      // Jetpack logic
+      if (this.cfg.enableSolarSystemMovement && this.input.jumpPressed) {
+        this.usingJetpack = true;
+      }
+      if (this.cfg.enableSolarSystemMovement &&
+          this.usingJetpack && this.input.jumpHeld &&
+          this.jetpackFuelPercent > 0) {
+        const now = performance.now() / 1000;
+        this.lastJetpackUseTime = now;
+        this.jetpackFuelPercent = Math.max(0,
+          this.jetpackFuelPercent - dt / this.cfg.jetpackDuration);
+        this.gravityVelocity.addInPlace(
+          this.gravityUp.scale(this.cfg.jetpackForce * dt)
+        );
+      } else {
+        this.usingJetpack = false;
+      }
+
+      // Refuel
+      const now = performance.now() / 1000;
+      if (this.cfg.enableSolarSystemMovement &&
+          now - this.lastJetpackUseTime > this.cfg.jetpackRefuelDelay) {
+        this.jetpackFuelPercent = Math.min(1,
+          this.jetpackFuelPercent + dt / this.cfg.jetpackRefuelTime);
+      }
+    }
+
+    this.gravityVelocity.addInPlace(gravAccel.scale(dt));
+  }
+
+  private getGravityAcceleration(): Vector3 {
+    if (this.cfg.enableSolarSystemMovement && this.nBodySim) {
+      return NBodySimulation.calculateAcceleration(this.node.position);
+    }
+    return new Vector3(0, this.cfg.gravity, 0);
+  }
+
+  // ─── Apply Movement ────────────────────────────────
+  private applyMovement(dt: number): void {
+    const horizontal = this.isDodging
+      ? this.dodgeVelocity
+      : this.velocity.add(this.externalVelocity);
+
+    const total = horizontal.add(this.gravityVelocity);
+
+    // Move with collision (Babylon built-in)
+    this.capsule.moveWithCollisions(total.scale(dt));
+
+    // Sync root node to capsule world position
+    this.node.position.copyFrom(this.capsule.absolutePosition);
+
+    // Damp external velocity
+    if (this.externalVelocity.lengthSquared() > 0) {
+      this.externalVelocity = Vector3.Lerp(
+        this.externalVelocity, Vector3.Zero(), 5 * dt
+      );
+    }
+  }
+
+  // ─── Gravity Alignment (Solar System) ──────────────
+  private updateGravityData(dt: number): void {
+    if (!this.cfg.enableSolarSystemMovement) {
+      this.gravityUp = Vector3.Up();
+      return;
+    }
+
+    if (!this.nBodySim) {
+      // Try to find it in the scene (lazy lookup)
+      this.nBodySim = (this.node.getScene() as any).__nBodySim ?? null;
+    }
+    if (!this.nBodySim) {
+      this.gravityUp = Vector3.Up();
+      return;
+    }
+
+    const accel = NBodySimulation.calculateAcceleration(this.node.position);
+    if (accel.lengthSquared() > 0.0001) {
+      this.gravityUp = accel.negate().normalize();
+      // Rotate player to align "up" with gravityUp
+      const currentQ = this.node.rotationQuaternion ?? Quaternion.Identity();
+      const currentUp = Vector3.TransformNormal(Vector3.Up(), currentQ.toRotationMatrix(/* temp */));
+      // NOTE: Use a small matrix temp — see actual implementation below
+      const alignQ = Quaternion.FromUnitVectorsToRef(currentUp, this.gravityUp, new Quaternion());
+      const targetQ = alignQ.multiply(currentQ);
+      this.node.rotationQuaternion = Quaternion.Slerp(
+        currentQ, targetQ, this.cfg.rotationSpeed * dt
+      );
+    }
+  }
+
+  // ─── Lock-On ───────────────────────────────────────
+  private toggleLockOn(): void {
+    this.isLockedOn = !this.isLockedOn;
+    if (this.isLockedOn) {
+      this.lockOnTarget = this.findNearestEnemy();
+      if (!this.lockOnTarget) this.isLockedOn = false;
+    }
+    this.cameraRig?.setLockOnTarget(
+      this.isLockedOn ? this.lockOnTarget : null
+    );
+  }
+
+  private findNearestEnemy(): TransformNode | null {
+    const enemies = this.node.getScene().getTransformNodesByTags("Enemy");
+    let nearest: TransformNode | null = null;
+    let bestDist = 15; // max lock-on range
+    for (const e of enemies) {
+      const d = Vector3.Distance(this.node.position, e.position);
+      if (d < bestDist) {
+        bestDist = d;
+        nearest = e;
+      }
+    }
+    return nearest;
+  }
+
+  // ─── Ship Integration ──────────────────────────────
+  attachCameraTo(target: TransformNode): void {
+    const cam = this.cameraRig?.camera;
+    if (!cam || !target) return;
+    this.cameraOriginalParent = cam.parent as TransformNode;
+    this.cameraOriginalLocalPos = cam.position.clone();
+    cam.parent = target;
+    cam.position = Vector3.Zero();
+  }
+
+  exitFromSpaceship(): void {
+    const cam = this.cameraRig?.camera;
+    if (!cam) return;
+    cam.parent = this.cameraOriginalParent;
+    cam.position = this.cameraOriginalLocalPos;
+  }
+
+  setVelocity(v: Vector3): void {
+    const gravComponent = this.gravityUp.scale(Vector3.Dot(v, this.gravityUp));
+    this.externalVelocity = v.subtract(gravComponent);
+    this.gravityVelocity = gravComponent;
+  }
+
+  applyKnockback(force: Vector3): void {
+    this.externalVelocity.addInPlace(force);
+    if (this.isDodging) {
+      this.isDodging = false;
+      this.dodgeTimer = 0;
+      this.stateMachine.changeState(PlayerState.Idle);
+    }
+  }
+}
+```
+
+---
+
+## 7. Player State Machine
+
+### Unity Source Reference
+```
+enum PlayerState { Idle, Moving, Attacking, Dodging, Stunned, Dead }
+- CanMove(): not Attacking or Stunned
+- CanAttack(): not Attacking, Dodging, or Stunned
+- EnterState(): crossfade animator
+```
+
+### Babylon.js Implementation — `PlayerStateMachine.ts`
+
+```typescript
+import { AnimationGroup } from "@babylonjs/core";
+
+export enum PlayerState {
+  Idle,
+  Moving,
+  Attacking,
+  Dodging,
+  Stunned,
+  Dead,
+}
+
+export class PlayerStateMachine {
+  private currentState: PlayerState = PlayerState.Idle;
+
+  // Map state → animation group (loaded from glTF)
+  animations = new Map<PlayerState, AnimationGroup>();
+
+  changeState(newState: PlayerState): void {
+    if (newState === this.currentState) return;
+    this.exitState(this.currentState);
+    this.currentState = newState;
+    this.enterState(newState);
+  }
+
+  private enterState(state: PlayerState): void {
+    const anim = this.animations.get(state);
+    if (anim) {
+      anim.start(true, 1.0, anim.from, anim.to, false);
+    }
+  }
+
+  private exitState(state: PlayerState): void {
+    const anim = this.animations.get(state);
+    anim?.stop();
+  }
+
+  getState(): PlayerState { return this.currentState; }
+
+  canMove(): boolean {
+    return this.currentState !== PlayerState.Attacking &&
+           this.currentState !== PlayerState.Stunned;
+  }
+
+  canAttack(): boolean {
+    return this.currentState !== PlayerState.Attacking &&
+           this.currentState !== PlayerState.Dodging &&
+           this.currentState !== PlayerState.Stunned;
+  }
+}
+```
+
+---
+
+## 8. Camera Controller
+
+### Unity Source Reference
+```
+CameraController : MonoBehaviour
+  - Free-look: mouse sensitivity, pitch clamp (-30 to 70)
+  - Lock-on: orbit around target with look-at
+  - Camera shake coroutine
+  - Distance: 5m, offset (0, 1.5, 0)
+```
+
+### Babylon.js Implementation — `CameraRig.ts`
+
+Babylon's `ArcRotateCamera` already provides orbiting. Wrap it for lock-on and shake:
+
+```typescript
+import {
+  ArcRotateCamera, Vector3, Scene, TransformNode,
+  Animation, EasingFunction, CubicEase
+} from "@babylonjs/core";
+
+export class CameraRig {
+  camera: ArcRotateCamera;
+  private lockOnTarget: TransformNode | null = null;
+  private isLockedOn = false;
+
+  // Config
+  private sensitivity = 2;
+  private topClamp = 70 * Math.PI / 180;
+  private bottomClamp = -30 * Math.PI / 180;
+  private cameraDistance = 5;
+  private offset = new Vector3(0, 1.5, 0);
+
+  constructor(
+    private scene: Scene,
+    private playerNode: TransformNode,
+  ) {
+    this.camera = new ArcRotateCamera(
+      "PlayerCam",
+      Math.PI,       // alpha
+      Math.PI / 3,   // beta
+      this.cameraDistance,
+      playerNode.position.add(this.offset),
+      scene
+    );
+
+    // Clamp vertical rotation
+    this.camera.lowerBetaLimit = Math.PI / 2 - this.topClamp;
+    this.camera.upperBetaLimit = Math.PI / 2 - this.bottomClamp;
+
+    // Attach controls (pointer lock)
+    this.camera.attachControl(scene.getEngine().getRenderingCanvas()!, true);
+    this.camera.angularSensibilityX = 1000 / this.sensitivity;
+    this.camera.angularSensibilityY = 1000 / this.sensitivity;
+
+    // Follow the player
+    scene.onBeforeRenderObservable.add(() => {
+      if (this.isLockedOn && this.lockOnTarget) {
+        this.handleLockOnCamera();
+      } else {
+        this.camera.target = this.playerNode.position.add(this.offset);
+      }
+    });
+  }
+
+  private handleLockOnCamera(): void {
+    if (!this.lockOnTarget) return;
+    // Smoothly point camera toward midpoint between player and target
+    const mid = Vector3.Lerp(
+      this.playerNode.position,
+      this.lockOnTarget.position,
+      0.3
+    ).add(this.offset);
+    this.camera.target = Vector3.Lerp(this.camera.target, mid, 0.1);
+  }
+
+  setLockOnTarget(target: TransformNode | null): void {
+    this.lockOnTarget = target;
+    this.isLockedOn = target !== null;
+  }
+
+  setDistance(d: number): void {
+    this.camera.radius = Math.max(2, Math.min(10, d));
+  }
+
+  /** Quick camera shake */
+  shake(intensity: number, durationMs: number): void {
+    const originalTarget = this.camera.target.clone();
+    let elapsed = 0;
+
+    const obs = this.scene.onBeforeRenderObservable.add(() => {
+      elapsed += this.scene.getEngine().getDeltaTime();
+      if (elapsed >= durationMs) {
+        this.camera.target = originalTarget;
+        this.scene.onBeforeRenderObservable.remove(obs);
+        return;
+      }
+      const offsetX = (Math.random() - 0.5) * 2 * intensity;
+      const offsetY = (Math.random() - 0.5) * 2 * intensity;
+      this.camera.target = originalTarget.add(new Vector3(offsetX, offsetY, 0));
+    });
+  }
+}
+```
+
+---
+
+## 9. Combat System — Combo & Weapons
+
+### Unity Source Reference
+
+**ComboSystem**: Light/Heavy attack chains with input buffering, hitbox overlap physics, knockback.
+**WeaponSystem**: Weapon list with damage/speed multipliers, switching via hotkeys.
+
+### Babylon.js Implementation — `CombatSystem.ts`
+
+```typescript
+import { Vector3, Scene, Mesh, PhysicsRaycastResult } from "@babylonjs/core";
+import { PlayerStateMachine, PlayerState } from "../player/PlayerStateMachine";
+import { InputController } from "../input/InputController";
+import { EnemyStats } from "../enemies/EnemyStats";
+
+export interface AttackData {
+  animationName: string;
+  damage: number;
+  knockback: number;
+  attackDuration: number; // seconds
+  comboWindow: number;    // seconds after which next attack can chain
+  hitboxSize: Vector3;
+  hitboxOffset: Vector3;
+}
+
+export interface ComboChain {
+  name: string;
+  attacks: AttackData[];
+  resetTime: number;      // seconds before combo resets
+  currentIndex: number;
+  lastAttackTime: number;
+  canCombo: boolean;
+}
+
+export class CombatSystem {
+  private lightCombo: ComboChain;
+  private heavyCombo: ComboChain;
+  private currentCombo: ComboChain | null = null;
+  private isAttacking = false;
+  private inputBuffered = false;
+  private inputBufferTimer = 0;
+  private readonly INPUT_BUFFER_TIME = 0.2;
+
+  constructor(
+    private scene: Scene,
+    private playerNode: Mesh,
+    private stateMachine: PlayerStateMachine,
+    private input: InputController,
+  ) {
+    // Default combos
+    this.lightCombo = this.createDefaultCombo("Light Combo");
+    this.heavyCombo = this.createDefaultCombo("Heavy Combo");
+
+    input.onAttackPressed.push(() => this.onLightAttack());
+    input.onHeavyAttackPressed.push(() => this.onHeavyAttack());
+  }
+
+  update(dt: number): void {
+    // Combo timer reset
+    if (this.currentCombo &&
+        (performance.now() / 1000) - this.currentCombo.lastAttackTime > this.currentCombo.resetTime) {
+      this.resetCombo();
+    }
+
+    // Input buffer drain
+    if (this.inputBufferTimer > 0) {
+      this.inputBufferTimer -= dt;
+      if (this.inputBufferTimer <= 0) this.inputBuffered = false;
+    }
+
+    if (this.inputBuffered && !this.isAttacking && this.stateMachine.canAttack()) {
+      this.inputBuffered = false;
+      this.onLightAttack();
+    }
+  }
+
+  private onLightAttack(): void {
+    if (this.stateMachine.canAttack()) {
+      this.startCombo(this.lightCombo);
+    } else if (this.currentCombo?.canCombo) {
+      this.continueCombo();
+    } else {
+      this.inputBuffered = true;
+      this.inputBufferTimer = this.INPUT_BUFFER_TIME;
+    }
+  }
+
+  private onHeavyAttack(): void {
+    if (this.stateMachine.canAttack()) {
+      this.startCombo(this.heavyCombo);
+    }
+  }
+
+  private startCombo(combo: ComboChain): void {
+    this.currentCombo = combo;
+    combo.currentIndex = 0;
+    combo.lastAttackTime = performance.now() / 1000;
+    this.executeAttack(combo.attacks[0]);
+  }
+
+  private continueCombo(): void {
+    if (!this.currentCombo) return;
+    this.currentCombo.currentIndex =
+      (this.currentCombo.currentIndex + 1) % this.currentCombo.attacks.length;
+    this.executeAttack(this.currentCombo.attacks[this.currentCombo.currentIndex]);
+  }
+
+  private executeAttack(attack: AttackData): void {
+    this.isAttacking = true;
+    this.stateMachine.changeState(PlayerState.Attacking);
+
+    // TODO: trigger animation by name via AnimationGroup
+
+    // Hitbox detection (box overlap approximation)
+    setTimeout(() => {
+      this.performHitDetection(attack);
+    }, 200); // 200ms into the attack
+
+    // Enable combo window
+    setTimeout(() => {
+      if (this.currentCombo) this.currentCombo.canCombo = true;
+    }, attack.comboWindow * 1000);
+
+    // End attack
+    setTimeout(() => {
+      this.isAttacking = false;
+      if (this.currentCombo) this.currentCombo.canCombo = false;
+      if (this.stateMachine.getState() === PlayerState.Attacking) {
+        this.stateMachine.changeState(PlayerState.Idle);
+      }
+    }, attack.attackDuration * 1000);
+  }
+
+  private performHitDetection(attack: AttackData): void {
+    // Use a physics shape query or simple distance check
+    const origin = this.playerNode.position
+      .add(this.playerNode.forward.scale(attack.hitboxOffset.z))
+      .add(Vector3.Up().scale(attack.hitboxOffset.y));
+
+    const enemies = this.scene.getTransformNodesByTags("Enemy");
+    for (const enemy of enemies) {
+      const dist = Vector3.Distance(origin, enemy.position);
+      if (dist < attack.hitboxSize.z) {
+        const stats = (enemy.metadata as any)?.enemyStats as EnemyStats | undefined;
+        stats?.takeDamage(attack.damage);
+
+        // Knockback
+        const dir = enemy.position.subtract(this.playerNode.position).normalize();
+        dir.y = 0.3;
+        // Apply impulse if physics body exists
+      }
+    }
+  }
+
+  private resetCombo(): void {
+    if (this.currentCombo) {
+      this.currentCombo.currentIndex = 0;
+      this.currentCombo.canCombo = false;
+    }
+    this.currentCombo = null;
+  }
+
+  private createDefaultCombo(name: string): ComboChain {
+    return {
+      name,
+      attacks: [
+        { animationName: "Attack1", damage: 15, knockback: 3, attackDuration: 0.6, comboWindow: 0.3, hitboxSize: new Vector3(1,1,2), hitboxOffset: new Vector3(0,1,1) },
+        { animationName: "Attack2", damage: 20, knockback: 4, attackDuration: 0.7, comboWindow: 0.3, hitboxSize: new Vector3(1,1,2), hitboxOffset: new Vector3(0,1,1) },
+        { animationName: "Attack3", damage: 30, knockback: 6, attackDuration: 0.8, comboWindow: 0, hitboxSize: new Vector3(1,1,2), hitboxOffset: new Vector3(0,1,1) },
+      ],
+      resetTime: 1.5,
+      currentIndex: 0,
+      lastAttackTime: 0,
+      canCombo: false,
+    };
+  }
+}
+```
+
+### WeaponSystem — `WeaponSystem.ts`
+
+```typescript
+export interface Weapon {
+  name: string;
+  modelMesh: string; // asset path
+  attackCombos: AttackData[];
+  damageMultiplier: number;
+  speedMultiplier: number;
+  isEquipped: boolean;
+}
+
+export class WeaponSystem {
+  weapons: Weapon[] = [];
+  currentIndex = 0;
+  private switchCooldown = 0.5;
+  private switchTimer = 0;
+
+  update(dt: number): void {
+    if (this.switchTimer > 0) this.switchTimer -= dt;
+  }
+
+  equipWeapon(index: number): void {
+    if (index < 0 || index >= this.weapons.length || this.switchTimer > 0) return;
+    this.weapons[this.currentIndex].isEquipped = false;
+    this.currentIndex = index;
+    this.weapons[index].isEquipped = true;
+    this.switchTimer = this.switchCooldown;
+    // TODO: show/hide weapon mesh instances
+  }
+
+  getDamageMultiplier(): number {
+    return this.weapons[this.currentIndex]?.damageMultiplier ?? 1;
+  }
+}
+```
+
+---
+
+## 10. Player Stats & Damage
+
+### Unity Source Reference
+```
+PlayerStats : MonoBehaviour
+  MaxHealth, CurrentHealth, MaxStamina, CurrentStamina
+  Level, Experience, IsInvincible
+  TakeDamage() — ragdoll on heavy hits
+  Die() — permanent ragdoll
+```
+
+### Babylon.js Implementation — `PlayerStats.ts`
+
+```typescript
+export class PlayerStats {
+  maxHealth = 100;
+  currentHealth = 100;
+  maxStamina = 100;
+  currentStamina = 100;
+  level = 1;
+  experience = 0;
+  isInvincible = false;
+
+  private heavyDamageThreshold = 30;
+
+  // Callbacks
+  onDeath: (() => void)[] = [];
+  onDamage: ((amount: number) => void)[] = [];
+
+  takeDamage(amount: number): void {
+    if (this.isInvincible) return;
+    this.currentHealth = Math.max(0, this.currentHealth - amount);
+    this.onDamage.forEach(cb => cb(amount));
+
+    if (amount >= this.heavyDamageThreshold) {
+      // Trigger ragdoll / heavy hit reaction
+    }
+
+    if (this.currentHealth <= 0) {
+      this.die();
+    }
+  }
+
+  private die(): void {
+    this.onDeath.forEach(cb => cb());
+  }
+
+  addExperience(amount: number): void {
+    this.experience += amount;
+    // Level-up logic
+  }
+
+  getHealthPercent(): number {
+    return this.maxHealth > 0 ? this.currentHealth / this.maxHealth : 0;
+  }
+  getStaminaPercent(): number {
+    return this.maxStamina > 0 ? this.currentStamina / this.maxStamina : 0;
+  }
+
+  setInvincible(v: boolean): void {
+    this.isInvincible = v;
+  }
+}
+```
+
+---
+
+## 11. Enemy System — Stats, State Machine, AI
+
+### Unity Source Reference
+
+**EnemyStats**: health, defense, attack damage, loot drops, experience reward.  
+**EnemyStateMachine**: NavMeshAgent-driven FSM with Idle → Patrol → Chase → Attack → Stunned → Dead. Line-of-sight detection, attack cooldowns.
+
+### Babylon.js Implementation
+
+Babylon.js doesn't have a built-in NavMesh. Options:
+1. **recast.js** (`@recast-navigation/core`) — full NavMesh baking + pathfinding  
+2. **yuka.js** — autonomous agent AI library with NavMesh support  
+3. Simple waypoint / raycast-based pathfinding  
+
+We'll use **recast.js** for full NavMesh parity.
+
+#### `EnemyStats.ts`
+
+```typescript
+export interface EnemyDrop {
+  itemId: string;
+  chance: number;
+}
+
+export class EnemyStats {
+  maxHealth: number;
+  currentHealth: number;
+  attackDamage: number;
+  defense: number;
+  movementSpeed: number;
+  attackCooldown: number;
+  knockbackForce: number;
+  experienceValue: number;
+  drops: EnemyDrop[];
+  isDead = false;
+
+  onDeath: (() => void)[] = [];
+
+  constructor(cfg: Partial<EnemyStats> = {}) {
+    this.maxHealth = cfg.maxHealth ?? 100;
+    this.currentHealth = this.maxHealth;
+    this.attackDamage = cfg.attackDamage ?? 15;
+    this.defense = cfg.defense ?? 5;
+    this.movementSpeed = cfg.movementSpeed ?? 3;
+    this.attackCooldown = cfg.attackCooldown ?? 1.5;
+    this.knockbackForce = cfg.knockbackForce ?? 500;
+    this.experienceValue = cfg.experienceValue ?? 50;
+    this.drops = cfg.drops ?? [];
+  }
+
+  takeDamage(amount: number): void {
+    if (this.isDead) return;
+    const finalDamage = Math.max(1, amount - this.defense);
+    this.currentHealth -= finalDamage;
+    if (this.currentHealth <= 0) {
+      this.die();
+    }
+  }
+
+  private die(): void {
+    this.isDead = true;
+    this.onDeath.forEach(cb => cb());
+  }
+
+  getHealthPercent(): number {
+    return this.currentHealth / this.maxHealth;
+  }
+
+  getAttackDamage(): number {
+    return this.attackDamage;
+  }
+}
+```
+
+#### `EnemyFSM.ts`
+
+```typescript
+import {
+  TransformNode, Vector3, Scene, Ray
+} from "@babylonjs/core";
+import { EnemyStats } from "./EnemyStats";
+
+export enum EnemyState {
+  Idle, Patrol, Chase, Attack, Stunned, Dead,
+}
+
+export class EnemyFSM {
+  currentState = EnemyState.Patrol;
+  private stateTimer = 0;
+  private attackTimer = 0;
+  private currentPatrolIndex = 0;
+  private player: TransformNode | null = null;
+
+  constructor(
+    private node: TransformNode,
+    private stats: EnemyStats,
+    private scene: Scene,
+    private patrolPoints: Vector3[],
+    private config = {
+      detectionRange: 10,
+      chaseRange: 15,
+      attackRange: 2,
+      patrolSpeed: 2,
+      chaseSpeed: 4,
+      attackCooldown: 2,
+    }
+  ) {
+    // Find player once
+    this.player = scene.getTransformNodeByName("Player") ?? null;
+
+    // On death
+    stats.onDeath.push(() => this.changeState(EnemyState.Dead));
+  }
+
+  update(dt: number): void {
+    if (this.stats.isDead) return;
+
+    switch (this.currentState) {
+      case EnemyState.Idle:    this.updateIdle(dt); break;
+      case EnemyState.Patrol:  this.updatePatrol(dt); break;
+      case EnemyState.Chase:   this.updateChase(dt); break;
+      case EnemyState.Attack:  this.updateAttack(dt); break;
+      case EnemyState.Stunned: this.updateStunned(dt); break;
+    }
+  }
+
+  private updateIdle(dt: number): void {
+    this.stateTimer -= dt;
+    if (this.stateTimer <= 0) this.changeState(EnemyState.Patrol);
+    this.checkForPlayer();
+  }
+
+  private updatePatrol(dt: number): void {
+    if (this.patrolPoints.length === 0) return;
+    const target = this.patrolPoints[this.currentPatrolIndex];
+    const dir = target.subtract(this.node.position);
+    if (dir.length() < 0.5) {
+      this.currentPatrolIndex = (this.currentPatrolIndex + 1) % this.patrolPoints.length;
+      this.changeState(EnemyState.Idle);
+      this.stateTimer = 1 + Math.random() * 2;
+      return;
+    }
+    // Move toward patrol point (use NavMesh agent or simple movement)
+    this.node.position.addInPlace(
+      dir.normalize().scale(this.config.patrolSpeed * dt)
+    );
+    this.checkForPlayer();
+  }
+
+  private updateChase(dt: number): void {
+    if (!this.player) { this.changeState(EnemyState.Patrol); return; }
+    const dir = this.player.position.subtract(this.node.position);
+    const dist = dir.length();
+
+    if (dist <= this.config.attackRange) {
+      this.changeState(EnemyState.Attack);
+      return;
+    }
+    if (dist > this.config.detectionRange * 1.5) {
+      this.changeState(EnemyState.Patrol);
+      return;
+    }
+
+    // Move toward player (use NavMesh crowd agent for production)
+    this.node.position.addInPlace(
+      dir.normalize().scale(this.config.chaseSpeed * dt)
+    );
+
+    // Face player
+    this.faceTarget(this.player.position, dt);
+  }
+
+  private updateAttack(dt: number): void {
+    if (!this.player) return;
+    this.faceTarget(this.player.position, dt);
+
+    this.attackTimer -= dt;
+    if (this.attackTimer <= 0) {
+      this.performAttack();
+      this.attackTimer = this.config.attackCooldown;
+    }
+
+    const dist = Vector3.Distance(this.node.position, this.player.position);
+    if (dist > this.config.attackRange) {
+      this.changeState(EnemyState.Chase);
+    }
+  }
+
+  private updateStunned(dt: number): void {
+    this.stateTimer -= dt;
+    if (this.stateTimer <= 0) this.changeState(EnemyState.Chase);
+  }
+
+  private checkForPlayer(): void {
+    if (!this.player) return;
+    const dist = Vector3.Distance(this.node.position, this.player.position);
+    if (dist <= this.config.detectionRange) {
+      // Line-of-sight check
+      const dir = this.player.position.subtract(this.node.position).normalize();
+      const ray = new Ray(this.node.position, dir, this.config.detectionRange);
+      const hit = this.scene.pickWithRay(ray);
+      if (hit?.hit && hit.pickedMesh?.metadata?.tag === "Player") {
+        this.changeState(EnemyState.Chase);
+      }
+    }
+  }
+
+  private performAttack(): void {
+    if (!this.player) return;
+    const dist = Vector3.Distance(this.node.position, this.player.position);
+    if (dist <= this.config.attackRange * 1.2) {
+      const playerStats = (this.player.metadata as any)?.playerStats;
+      playerStats?.takeDamage(this.stats.getAttackDamage());
+    }
+  }
+
+  private faceTarget(target: Vector3, dt: number): void {
+    const dir = target.subtract(this.node.position);
+    dir.y = 0;
+    if (dir.lengthSquared() < 0.001) return;
+    // Simple lookAt
+    this.node.lookAt(target);
+  }
+
+  changeState(newState: EnemyState): void {
+    this.currentState = newState;
+    if (newState === EnemyState.Stunned) this.stateTimer = 2;
+    if (newState === EnemyState.Attack) this.attackTimer = 0.5;
+    if (newState === EnemyState.Dead) {
+      // Disable collision, schedule disposal
+      setTimeout(() => this.node.dispose(), 3000);
+    }
+  }
+
+  onDamaged(): void {
+    if (this.currentState !== EnemyState.Dead && this.currentState !== EnemyState.Stunned) {
+      this.changeState(EnemyState.Stunned);
+    }
+  }
+}
+```
+
+---
+
+## 12. Enemy Spawn Trigger
+
+### Unity Source Reference
+```
+EnemySpawnTrigger : MonoBehaviour
+  - Trigger volume (OnTriggerEnter/Exit)
+  - SpawnLoop coroutine: interval-based, NavMesh.SamplePosition
+  - Supports Health (FPS), Damageable (Starfall), EnemyStats (reflection)
+  - maxAlive tracking with cleanup
+```
+
+### Babylon.js Implementation — `EnemySpawnZone.ts`
+
+Use Babylon's `ActionManager` with `OnIntersectionEnterTrigger` for trigger volumes.
+
+```typescript
+import {
+  TransformNode, Scene, Mesh, Vector3,
+  ActionManager, ExecuteCodeAction, MeshBuilder,
+} from "@babylonjs/core";
+import { EnemyStats } from "./EnemyStats";
+import { EnemyFSM } from "./EnemyFSM";
+
+export interface SpawnZoneConfig {
+  prefabNames: string[];       // names of enemy template meshes in scene
+  spawnRadius: number;         // 15
+  maxAlive: number;            // 6
+  spawnPerTick: number;        // 2
+  spawnIntervalMs: number;     // 2000
+  playerTag: string;           // "Player"
+}
+
+export class EnemySpawnZone {
+  private aliveEnemies: TransformNode[] = [];
+  private spawnInterval: number | null = null;
+
+  constructor(
+    private triggerMesh: Mesh,
+    private scene: Scene,
+    private config: SpawnZoneConfig,
+  ) {
+    // Set up trigger volume
+    triggerMesh.isVisible = false;
+    triggerMesh.checkCollisions = false;
+
+    triggerMesh.actionManager = new ActionManager(scene);
+
+    // Find player mesh
+    const playerMesh = scene.getMeshByName("PlayerCapsule");
+    if (!playerMesh) return;
+
+    // On player enter
+    triggerMesh.actionManager.registerAction(
+      new ExecuteCodeAction(
+        { trigger: ActionManager.OnIntersectionEnterTrigger, parameter: playerMesh },
+        () => this.startSpawning()
+      )
+    );
+
+    // On player exit
+    triggerMesh.actionManager.registerAction(
+      new ExecuteCodeAction(
+        { trigger: ActionManager.OnIntersectionExitTrigger, parameter: playerMesh },
+        () => this.stopSpawning()
+      )
+    );
+  }
+
+  private startSpawning(): void {
+    if (this.spawnInterval !== null) return;
+    this.spawnInterval = window.setInterval(() => this.spawnTick(), this.config.spawnIntervalMs);
+    this.spawnTick(); // immediate first tick
+  }
+
+  private stopSpawning(): void {
+    if (this.spawnInterval !== null) {
+      clearInterval(this.spawnInterval);
+      this.spawnInterval = null;
+    }
+  }
+
+  private spawnTick(): void {
+    this.cleanupAliveList();
+    const remaining = Math.max(0, this.config.maxAlive - this.aliveEnemies.length);
+    if (remaining <= 0 || this.config.prefabNames.length === 0) return;
+
+    const toSpawn = Math.min(this.config.spawnPerTick, remaining);
+    for (let i = 0; i < toSpawn; i++) {
+      this.trySpawnEnemy();
+    }
+  }
+
+  private trySpawnEnemy(): void {
+    // Random position within radius
+    const angle = Math.random() * Math.PI * 2;
+    const dist = Math.random() * this.config.spawnRadius;
+    const offset = new Vector3(
+      Math.cos(angle) * dist,
+      0,
+      Math.sin(angle) * dist
+    );
+    const spawnPos = this.triggerMesh.position.add(offset);
+
+    // For NavMesh snapping: use recast.js navMesh.getClosestPoint(spawnPos)
+    // Simplified: raycast down to find ground
+    // ...
+
+    const prefabName = this.config.prefabNames[
+      Math.floor(Math.random() * this.config.prefabNames.length)
+    ];
+    const template = this.scene.getMeshByName(prefabName);
+    if (!template) return;
+
+    const enemy = template.clone(prefabName + "_instance", null);
+    if (!enemy) return;
+    enemy.position = spawnPos;
+    enemy.setEnabled(true);
+
+    // Attach EnemyStats + FSM
+    const stats = new EnemyStats();
+    const fsm = new EnemyFSM(enemy, stats, this.scene, []);
+    enemy.metadata = { tag: "Enemy", enemyStats: stats, enemyFSM: fsm };
+
+    // Register update
+    const obs = this.scene.onBeforeRenderObservable.add(() => {
+      if (stats.isDead) {
+        this.scene.onBeforeRenderObservable.remove(obs);
+        return;
+      }
+      fsm.update(this.scene.getEngine().getDeltaTime() / 1000);
+    });
+
+    this.aliveEnemies.push(enemy);
+  }
+
+  private cleanupAliveList(): void {
+    this.aliveEnemies = this.aliveEnemies.filter((e) => {
+      if (e.isDisposed()) return false;
+      const stats = (e.metadata as any)?.enemyStats as EnemyStats | undefined;
+      return stats ? !stats.isDead : e.isEnabled();
+    });
+  }
+}
+```
+
+---
+
+## 13. Solar System — N-Body Simulation
+
+### Unity Source Reference
+```
+NBodySimulation : MonoBehaviour
+  - CelestialBody[] bodies (FindObjectsOfType on Awake)
+  - FixedUpdate: calculate acceleration per body, update velocity, update position
+  - Static CalculateAcceleration(point, ignoreBody): sum G*m/r² per body
+  - Universe.gravitationalConstant = 0.0001, physicsTimeStep = 0.01
+
+CelestialBody : GravityObject (Rigidbody required)
+  - BodyType { Planet, Moon, Sun }, radius, surfaceGravity, initialVelocity
+  - mass = surfaceGravity * radius² / G
+  - UpdateVelocity(acceleration, timeStep), UpdatePosition(timeStep)
+  - Rigidbody.MovePosition for kinematic orbital motion
+```
+
+### Babylon.js Implementation — `NBodySimulation.ts`
+
+This is custom physics, not Havok/Ammo-driven. We use a fixed-timestep loop via `onBeforeRenderObservable`.
+
+```typescript
+import { Vector3, Scene } from "@babylonjs/core";
+import { CelestialBody } from "./CelestialBody";
+import { Universe } from "./Universe";
+
+export class NBodySimulation {
+  private static instance: NBodySimulation;
+  bodies: CelestialBody[] = [];
+  private accumulator = 0;
+
+  constructor(private scene: Scene) {
+    NBodySimulation.instance = this;
+    (scene as any).__nBodySim = this; // for PlayerController lookup
+
+    // Fixed-timestep loop
+    scene.onBeforeRenderObservable.add(() => {
+      const dt = scene.getEngine().getDeltaTime() / 1000;
+      this.accumulator += dt;
+      while (this.accumulator >= Universe.PHYSICS_TIME_STEP) {
+        this.fixedUpdate(Universe.PHYSICS_TIME_STEP);
+        this.accumulator -= Universe.PHYSICS_TIME_STEP;
+      }
+    });
+  }
+
+  registerBody(body: CelestialBody): void {
+    this.bodies.push(body);
+  }
+
+  private fixedUpdate(step: number): void {
+    // Calculate accelerations
+    for (const body of this.bodies) {
+      const accel = NBodySimulation.calculateAcceleration(body.position, body);
+      body.updateVelocity(accel, step);
+    }
+    // Update positions
+    for (const body of this.bodies) {
+      body.updatePosition(step);
+    }
+  }
+
+  /**
+   * Calculate gravitational acceleration at a given point.
+   * This is the core of the N-body simulation used by both
+   * celestial bodies and the player controller for gravity alignment.
+   */
+  static calculateAcceleration(
+    point: Vector3,
+    ignoreBody: CelestialBody | null = null
+  ): Vector3 {
+    const inst = NBodySimulation.instance;
+    if (!inst) return Vector3.Zero();
+
+    let ax = 0, ay = 0, az = 0;
+    for (const body of inst.bodies) {
+      if (body === ignoreBody) continue;
+      const dx = body.position.x - point.x;
+      const dy = body.position.y - point.y;
+      const dz = body.position.z - point.z;
+      const sqrDst = dx * dx + dy * dy + dz * dz;
+      if (sqrDst < 0.0001) continue;
+      const invDst = 1 / Math.sqrt(sqrDst);
+      const forceMag = Universe.GRAVITATIONAL_CONSTANT * body.mass / sqrDst;
+      ax += dx * invDst * forceMag;
+      ay += dy * invDst * forceMag;
+      az += dz * invDst * forceMag;
+    }
+    return new Vector3(ax, ay, az);
+  }
+}
+```
+
+### `Universe.ts`
+
+```typescript
+export class Universe {
+  static readonly GRAVITATIONAL_CONSTANT = 0.0001;
+  static readonly PHYSICS_TIME_STEP = 0.01;
+  static cheatsEnabled = true;
+}
+```
+
+---
+
+## 14. Celestial Bodies & Gravity Objects
+
+### Babylon.js Implementation — `CelestialBody.ts`
+
+```typescript
+import { TransformNode, Vector3, Scene, Mesh, MeshBuilder } from "@babylonjs/core";
+import { Universe } from "./Universe";
+
+export enum BodyType { Planet, Moon, Sun }
+
+export class CelestialBody {
+  node: TransformNode;
+  bodyType: BodyType;
+  radius: number;
+  surfaceGravity: number;
+  mass: number;
+  velocity: Vector3;
+  bodyName: string;
+
+  constructor(
+    scene: Scene,
+    config: {
+      name: string;
+      bodyType: BodyType;
+      radius: number;
+      surfaceGravity: number;
+      initialVelocity: Vector3;
+      position: Vector3;
+    }
+  ) {
+    this.bodyName = config.name;
+    this.bodyType = config.bodyType;
+    this.radius = config.radius;
+    this.surfaceGravity = config.surfaceGravity;
+    this.velocity = config.initialVelocity.clone();
+
+    // mass = surfaceGravity * radius² / G
+    this.mass = this.surfaceGravity * this.radius * this.radius
+                / Universe.GRAVITATIONAL_CONSTANT;
+
+    // Create visual (sphere placeholder — replace with procedural generation)
+    this.node = new TransformNode(config.name, scene);
+    this.node.position = config.position.clone();
+  }
+
+  get position(): Vector3 {
+    return this.node.position;
+  }
+
+  updateVelocity(acceleration: Vector3, timeStep: number): void {
+    this.velocity.addInPlace(acceleration.scale(timeStep));
+  }
+
+  updatePosition(timeStep: number): void {
+    this.node.position.addInPlace(this.velocity.scale(timeStep));
+  }
+
+  recalculateMass(): void {
+    this.mass = this.surfaceGravity * this.radius * this.radius
+                / Universe.GRAVITATIONAL_CONSTANT;
+  }
+}
+```
+
+---
+
+## 15. Ship Piloting System
+
+### Unity Source Reference
+```
+Ship : GravityObject (Rigidbody)
+  - 6DOF thrust: WASD + Space/Shift + Q/E roll
+  - Mouse yaw/pitch with smoothing
+  - NBodySimulation gravity
+  - PilotShip(): attach player camera to ship viewpoint, deactivate player
+  - StopPilotingShip(): transfer velocity, restore camera
+  - Collision tracking for rotation lock
+```
+
+### Babylon.js Implementation — `ShipController.ts`
+
+```typescript
+import {
+  TransformNode, Scene, Vector3, Quaternion,
+  PhysicsAggregate, PhysicsShapeType, Mesh,
+} from "@babylonjs/core";
+import { NBodySimulation } from "./NBodySimulation";
+import { InputController } from "../input/InputController";
+import { PlayerController } from "../player/PlayerController";
+
+export class ShipController {
+  node: Mesh;
+  aggregate: PhysicsAggregate;
+
+  // Config
+  thrustStrength = 20;
+  rotSpeed = 5;
+  rollSpeed = 30;
+  rotSmoothSpeed = 10;
+
+  // References
+  camViewPoint: TransformNode;
+  pilotSeatPoint: TransformNode;
+  hatch: TransformNode;
+  hatchAngle = 60;
+
+  // State
+  private pilot: PlayerController | null = null;
+  private isPiloted = false;
+  private targetRot: Quaternion;
+  private smoothedRot: Quaternion;
+  private thrusterInput = Vector3.Zero();
+  private numCollisionTouches = 0;
+  private hatchOpen = false;
+
+  private input: InputController;
+
+  constructor(
+    mesh: Mesh,
+    scene: Scene,
+    camViewPoint: TransformNode,
+    pilotSeatPoint: TransformNode,
+    hatch: TransformNode,
+  ) {
+    this.node = mesh;
+    this.camViewPoint = camViewPoint;
+    this.pilotSeatPoint = pilotSeatPoint;
+    this.hatch = hatch;
+    this.input = (scene as any).__gameEngine?.input;
+
+    this.targetRot = mesh.rotationQuaternion?.clone() ?? Quaternion.Identity();
+    this.smoothedRot = this.targetRot.clone();
+
+    // Physics
+    this.aggregate = new PhysicsAggregate(mesh, PhysicsShapeType.CONVEX_HULL, {
+      mass: 1000,
+      friction: 0.3,
+      restitution: 0.1,
+    }, scene);
+    // Disable built-in gravity — we use NBody
+    this.aggregate.body.setGravityFactor(0);
+
+    // Tick
+    scene.onBeforeRenderObservable.add(() => {
+      const dt = scene.getEngine().getDeltaTime() / 1000;
+      this.update(dt);
+    });
+
+    scene.onBeforePhysicsObservable?.add(() => {
+      this.fixedUpdate();
+    });
+  }
+
+  private update(dt: number): void {
+    if (this.isPiloted) this.handleMovement(dt);
+
+    // Animate hatch
+    // (lerp local rotation on hatch node)
+  }
+
+  private handleMovement(dt: number): void {
+    // Thruster input from keyboard
+    let tx = 0, ty = 0, tz = 0;
+    if (this.input.isHeld("d")) tx += 1;
+    if (this.input.isHeld("a")) tx -= 1;
+    if (this.input.isHeld(" ")) ty += 1;      // ascend
+    if (this.input.isHeld("shift")) ty -= 1;   // descend
+    if (this.input.isHeld("w")) tz += 1;
+    if (this.input.isHeld("s")) tz -= 1;
+    this.thrusterInput.set(tx, ty, tz);
+
+    // Rotation: mouse
+    const yawInput = this.input.lookInput.x * this.rotSpeed * 0.01;
+    const pitchInput = this.input.lookInput.y * this.rotSpeed * 0.01;
+
+    let rollInput = 0;
+    if (this.input.isHeld("q")) rollInput -= 1;
+    if (this.input.isHeld("e")) rollInput += 1;
+    rollInput *= this.rollSpeed * dt;
+
+    if (this.numCollisionTouches === 0) {
+      const yaw = Quaternion.RotationAxis(this.node.up, yawInput);
+      const pitch = Quaternion.RotationAxis(this.node.right, -pitchInput);
+      const roll = Quaternion.RotationAxis(this.node.forward, -rollInput);
+
+      this.targetRot = yaw.multiply(pitch).multiply(roll).multiply(this.targetRot);
+      this.smoothedRot = Quaternion.Slerp(
+        this.node.rotationQuaternion ?? Quaternion.Identity(),
+        this.targetRot,
+        dt * this.rotSmoothSpeed
+      );
+    } else {
+      this.targetRot = this.node.rotationQuaternion?.clone() ?? Quaternion.Identity();
+      this.smoothedRot = this.targetRot.clone();
+    }
+  }
+
+  private fixedUpdate(): void {
+    const body = this.aggregate.body;
+
+    // Gravity from NBody
+    const gravity = NBodySimulation.calculateAcceleration(this.node.position);
+    body.applyForce(gravity, this.node.position);
+
+    // Thrusters (local to world)
+    const worldThrust = Vector3.TransformNormal(
+      this.thrusterInput, this.node.getWorldMatrix()
+    );
+    body.applyForce(worldThrust.scale(this.thrustStrength), this.node.position);
+
+    // Apply smoothed rotation
+    if (this.numCollisionTouches === 0) {
+      this.node.rotationQuaternion = this.smoothedRot.clone();
+    }
+  }
+
+  // ─── Piloting API ──────────────────────────────────
+  pilotShip(player: PlayerController): void {
+    this.pilot = player;
+    this.isPiloted = true;
+    player.attachCameraTo(this.camViewPoint);
+    player.node.setEnabled(false);
+    this.hatchOpen = false;
+  }
+
+  stopPilotingShip(): void {
+    if (!this.pilot) return;
+    this.isPiloted = false;
+    this.pilot.node.position = this.pilotSeatPoint.absolutePosition.clone();
+    this.pilot.setVelocity(this.getLinearVelocity());
+    this.pilot.node.setEnabled(true);
+    this.pilot.exitFromSpaceship();
+    this.pilot = null;
+  }
+
+  togglePiloting(player: PlayerController): void {
+    this.isPiloted ? this.stopPilotingShip() : this.pilotShip(player);
+  }
+
+  toggleHatch(): void { this.hatchOpen = !this.hatchOpen; }
+
+  getLinearVelocity(): Vector3 {
+    return this.aggregate.body.getLinearVelocity();
+  }
+}
+```
+
+---
+
+## 16. Floating Origin (Endless Manager)
+
+### Unity Source Reference
+```
+EndlessManager : MonoBehaviour
+  - LateUpdate: if camera > 1000m from origin, shift ALL physics objects back
+  - PostFloatingOriginUpdate event for UI re-sync
+```
+
+### Babylon.js Implementation — `FloatingOrigin.ts`
+
+```typescript
+import { Scene, Vector3, TransformNode, Camera } from "@babylonjs/core";
+
+export class FloatingOrigin {
+  private distanceThreshold = 1000;
+  private physicsObjects: TransformNode[] = [];
+  onPostUpdate: (() => void)[] = [];
+
+  constructor(private scene: Scene, private camera: Camera) {
+    // Collect physics objects on init
+    // (bodies, player, ship — register externally)
+
+    scene.onAfterRenderObservable.add(() => {
+      this.updateFloatingOrigin();
+    });
+  }
+
+  registerObject(obj: TransformNode): void {
+    this.physicsObjects.push(obj);
+  }
+
+  private updateFloatingOrigin(): void {
+    const camPos = this.camera.position;
+    if (camPos.length() > this.distanceThreshold) {
+      const offset = camPos.clone();
+      for (const t of this.physicsObjects) {
+        t.position.subtractInPlace(offset);
+      }
+      // Also offset the camera itself
+      this.camera.position.subtractInPlace(offset);
+
+      this.onPostUpdate.forEach(cb => cb());
+    }
+  }
+}
+```
+
+> **Important**: Floating origin requires careful handling in Babylon.js because the camera position affects the projection matrix. After shifting, force a matrix recomputation with `camera.getViewMatrix(true)`.
+
+---
+
+## 17. Star Dome
+
+### Unity Source Reference
+```
+StarDome : MonoBehaviour
+  - Spawn 1000 star meshes on a sphere at camera.farClipPlane distance
+  - LateUpdate: follow camera position
+  - Variable brightness using SmallestRandomValue(6)
+```
+
+### Babylon.js — `StarDome.ts`
+
+Use a `PointsCloudSystem` for extreme efficiency (thousands of points, one draw call):
+
+```typescript
+import { Scene, Vector3, Color4, PointsCloudSystem } from "@babylonjs/core";
+
+export class StarDome {
+  pcs: PointsCloudSystem;
+
+  constructor(
+    scene: Scene,
+    count = 1000,
+    radiusMin = 0.5,
+    radiusMax = 3,
+    brightnessMin = 0.3,
+    brightnessMax = 1.0,
+  ) {
+    const camera = scene.activeCamera!;
+    const starDst = camera.maxZ * 0.95;
+    const scale = starDst / 2000;
+
+    this.pcs = new PointsCloudSystem("stars", 2, scene);
+
+    this.pcs.addPoints(count, (particle, i) => {
+      // Random direction on unit sphere
+      const dir = this.randomOnUnitSphere();
+      particle.position = dir.scale(starDst);
+
+      // Brightness: smallest of 6 random values → bias toward dimmer
+      const t = this.smallestRandom(6);
+      const brightness = brightnessMin + t * (brightnessMax - brightnessMin);
+      particle.color = new Color4(brightness, brightness, brightness * 0.9, 1);
+
+      // Size
+      const size = (radiusMin + t * (radiusMax - radiusMin)) * scale;
+      particle.size = size;
+    });
+
+    this.pcs.buildMeshAsync().then(() => {
+      // Follow camera every frame
+      scene.onAfterRenderObservable.add(() => {
+        if (this.pcs.mesh) {
+          this.pcs.mesh.position = camera.position.clone();
+        }
+      });
+    });
+  }
+
+  private randomOnUnitSphere(): Vector3 {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    return new Vector3(
+      Math.sin(phi) * Math.cos(theta),
+      Math.sin(phi) * Math.sin(theta),
+      Math.cos(phi),
+    );
+  }
+
+  private smallestRandom(iterations: number): number {
+    let r = 1;
+    for (let i = 0; i < iterations; i++) {
+      r = Math.min(r, Math.random());
+    }
+    return r;
+  }
+}
+```
+
+---
+
+## 18. Ship HUD & Lock-On UI
+
+### Unity Source Reference
+```
+ShipHUD : MonoBehaviour
+  - FindAimedBody(): ray-sphere intersection for planet targeting
+  - DrawPlanetHUD(): planet name, distance, relative velocity arrows
+  - Lock on click, display UI at screen-space position
+  - VelocityIndicator: horizontal/vertical arrows showing relative velocity components
+```
+
+### Babylon.js — `ShipHUDOverlay.ts`
+
+Use `@babylonjs/gui` `AdvancedDynamicTexture` fullscreen overlay:
+
+```typescript
+import {
+  Scene, Vector3, Camera,
+} from "@babylonjs/core";
+import {
+  AdvancedDynamicTexture, TextBlock, Control, Ellipse, Line,
+} from "@babylonjs/gui";
+import { CelestialBody } from "./CelestialBody";
+import { ShipController } from "./ShipController";
+
+export class ShipHUDOverlay {
+  private gui: AdvancedDynamicTexture;
+  private planetNameLabel: TextBlock;
+  private planetInfoLabel: TextBlock;
+  private lockedBody: CelestialBody | null = null;
+  private centreDot: Ellipse;
+
+  constructor(
+    private scene: Scene,
+    private ship: ShipController,
+    private bodies: CelestialBody[],
+  ) {
+    this.gui = AdvancedDynamicTexture.CreateFullscreenUI("ShipHUD", true, scene);
+
+    // Centre aim dot
+    this.centreDot = new Ellipse("centreDot");
+    this.centreDot.width = "8px";
+    this.centreDot.height = "8px";
+    this.centreDot.color = "white";
+    this.centreDot.background = "white";
+    this.gui.addControl(this.centreDot);
+
+    // Planet name
+    this.planetNameLabel = new TextBlock("planetName", "");
+    this.planetNameLabel.color = "white";
+    this.planetNameLabel.fontSize = 18;
+    this.planetNameLabel.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    this.planetNameLabel.isVisible = false;
+    this.gui.addControl(this.planetNameLabel);
+
+    // Planet info (distance + velocity)
+    this.planetInfoLabel = new TextBlock("planetInfo", "");
+    this.planetInfoLabel.color = "white";
+    this.planetInfoLabel.fontSize = 14;
+    this.planetInfoLabel.isVisible = false;
+    this.gui.addControl(this.planetInfoLabel);
+
+    // Update loop
+    scene.onAfterRenderObservable.add(() => this.updateUI());
+  }
+
+  private updateUI(): void {
+    if (!this.ship) return;
+    const cam = this.scene.activeCamera as Camera;
+
+    // Find aimed body (dot product + distance check)
+    const aimed = this.findAimedBody(cam);
+
+    if (this.lockedBody) {
+      this.drawPlanetHUD(this.lockedBody, cam);
+    } else {
+      this.planetNameLabel.isVisible = false;
+      this.planetInfoLabel.isVisible = false;
+    }
+  }
+
+  private findAimedBody(cam: Camera): CelestialBody | null {
+    const fwd = cam.getForwardRay().direction;
+    const origin = cam.position;
+    const minAimAngle = 30 * Math.PI / 180;
+    let bestAngle = minAimAngle;
+    let aimed: CelestialBody | null = null;
+
+    for (const body of this.bodies) {
+      const toBody = body.position.subtract(origin);
+      const angle = Math.acos(Vector3.Dot(fwd, toBody.normalize()));
+      if (angle < bestAngle) {
+        bestAngle = angle;
+        aimed = body;
+      }
+    }
+    return aimed;
+  }
+
+  private drawPlanetHUD(body: CelestialBody, cam: Camera): void {
+    const dist = Vector3.Distance(cam.position, body.position) - body.radius;
+    const relV = this.ship.getLinearVelocity().subtract(body.velocity);
+
+    this.planetNameLabel.text = body.bodyName;
+    this.planetInfoLabel.text = `${this.formatDist(dist)}\n${relV.length().toFixed(0)}m/s`;
+    this.planetNameLabel.isVisible = true;
+    this.planetInfoLabel.isVisible = true;
+
+    // Position at screen-space coordinate of body
+    const screenPos = Vector3.Project(
+      body.position,
+      this.scene.getTransformMatrix(),
+      cam.getProjectionMatrix(),
+      cam.viewport.toGlobal(
+        this.scene.getEngine().getRenderWidth(),
+        this.scene.getEngine().getRenderHeight()
+      )
+    );
+    this.planetNameLabel.left = `${screenPos.x}px`;
+    this.planetNameLabel.top = `${screenPos.y}px`;
+    this.planetInfoLabel.left = `${screenPos.x}px`;
+    this.planetInfoLabel.top = `${screenPos.y + 20}px`;
+  }
+
+  lockOn(body: CelestialBody | null): void {
+    this.lockedBody = body;
+  }
+
+  private formatDist(d: number): string {
+    return d < 1000 ? `${Math.floor(d)}m` : `${(d / 1000).toFixed(0)}km`;
+  }
+}
+```
+
+---
+
+## 19. Procedural Terrain Generation
+
+### Unity Source Reference
+```
+ProceduralTerrainGenerator : MonoBehaviour
+  Algorithms: PerlinNoise, SimplexNoise, DiamondSquare, FaultLines, RidgedNoise, BillowNoise, MultiFractal
+  Post-processing: ThermalErosion, Smoothing
+  GenerateHeightmap(chunkPosition, chunkSize) → float[,]
+  GenerateTerrainMesh(heightmap, chunkSize) → Mesh
+  Heightmap caching per chunk (Vector2Int key)
+  Integration with QuadTreeTerrain for LOD
+```
+
+### Babylon.js Implementation — `ProceduralTerrain.ts`
+
+```typescript
+import {
+  Scene, Vector3, Mesh, VertexData,
+} from "@babylonjs/core";
+
+export enum TerrainAlgorithm {
+  PerlinNoise,
+  DiamondSquare,
+  FaultLines,
+  RidgedNoise,
+  BillowNoise,
+  MultiFractal,
+}
+
+export interface TerrainConfig {
+  algorithm: TerrainAlgorithm;
+  resolution: number;     // 257 (2^n + 1)
+  heightScale: number;    // 100
+  baseHeight: number;     // 0
+  frequency: number;      // 0.01
+  amplitude: number;      // 1
+  octaves: number;        // 4
+  persistence: number;    // 0.5
+  lacunarity: number;     // 2
+  seed: number;
+  roughness: number;      // Diamond-Square
+  faultLines: number;     // 50
+  ridgeOffset: number;    // 1
+  applyErosion: boolean;
+  erosionIterations: number;
+  erosionStrength: number;
+  applySmoothing: boolean;
+  smoothIterations: number;
+  smoothStrength: number;
+}
+
+export class ProceduralTerrain {
+  private heightmapCache = new Map<string, Float32Array>();
+
+  constructor(private scene: Scene, private config: TerrainConfig) {
+    if (config.seed === 0) config.seed = Math.floor(Math.random() * 2147483647);
+  }
+
+  generateHeightmap(chunkPos: Vector3, chunkSize: number): Float32Array {
+    const key = `${Math.round(chunkPos.x / chunkSize)}_${Math.round(chunkPos.z / chunkSize)}`;
+    if (this.heightmapCache.has(key)) return this.heightmapCache.get(key)!;
+
+    const res = this.config.resolution;
+    const hm = new Float32Array(res * res);
+
+    switch (this.config.algorithm) {
+      case TerrainAlgorithm.PerlinNoise:
+        this.generatePerlin(hm, chunkPos, chunkSize);
+        break;
+      case TerrainAlgorithm.RidgedNoise:
+        this.generateRidged(hm, chunkPos, chunkSize);
+        break;
+      case TerrainAlgorithm.DiamondSquare:
+        this.generateDiamondSquare(hm);
+        break;
+      // ... other algorithms follow same pattern
+    }
+
+    if (this.config.applyErosion) this.thermalErosion(hm);
+    if (this.config.applySmoothing) this.smooth(hm);
+
+    this.heightmapCache.set(key, hm);
+    return hm;
+  }
+
+  generateTerrainMesh(hm: Float32Array, chunkSize: number): Mesh {
+    const res = this.config.resolution;
+    const positions: number[] = [];
+    const indices: number[] = [];
+    const uvs: number[] = [];
+    const normals: number[] = [];
+
+    for (let z = 0; z < res; z++) {
+      for (let x = 0; x < res; x++) {
+        const xPos = (x / (res - 1) - 0.5) * chunkSize;
+        const zPos = (z / (res - 1) - 0.5) * chunkSize;
+        const yPos = this.config.baseHeight + hm[z * res + x] * this.config.heightScale;
+        positions.push(xPos, yPos, zPos);
+        uvs.push(x / (res - 1), z / (res - 1));
+      }
+    }
+
+    for (let z = 0; z < res - 1; z++) {
+      for (let x = 0; x < res - 1; x++) {
+        const i = z * res + x;
+        indices.push(i, i + res, i + 1);
+        indices.push(i + 1, i + res, i + res + 1);
+      }
+    }
+
+    const mesh = new Mesh("terrainChunk", this.scene);
+    const vd = new VertexData();
+    vd.positions = positions;
+    vd.indices = indices;
+    vd.uvs = uvs;
+    VertexData.ComputeNormals(positions, indices, normals);
+    vd.normals = normals;
+    vd.applyToMesh(mesh);
+
+    return mesh;
+  }
+
+  // ─── Noise Functions ───────────────────────────────
+  // Babylon.js doesn't have built-in Perlin noise.
+  // Use a simple implementation or import a library like `simplex-noise`.
+
+  private generatePerlin(hm: Float32Array, chunkPos: Vector3, chunkSize: number): void {
+    const res = this.config.resolution;
+    for (let z = 0; z < res; z++) {
+      for (let x = 0; x < res; x++) {
+        const wx = chunkPos.x + (x / (res - 1) - 0.5) * chunkSize;
+        const wz = chunkPos.z + (z / (res - 1) - 0.5) * chunkSize;
+
+        let val = 0, amp = this.config.amplitude, freq = this.config.frequency;
+        for (let o = 0; o < this.config.octaves; o++) {
+          val += this.perlin2D(wx * freq + this.config.seed, wz * freq + this.config.seed) * amp;
+          amp *= this.config.persistence;
+          freq *= this.config.lacunarity;
+        }
+        hm[z * res + x] = val;
+      }
+    }
+  }
+
+  private generateRidged(hm: Float32Array, chunkPos: Vector3, chunkSize: number): void {
+    const res = this.config.resolution;
+    for (let z = 0; z < res; z++) {
+      for (let x = 0; x < res; x++) {
+        const wx = chunkPos.x + (x / (res - 1) - 0.5) * chunkSize;
+        const wz = chunkPos.z + (z / (res - 1) - 0.5) * chunkSize;
+        let val = 0, amp = this.config.amplitude, freq = this.config.frequency;
+        for (let o = 0; o < this.config.octaves; o++) {
+          let n = this.perlin2D(wx * freq + this.config.seed, wz * freq + this.config.seed);
+          n = Math.abs(n - this.config.ridgeOffset);
+          n = this.config.ridgeOffset - n;
+          val += n * amp;
+          amp *= this.config.persistence;
+          freq *= this.config.lacunarity;
+        }
+        hm[z * res + x] = val;
+      }
+    }
+  }
+
+  private generateDiamondSquare(hm: Float32Array): void {
+    const res = this.config.resolution;
+    const size = res - 1;
+    // Initialize corners
+    hm[0] = Math.random();
+    hm[size] = Math.random();
+    hm[size * res] = Math.random();
+    hm[size * res + size] = Math.random();
+
+    let step = size;
+    let scale = this.config.roughness;
+    while (step > 1) {
+      const half = step >> 1;
+      // Diamond
+      for (let z = half; z < res; z += step) {
+        for (let x = half; x < res; x += step) {
+          const avg = (
+            hm[(z - half) * res + (x - half)] +
+            hm[(z - half) * res + (x + half)] +
+            hm[(z + half) * res + (x - half)] +
+            hm[(z + half) * res + (x + half)]
+          ) / 4;
+          hm[z * res + x] = avg + (Math.random() - 0.5) * scale;
+        }
+      }
+      // Square
+      for (let z = 0; z < res; z += half) {
+        for (let x = ((z + half) % step); x < res; x += step) {
+          let sum = 0, count = 0;
+          if (x - half >= 0) { sum += hm[z * res + (x - half)]; count++; }
+          if (x + half < res) { sum += hm[z * res + (x + half)]; count++; }
+          if (z - half >= 0) { sum += hm[(z - half) * res + x]; count++; }
+          if (z + half < res) { sum += hm[(z + half) * res + x]; count++; }
+          hm[z * res + x] = sum / count + (Math.random() - 0.5) * scale;
+        }
+      }
+      step = half;
+      scale *= this.config.roughness;
+    }
+  }
+
+  private thermalErosion(hm: Float32Array): void {
+    const res = this.config.resolution;
+    for (let iter = 0; iter < this.config.erosionIterations; iter++) {
+      const copy = new Float32Array(hm);
+      for (let z = 1; z < res - 1; z++) {
+        for (let x = 1; x < res - 1; x++) {
+          const h = hm[z * res + x];
+          let minN = h;
+          for (let dz = -1; dz <= 1; dz++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dz === 0) continue;
+              minN = Math.min(minN, hm[(z + dz) * res + (x + dx)]);
+            }
+          }
+          if (h - minN > this.config.erosionStrength) {
+            copy[z * res + x] -= this.config.erosionStrength * 0.5;
+          }
+        }
+      }
+      hm.set(copy);
+    }
+  }
+
+  private smooth(hm: Float32Array): void {
+    const res = this.config.resolution;
+    for (let iter = 0; iter < this.config.smoothIterations; iter++) {
+      const out = new Float32Array(res * res);
+      for (let z = 0; z < res; z++) {
+        for (let x = 0; x < res; x++) {
+          let sum = 0, count = 0;
+          for (let dz = -1; dz <= 1; dz++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const nx = x + dx, nz = z + dz;
+              if (nx >= 0 && nx < res && nz >= 0 && nz < res) {
+                sum += hm[nz * res + nx]; count++;
+              }
+            }
+          }
+          const avg = sum / count;
+          out[z * res + x] = hm[z * res + x] * (1 - this.config.smoothStrength) + avg * this.config.smoothStrength;
+        }
+      }
+      hm.set(out);
+    }
+  }
+
+  // ─── Perlin noise (simple 2D) ──────────────────────
+  // Use the `simplex-noise` npm package for production.
+  // Fallback implementation:
+  private perlin2D(x: number, y: number): number {
+    // Simple value noise fallback
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = x - xi, yf = y - yi;
+    const u = xf * xf * (3 - 2 * xf);
+    const v = yf * yf * (3 - 2 * yf);
+    const n00 = this.hash2D(xi, yi);
+    const n10 = this.hash2D(xi + 1, yi);
+    const n01 = this.hash2D(xi, yi + 1);
+    const n11 = this.hash2D(xi + 1, yi + 1);
+    const a = n00 + u * (n10 - n00);
+    const b = n01 + u * (n11 - n01);
+    return a + v * (b - a);
+  }
+
+  private hash2D(x: number, y: number): number {
+    let h = (x * 374761393 + y * 668265263 + this.config.seed) | 0;
+    h = (h ^ (h >> 13)) * 1274126177;
+    h = h ^ (h >> 16);
+    return (h & 0x7fffffff) / 0x7fffffff;
+  }
+
+  clearCache(): void { this.heightmapCache.clear(); }
+}
+```
+
+---
+
+## 20. Shaders — Terrain, Water, Vegetation
+
+### General Approach
+
+Unity shaders (HLSL/CG surface shaders) must be rewritten as GLSL for Babylon's `ShaderMaterial` or `CustomMaterial` (node-based). Babylon supports both raw GLSL shaders and the Node Material Editor (NME).
+
+### Water Shader
+
+Unity source uses CG surface shader with vertex displacement (sine wave) and scrolling normal map.
+
+#### `water.vertex.glsl`
+
+```glsl
+precision highp float;
+
+// Attributes
+attribute vec3 position;
+attribute vec3 normal;
+attribute vec2 uv;
+
+// Uniforms
+uniform mat4 worldViewProjection;
+uniform mat4 world;
+uniform float time;
+uniform float waveSpeed;
+uniform float waveHeight;
+uniform float waveFrequency;
+
+// Varyings
+varying vec2 vUV;
+varying vec3 vWorldPos;
+varying vec3 vNormal;
+
+void main() {
+    vec3 pos = position;
+    // Sine wave displacement
+    float wave = sin(time * waveSpeed + pos.x * waveFrequency + pos.z * waveFrequency) * waveHeight;
+    pos.y += wave;
+
+    vUV = uv;
+    vWorldPos = (world * vec4(pos, 1.0)).xyz;
+    vNormal = normalize((world * vec4(normal, 0.0)).xyz);
+
+    gl_Position = worldViewProjection * vec4(pos, 1.0);
+}
+```
+
+#### `water.fragment.glsl`
+
+```glsl
+precision highp float;
+
+uniform vec4 waterColor;      // (0.2, 0.4, 0.8, 0.8)
+uniform sampler2D normalMap;
+uniform float time;
+
+varying vec2 vUV;
+varying vec3 vWorldPos;
+varying vec3 vNormal;
+
+void main() {
+    // Scrolling normal map
+    vec2 scrollUV = vUV + vec2(time * 0.1, 0.0);
+    vec3 normalSample = texture2D(normalMap, scrollUV).rgb * 2.0 - 1.0;
+
+    // Simple Lambert-like shading
+    vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
+    float diff = max(dot(normalize(vNormal + normalSample * 0.3), lightDir), 0.2);
+
+    gl_FragColor = vec4(waterColor.rgb * diff, waterColor.a);
+}
+```
+
+#### Usage in Babylon
+
+```typescript
+import { ShaderMaterial, Texture, Color4, Scene, Effect } from "@babylonjs/core";
+
+// Register shaders (or load from files)
+Effect.ShadersStore["waterVertexShader"] = waterVertexGLSL;
+Effect.ShadersStore["waterFragmentShader"] = waterFragmentGLSL;
+
+export function createWaterMaterial(scene: Scene): ShaderMaterial {
+  const mat = new ShaderMaterial("waterMat", scene, { vertex: "water", fragment: "water" }, {
+    attributes: ["position", "normal", "uv"],
+    uniforms: ["worldViewProjection", "world", "time", "waveSpeed", "waveHeight", "waveFrequency", "waterColor"],
+    samplers: ["normalMap"],
+    needAlphaBlending: true,
+  });
+
+  mat.setFloat("waveSpeed", 1.0);
+  mat.setFloat("waveHeight", 0.5);
+  mat.setFloat("waveFrequency", 0.1);
+  mat.setColor4("waterColor", new Color4(0.2, 0.4, 0.8, 0.8));
+  // mat.setTexture("normalMap", new Texture("assets/textures/water_normal.png", scene));
+
+  // Animate time uniform
+  scene.onBeforeRenderObservable.add(() => {
+    mat.setFloat("time", performance.now() / 1000);
+  });
+
+  return mat;
+}
+```
+
+### Terrain Shader
+
+Unity's `HeavyWater/TerrainShader` uses height-based coloring (green → brown → gray). Convert similarly:
+
+```glsl
+// terrain.fragment.glsl
+precision highp float;
+
+uniform float heightScale;
+varying vec3 vWorldPos;
+varying vec2 vUV;
+
+vec3 getTerrainColor(float height) {
+    float h = clamp(height / heightScale, 0.0, 1.0);
+    if (h < 0.3) return vec3(0.2, 0.6, 0.2);       // Grass
+    else if (h < 0.7) return vec3(0.6, 0.4, 0.2);   // Dirt
+    else return vec3(0.5, 0.5, 0.5);                 // Rock
+}
+
+void main() {
+    vec3 color = getTerrainColor(vWorldPos.y);
+    gl_FragColor = vec4(color, 1.0);
+}
+```
+
+### Vegetation Shaders (Bush, Grass, Rock)
+
+These follow the same pattern. Key considerations:
+- **Grass**: Add wind animation via vertex displacement using `sin(time + worldPos.x)` in vertex shader
+- **Bush**: Billboard or soft alpha-test with world-space UV tiling
+- **Rock**: Triplanar mapping for seamless texturing on steep surfaces
+
+---
+
+## 21. Jetpack & Multi-Jump System
+
+### Unity Source Reference (FPS.Gameplay.Jetpack)
+```
+Three-tier jump: Regular → Super Jump → Double Jump → Continuous Jetpack
+Jet Mode vs Jetpack Mode (toggle with crouch in air)
+Fuel system: consume/refill with delays
+```
+
+### Babylon.js Implementation — `JetpackSystem.ts`
+
+```typescript
+export class JetpackSystem {
+  isUnlocked = false;
+  isJetMode = false;
+  currentFill = 1;
+
+  // Config (mirror Unity Inspector values)
+  jetpackAcceleration = 7;
+  maxTiltAngle = 45;
+  superJumpForce = 25;
+  superJumpFuelCost = 0.3;
+  doubleJumpForce = 37.5;
+  doubleJumpFuelCost = 0.25;
+  jetModeAcceleration = 15;
+  consumeDuration = 1.5;
+  refillGrounded = 2;
+  refillAir = 5;
+  refillDelay = 1;
+  inactiveGravityMult = 2.5;
+
+  private airJumpCount = 0;
+  private canUseJetpack = false;
+  private lastUseTime = 0;
+
+  update(
+    dt: number,
+    isGrounded: boolean,
+    jumpDown: boolean,
+    jumpHeld: boolean,
+    crouchDown: boolean,
+    playerVelocity: { y: number },
+    cameraForward: { x: number; y: number; z: number },
+    applyForce: (fx: number, fy: number, fz: number) => void,
+    gravityDownForce: number,
+  ): void {
+    if (!this.isUnlocked) return;
+
+    // Toggle jet mode while airborne
+    if (crouchDown && !isGrounded) {
+      this.isJetMode = !this.isJetMode;
+    }
+
+    if (isGrounded) {
+      this.canUseJetpack = false;
+      this.airJumpCount = 0;
+    } else if (jumpDown) {
+      this.airJumpCount++;
+      if (this.airJumpCount === 1 && this.currentFill >= 0.3) {
+        this.superJump(playerVelocity, applyForce);
+      } else if (this.airJumpCount === 2 && this.currentFill >= 0.25) {
+        this.doubleJump(playerVelocity, applyForce);
+      } else if (this.airJumpCount > 2) {
+        this.canUseJetpack = true;
+      }
+    }
+
+    // Continuous jetpack thrust
+    if (this.canUseJetpack && jumpHeld && this.currentFill > 0) {
+      this.lastUseTime = performance.now() / 1000;
+      this.currentFill -= dt / this.consumeDuration;
+
+      if (this.isJetMode) {
+        const gc = gravityDownForce * 0.2;
+        applyForce(
+          cameraForward.x * this.jetModeAcceleration * dt,
+          cameraForward.y * this.jetModeAcceleration * dt + gc * dt,
+          cameraForward.z * this.jetModeAcceleration * dt,
+        );
+      } else {
+        const upCancel = gravityDownForce;
+        applyForce(0, (upCancel + this.jetpackAcceleration) * dt, 0);
+      }
+    } else {
+      // Refuel
+      const now = performance.now() / 1000;
+      if (now - this.lastUseTime >= this.refillDelay) {
+        const rate = 1 / (isGrounded ? this.refillGrounded : this.refillAir);
+        this.currentFill = Math.min(1, this.currentFill + dt * rate);
+      }
+
+      // Extra gravity when not jetting
+      if (!isGrounded && this.inactiveGravityMult > 1) {
+        applyForce(0, -gravityDownForce * (this.inactiveGravityMult - 1) * dt, 0);
+      }
+    }
+
+    this.currentFill = Math.max(0, Math.min(1, this.currentFill));
+  }
+
+  private superJump(
+    vel: { y: number },
+    apply: (fx: number, fy: number, fz: number) => void,
+  ): void {
+    if (vel.y < 0) vel.y = 0;
+    apply(0, this.superJumpForce, 0);
+    this.currentFill = Math.max(0, this.currentFill - this.superJumpFuelCost);
+    this.lastUseTime = performance.now() / 1000;
+  }
+
+  private doubleJump(
+    vel: { y: number },
+    apply: (fx: number, fy: number, fz: number) => void,
+  ): void {
+    if (vel.y < 0) vel.y = 0;
+    apply(0, this.doubleJumpForce, 0);
+    this.currentFill = Math.max(0, this.currentFill - this.doubleJumpFuelCost);
+    this.lastUseTime = performance.now() / 1000;
+  }
+}
+```
+
+---
+
+## 22. Robot Transformation System
+
+### Unity Source Reference
+```
+RobotTransformationController : MonoBehaviour
+  TransformMode { Mech, Motorcycle, Jet }
+  - Switches between PlayerCharacterController, MotorcycleController, JetModeController
+  - Shows/hides corresponding visual models
+  - Cooldown + VFX + SFX on transform
+  - Radial menu for selection
+```
+
+### Babylon.js — `TransformationSystem.ts`
+
+```typescript
+import { TransformNode, Scene, Mesh } from "@babylonjs/core";
+
+export enum TransformMode { Mech, Motorcycle, Jet }
+
+export class TransformationSystem {
+  currentMode = TransformMode.Mech;
+  isTransforming = false;
+  private cooldown = 0.5;
+  private lastTransformTime = 0;
+
+  // Model references (set externally)
+  mechModel: Mesh | null = null;
+  motorcycleModel: Mesh | null = null;
+  jetModel: Mesh | null = null;
+
+  // Controller enable/disable callbacks
+  onModeChange: ((mode: TransformMode) => void)[] = [];
+
+  async transformTo(mode: TransformMode): Promise<void> {
+    if (mode === this.currentMode || this.isTransforming) return;
+    const now = performance.now() / 1000;
+    if (now - this.lastTransformTime < this.cooldown) return;
+
+    this.isTransforming = true;
+    this.lastTransformTime = now;
+
+    // Play VFX / SFX here
+
+    await new Promise(resolve => setTimeout(resolve, 300)); // transform duration
+
+    // Swap models
+    this.mechModel?.setEnabled(mode === TransformMode.Mech);
+    this.motorcycleModel?.setEnabled(mode === TransformMode.Motorcycle);
+    this.jetModel?.setEnabled(mode === TransformMode.Jet);
+
+    this.currentMode = mode;
+    this.onModeChange.forEach(cb => cb(mode));
+    this.isTransforming = false;
+  }
+}
+```
+
+---
+
+## 23. Inventory System
+
+### Unity Source Reference
+```
+Inventory : ScriptableObject
+  maxSlots = 20
+  List<ItemSlot> { Item item, int quantity }
+  AddItem() — stack up to maxStackSize, then new slot
+  RemoveItem(), HasItem()
+```
+
+### Babylon.js — `InventoryStore.ts`
+
+```typescript
+export interface ItemDef {
+  id: string;
+  name: string;
+  maxStackSize: number;
+  icon?: string;
+}
+
+export interface ItemSlot {
+  item: ItemDef;
+  quantity: number;
+}
+
+export class InventoryStore {
+  maxSlots = 20;
+  slots: ItemSlot[] = [];
+
+  addItem(item: ItemDef, quantity = 1): boolean {
+    let remaining = quantity;
+
+    // Stack into existing slots
+    for (const slot of this.slots) {
+      if (slot.item.id === item.id && slot.quantity < item.maxStackSize) {
+        const canAdd = Math.min(remaining, item.maxStackSize - slot.quantity);
+        slot.quantity += canAdd;
+        remaining -= canAdd;
+        if (remaining <= 0) return true;
+      }
+    }
+
+    // New slots
+    while (remaining > 0 && this.slots.length < this.maxSlots) {
+      const add = Math.min(remaining, item.maxStackSize);
+      this.slots.push({ item, quantity: add });
+      remaining -= add;
+    }
+
+    return remaining <= 0;
+  }
+
+  removeItem(itemId: string, quantity = 1): boolean {
+    let remaining = quantity;
+    for (let i = this.slots.length - 1; i >= 0; i--) {
+      if (this.slots[i].item.id === itemId) {
+        const remove = Math.min(remaining, this.slots[i].quantity);
+        this.slots[i].quantity -= remove;
+        remaining -= remove;
+        if (this.slots[i].quantity <= 0) this.slots.splice(i, 1);
+        if (remaining <= 0) return true;
+      }
+    }
+    return false;
+  }
+
+  hasItem(itemId: string, quantity = 1): boolean {
+    let total = 0;
+    for (const slot of this.slots) {
+      if (slot.item.id === itemId) total += slot.quantity;
+      if (total >= quantity) return true;
+    }
+    return false;
+  }
+}
+```
+
+---
+
+## 24. UI Manager
+
+### Unity Source Reference
+```
+UIManager : MonoBehaviour
+  Health/stamina sliders, combo text, lock-on icon, hit marker
+  Pause/GameOver/Victory menus with cursor show/hide
+  Boss health bar
+```
+
+### Babylon.js — `UIManager.ts`
+
+Use `@babylonjs/gui` `AdvancedDynamicTexture` for all HUD and menu rendering:
+
+```typescript
+import {
+  AdvancedDynamicTexture, StackPanel, TextBlock, Rectangle,
+  Control, Button, Slider, Image,
+} from "@babylonjs/gui";
+import { Scene } from "@babylonjs/core";
+
+export class UIManager {
+  private gui: AdvancedDynamicTexture;
+  
+  // HUD elements
+  private healthBar!: Slider;
+  private staminaBar!: Slider;
+  private comboText!: TextBlock;
+  private bossPanel!: StackPanel;
+  private bossHealthBar!: Slider;
+  private bossNameText!: TextBlock;
+
+  // Menus
+  private pauseMenu!: Rectangle;
+  private gameOverMenu!: Rectangle;
+  private victoryMenu!: Rectangle;
+  private hudPanel!: StackPanel;
+
+  constructor(private scene: Scene) {
+    this.gui = AdvancedDynamicTexture.CreateFullscreenUI("UI", true, scene);
+    this.buildHUD();
+    this.buildPauseMenu();
+    this.buildGameOverMenu();
+    this.buildVictoryMenu();
+  }
+
+  initialize(): void {
+    this.pauseMenu.isVisible = false;
+    this.gameOverMenu.isVisible = false;
+    this.victoryMenu.isVisible = false;
+    this.hudPanel.isVisible = true;
+  }
+
+  private buildHUD(): void {
+    this.hudPanel = new StackPanel("hud");
+    this.hudPanel.verticalAlignment = Control.VERTICAL_ALIGNMENT_BOTTOM;
+    this.hudPanel.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    this.hudPanel.left = "20px";
+    this.hudPanel.top = "-20px";
+    this.hudPanel.width = "300px";
+    this.gui.addControl(this.hudPanel);
+
+    // Health bar
+    this.healthBar = new Slider("health");
+    this.healthBar.minimum = 0;
+    this.healthBar.maximum = 1;
+    this.healthBar.value = 1;
+    this.healthBar.height = "20px";
+    this.healthBar.width = "250px";
+    this.healthBar.color = "red";
+    this.healthBar.background = "darkred";
+    this.healthBar.isThumbClamped = true;
+    this.healthBar.thumbWidth = 0;
+    this.hudPanel.addControl(this.healthBar);
+
+    // Stamina bar
+    this.staminaBar = new Slider("stamina");
+    this.staminaBar.minimum = 0;
+    this.staminaBar.maximum = 1;
+    this.staminaBar.value = 1;
+    this.staminaBar.height = "14px";
+    this.staminaBar.width = "250px";
+    this.staminaBar.color = "lime";
+    this.staminaBar.background = "darkgreen";
+    this.staminaBar.isThumbClamped = true;
+    this.staminaBar.thumbWidth = 0;
+    this.hudPanel.addControl(this.staminaBar);
+
+    // Combo text
+    this.comboText = new TextBlock("combo", "");
+    this.comboText.color = "yellow";
+    this.comboText.fontSize = 24;
+    this.comboText.isVisible = false;
+    this.comboText.verticalAlignment = Control.VERTICAL_ALIGNMENT_CENTER;
+    this.gui.addControl(this.comboText);
+
+    // Boss health panel
+    this.bossPanel = new StackPanel("bossPanel");
+    this.bossPanel.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    this.bossPanel.top = "40px";
+    this.bossPanel.isVisible = false;
+    this.gui.addControl(this.bossPanel);
+
+    this.bossNameText = new TextBlock("bossName", "");
+    this.bossNameText.color = "white";
+    this.bossNameText.fontSize = 20;
+    this.bossPanel.addControl(this.bossNameText);
+
+    this.bossHealthBar = new Slider("bossHealth");
+    this.bossHealthBar.minimum = 0;
+    this.bossHealthBar.maximum = 1;
+    this.bossHealthBar.value = 1;
+    this.bossHealthBar.height = "20px";
+    this.bossHealthBar.width = "400px";
+    this.bossHealthBar.color = "orange";
+    this.bossHealthBar.background = "gray";
+    this.bossHealthBar.isThumbClamped = true;
+    this.bossHealthBar.thumbWidth = 0;
+    this.bossPanel.addControl(this.bossHealthBar);
+  }
+
+  private buildPauseMenu(): void {
+    this.pauseMenu = this.buildMenuPanel("PAUSED", [
+      { label: "Resume", action: () => { /* GameEngine.Instance.togglePause() */ } },
+      { label: "Restart", action: () => { /* reload scene */ } },
+      { label: "Quit", action: () => { /* window.close() */ } },
+    ]);
+  }
+
+  private buildGameOverMenu(): void {
+    this.gameOverMenu = this.buildMenuPanel("GAME OVER", [
+      { label: "Restart", action: () => {} },
+      { label: "Quit", action: () => {} },
+    ]);
+  }
+
+  private buildVictoryMenu(): void {
+    this.victoryMenu = this.buildMenuPanel("VICTORY!", [
+      { label: "Continue", action: () => {} },
+    ]);
+  }
+
+  private buildMenuPanel(title: string, buttons: { label: string; action: () => void }[]): Rectangle {
+    const bg = new Rectangle("menu_" + title);
+    bg.width = "400px";
+    bg.height = "300px";
+    bg.background = "rgba(0,0,0,0.8)";
+    bg.color = "white";
+    bg.cornerRadius = 10;
+    bg.isVisible = false;
+    this.gui.addControl(bg);
+
+    const panel = new StackPanel();
+    panel.verticalAlignment = Control.VERTICAL_ALIGNMENT_CENTER;
+    bg.addControl(panel);
+
+    const titleText = new TextBlock("title", title);
+    titleText.color = "white";
+    titleText.fontSize = 28;
+    titleText.height = "50px";
+    panel.addControl(titleText);
+
+    for (const btn of buttons) {
+      const b = Button.CreateSimpleButton("btn_" + btn.label, btn.label);
+      b.width = "200px";
+      b.height = "40px";
+      b.color = "white";
+      b.background = "green";
+      b.paddingTop = "10px";
+      b.onPointerUpObservable.add(btn.action);
+      panel.addControl(b);
+    }
+
+    return bg;
+  }
+
+  // ─── Public API ────────────────────────────────────
+  updateHealth(percent: number): void { this.healthBar.value = percent; }
+  updateStamina(percent: number): void { this.staminaBar.value = percent; }
+
+  showCombo(count: number, style = ""): void {
+    this.comboText.text = `Combo: ${count}${style ? "\n" + style : ""}`;
+    this.comboText.isVisible = true;
+    setTimeout(() => { this.comboText.isVisible = false; }, 2000);
+  }
+
+  showBossHealth(name: string): void {
+    this.bossNameText.text = name;
+    this.bossPanel.isVisible = true;
+  }
+  updateBossHealth(percent: number): void { this.bossHealthBar.value = percent; }
+  hideBossHealth(): void { this.bossPanel.isVisible = false; }
+
+  togglePauseMenu(show: boolean): void {
+    this.pauseMenu.isVisible = show;
+    this.hudPanel.isVisible = !show;
+  }
+  showGameOverScreen(): void {
+    this.gameOverMenu.isVisible = true;
+    this.hudPanel.isVisible = false;
+  }
+  showVictoryScreen(): void {
+    this.victoryMenu.isVisible = true;
+    this.hudPanel.isVisible = false;
+  }
+}
+```
+
+---
+
+## 25. Audio Manager
+
+### Babylon.js — `AudioEngine.ts`
+
+Babylon has a built-in `Sound` class with spatial audio support:
+
+```typescript
+import { Scene, Sound, Vector3 } from "@babylonjs/core";
+
+export class AudioEngine {
+  private sounds = new Map<string, Sound>();
+
+  constructor(private scene: Scene) {}
+
+  load(name: string, url: string, options?: { loop?: boolean; volume?: number; spatial?: boolean }): void {
+    const sound = new Sound(name, url, this.scene, null, {
+      loop: options?.loop ?? false,
+      volume: options?.volume ?? 1,
+      spatialSound: options?.spatial ?? false,
+    });
+    this.sounds.set(name, sound);
+  }
+
+  play(name: string): void { this.sounds.get(name)?.play(); }
+  stop(name: string): void { this.sounds.get(name)?.stop(); }
+  setVolume(name: string, vol: number): void { this.sounds.get(name)?.setVolume(vol); }
+
+  playSpatial(name: string, position: Vector3): void {
+    const s = this.sounds.get(name);
+    if (s) {
+      s.setPosition(position);
+      s.play();
+    }
+  }
+}
+```
+
+---
+
+## 26. Physics Mapping
+
+| Unity Physics | Babylon.js (Havok) |
+|---|---|
+| `Rigidbody` | `PhysicsAggregate` / `PhysicsBody` |
+| `CharacterController` | `moveWithCollisions()` or kinematic `PhysicsBody` |
+| `Collider` (Box/Sphere/Capsule/Mesh) | `PhysicsShape` (BOX/SPHERE/CAPSULE/MESH) |
+| `Rigidbody.AddForce(F, ForceMode.Acceleration)` | `body.applyForce(F, worldPoint)` |
+| `Rigidbody.MovePosition()` | Set `body.setTargetTransform()` for kinematic |
+| `Rigidbody.velocity` | `body.getLinearVelocity()` / `body.setLinearVelocity()` |
+| `Physics.OverlapBox()` | `PhysicsEngine.raycast()` or custom AABB check |
+| `OnCollisionEnter/Exit` | `body.getCollisionObservable()` |
+| `OnTriggerEnter/Exit` | `ActionManager` + `OnIntersectionEnterTrigger` |
+| `NavMesh` / `NavMeshAgent` | `recast-navigation` (npm) |
+| `Physics.Raycast()` | `scene.pickWithRay()` or `PhysicsEngine.raycast()` |
+| `LayerMask` | `node.layerMask` (bitmask, 0x0FFFFFFF) |
+| `isKinematic = true` | `PhysicsMotionType.STATIC` or `ANIMATED` |
+| `RigidbodyInterpolation` | Havok handles interpolation automatically |
+
+### Kinematic Character Controller Pattern
+
+Unity's `CharacterController.Move()` is a kinematic sweep-and-slide. Babylon can replicate this:
+
+```typescript
+// Option A: Built-in collision system
+mesh.ellipsoid = new Vector3(0.5, 1, 0.5);
+mesh.moveWithCollisions(velocityDelta);
+
+// Option B: Havok kinematic body
+const body = new PhysicsBody(mesh, PhysicsMotionType.ANIMATED, false, scene);
+body.setTargetTransform(newPosition, newRotation);
+```
+
+---
+
+## 27. Animation System
+
+| Unity Animation | Babylon.js |
+|---|---|
+| `Animator` | `AnimationGroup` (from glTF) |
+| `animator.CrossFade("clip", 0.1)` | `animGroup.start(true, speed, from, to, false)` with weight blending |
+| `animator.SetFloat("Speed", v)` | `animGroup.speedRatio = v` |
+| `animator.SetTrigger("Attack")` | Start the attack `AnimationGroup`, stop others |
+| Blend Trees | Manual weight blending between `AnimationGroup` instances |
+| Animation Events | `animGroup.onAnimationGroupLoopObservable` + time checks |
+| Root Motion | Extract root bone position delta per frame |
+
+### Animation Blending Example
+
+```typescript
+const idleAnim = scene.getAnimationGroupByName("Idle");
+const runAnim = scene.getAnimationGroupByName("Run");
+
+// Blend based on speed
+function setLocomotionBlend(speed: number) {
+  const t = Math.min(speed / maxSpeed, 1);
+  if (idleAnim && runAnim) {
+    idleAnim.setWeightForAllAnimatables(1 - t);
+    runAnim.setWeightForAllAnimatables(t);
+  }
+}
+```
+
+---
+
+## 28. Performance & Optimisation
+
+### Rendering
+
+| Technique | Babylon.js API |
+|---|---|
+| Frustum Culling | Automatic (per-mesh `.isInFrustum`) |
+| Instancing | `mesh.thinInstanceAdd()` for vegetation, stars |
+| LOD | `mesh.addLODLevel(distance, lowerMesh)` |
+| Occlusion Queries | `scene.occlusionQueryAbstraction` |
+| Post-Processing | `DefaultRenderingPipeline` (bloom, FXAA, tone mapping) |
+| Shadow Maps | `ShadowGenerator` with PCF/PCSS |
+
+### Physics
+- Use `PhysicsShapeType.CONVEX_HULL` for complex collision shapes
+- Set `body.setCollisionCallbackEnabled(false)` on objects that don't need callbacks
+- Use `scene.physicsEnabled = false` in menus
+
+### Memory
+- `mesh.dispose()` removes GPU buffers — always dispose cloned enemies
+- Use `AssetContainer` for prefab pools: load once, instantiate many
+- Pool spawned enemies instead of Instantiate/Destroy patterns
+
+### Frame Budget Targets
+
+| System | Budget (16ms frame) |
+|---|---|
+| NBody simulation | ~0.5ms (100 Hz fixed, partial each frame) |
+| Player controller | ~0.3ms |
+| Enemy FSM (× 20) | ~1ms |
+| Terrain generation | Off main thread via Worker |
+| Rendering | ~10ms |
+| Physics (Havok) | ~2ms |
+| UI | ~0.5ms |
+
+---
+
+## 29. Testing Strategy
+
+### Unit Tests (Vitest)
+
+Test pure logic classes without Babylon dependencies:
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { PlayerStats } from "../src/player/PlayerStats";
+
+describe("PlayerStats", () => {
+  it("takes damage reduced by defense", () => {
+    const stats = new EnemyStats({ maxHealth: 100, defense: 5 });
+    stats.takeDamage(20);
+    expect(stats.currentHealth).toBe(85); // 20 - 5 = 15 damage
+  });
+
+  it("cannot die while invincible", () => {
+    const ps = new PlayerStats();
+    ps.setInvincible(true);
+    ps.takeDamage(999);
+    expect(ps.currentHealth).toBe(100);
+  });
+});
+```
+
+### Integration Tests (Playwright + Headless Babylon)
+
+```typescript
+import { test, expect } from "@playwright/test";
+
+test("player moves right when D key is pressed", async ({ page }) => {
+  await page.goto("http://localhost:5173");
+  await page.waitForTimeout(1000); // wait for scene load
+
+  const initialX = await page.evaluate(() => window.__player.node.position.x);
+  await page.keyboard.down("d");
+  await page.waitForTimeout(500);
+  await page.keyboard.up("d");
+  const finalX = await page.evaluate(() => window.__player.node.position.x);
+
+  expect(finalX).toBeGreaterThan(initialX);
+});
+```
+
+---
+
+## 30. Migration Checklist
+
+Use this checklist to track progress through the port:
+
+### Core Engine
+- [ ] Project scaffolding (Vite + TypeScript + Babylon.js)
+- [ ] `GameEngine` singleton with Havok physics
+- [ ] Component system (`GameComponent` base class)
+- [ ] Fixed-timestep tick loop
+- [ ] Scene loading / switching
+- [ ] `Constants.ts` (all magic numbers from Unity)
+
+### Input
+- [ ] `InputController` with keyboard + mouse + gamepad
+- [ ] Key mapping table validated
+- [ ] Pointer lock for first/third person
+
+### Player
+- [ ] `PlayerController` — camera-relative movement
+- [ ] `PlayerStateMachine` — state transitions + animation hookup
+- [ ] `PlayerStats` — health, stamina, invincibility, XP
+- [ ] `PlayerCombat` + `CombatSystem` — combo chains
+- [ ] `WeaponSystem` — weapon switching, model swap
+- [ ] Dodge with i-frames
+- [ ] Parry system
+- [ ] Lock-on targeting
+- [ ] Solar System mode: gravity alignment, jetpack, jump
+- [ ] Ship camera attach/detach
+
+### Camera
+- [ ] `CameraRig` — orbit camera, pitch clamp
+- [ ] Lock-on camera mode
+- [ ] Camera shake
+
+### Enemies
+- [ ] `EnemyStats` — health, defense, death, loot
+- [ ] `EnemyFSM` — Patrol/Chase/Attack/Stunned/Dead
+- [ ] NavMesh integration (recast.js)
+- [ ] `EnemySpawnZone` — trigger-based, NavMesh placement
+- [ ] Boss AI placeholder
+
+### Solar System
+- [ ] `Universe` constants
+- [ ] `CelestialBody` — mass, velocity, orbital mechanics
+- [ ] `NBodySimulation` — fixed-timestep gravitational sim
+- [ ] `ShipController` — 6DOF piloting, gravity
+- [ ] `FloatingOrigin` — coordinate reset at distance threshold
+- [ ] `StarDome` — PointsCloudSystem skybox
+- [ ] `ShipHUDOverlay` — planet targeting, distance, velocity arrows
+- [ ] `SolarSystemSpawner` — procedural planet generation hookup
+
+### Terrain
+- [ ] `ProceduralTerrain` — all 7 algorithms ported
+- [ ] Terrain mesh generation via `VertexData`
+- [ ] Heightmap caching
+- [ ] `QuadTreeTerrain` LOD system
+- [ ] Noise library (`simplex-noise` npm package)
+
+### Shaders
+- [ ] Water shader (vertex displacement + scrolling normal)
+- [ ] Terrain shader (height-based coloring)
+- [ ] Grass shader (wind animation)
+- [ ] Bush / Rock shaders
+- [ ] Post-processing pipeline (bloom, tone mapping)
+
+### Systems
+- [ ] `InventoryStore` — add/remove/query items
+- [ ] `AudioEngine` — spatial audio, music
+- [ ] `UIManager` — HUD bars, menus, boss bar, combo display
+- [ ] `TransformationSystem` — Mech/Motorcycle/Jet mode switching
+- [ ] `JetpackSystem` — multi-jump + continuous thrust + fuel
+
+### Art Pipeline
+- [ ] Export Unity meshes → glTF/glb
+- [ ] Export animations → embedded in glTF
+- [ ] Convert textures (normal maps: OpenGL ↔ DirectX flip green)
+- [ ] Export audio clips (`.ogg` / `.mp3`)
+- [ ] Convert particle systems to Babylon `ParticleSystem`
+
+### Testing & Polish
+- [ ] Unit tests for all pure logic classes
+- [ ] Integration tests for player movement, combat, spawning
+- [ ] Performance profiling (target 60 FPS on mid-range GPU)
+- [ ] Mobile / touch input support
+- [ ] Deployment (static host: Vercel, Netlify, or CDN)
+
+---
+
+## Appendix A: Unity → Babylon.js API Quick Reference
+
+| Unity | Babylon.js |
+|---|---|
+| `Vector3` | `Vector3` (same API, different import) |
+| `Quaternion.Slerp` | `Quaternion.Slerp` |
+| `Quaternion.LookRotation(fwd, up)` | `Quaternion.FromLookDirectionLH(fwd, up)` |
+| `Quaternion.FromToRotation(a, b)` | `Quaternion.FromUnitVectorsToRef(a, b, result)` |
+| `Transform.forward` | `node.forward` (or `node.getDirection(Vector3.Forward())`) |
+| `Transform.up` | `node.up` |
+| `Mathf.Lerp` | `Scalar.Lerp` or manual `a + (b-a)*t` |
+| `Mathf.Clamp` | `Scalar.Clamp` |
+| `Mathf.InverseLerp` | `(value - min) / (max - min)` |
+| `Time.deltaTime` | `engine.getDeltaTime() / 1000` |
+| `Time.time` | `performance.now() / 1000` |
+| `Time.fixedDeltaTime` | Custom accumulator (see Section 3) |
+| `Debug.Log` | `console.log` |
+| `Debug.DrawLine` | `MeshBuilder.CreateLines` (debug) |
+| `Random.Range(a,b)` | `Math.random() * (b-a) + a` |
+| `Random.insideUnitSphere` | Custom (see StarDome `randomOnUnitSphere`) |
+| `SceneManager.LoadScene` | Dispose current scene, create new `Scene` |
+| `DontDestroyOnLoad` | Keep reference in `GameEngine` singleton |
+| `Invoke("method", delay)` | `setTimeout(() => method(), delay * 1000)` |
+| `StartCoroutine` | `async`/`await` with `onBeforeRenderObservable` |
+| `WaitForSeconds(n)` | `await new Promise(r => setTimeout(r, n * 1000))` |
+| `Physics.Raycast` | `scene.pickWithRay(ray)` |
+| `Physics.OverlapSphere` | Iterate + distance check, or Havok shape query |
+| `OnCollisionEnter` | `body.getCollisionObservable().add(...)` |
+| `CompareTag("X")` | `node.metadata?.tag === "X"` |
+
+## Appendix B: Recommended NPM Packages
+
+| Package | Purpose |
+|---|---|
+| `simplex-noise` | High-quality noise for terrain generation |
+| `recast-navigation` | NavMesh baking + pathfinding (replaces Unity NavMesh) |
+| `@babylonjs/havok` | Physics engine (replaces PhysX / Box2D) |
+| `@babylonjs/gui` | 2D UI overlay (replaces Unity UI / TMP) |
+| `@babylonjs/loaders` | glTF/glb asset loading |
+| `@babylonjs/materials` | Pre-built materials (water, cell, gradient) |
+| `@babylonjs/inspector` | Dev-time scene inspector |
+| `zustand` or `jotai` | Lightweight state management for UI |
+| `howler.js` | Alternative audio engine if Babylon Sound is insufficient |
+
+## Appendix C: Asset Export Workflow (Unity → Babylon)
+
+1. **Meshes**: Install `UnityGLTF` package → select objects → Export glTF
+2. **Animations**: Ensure all animation clips are in the same glTF export
+3. **Materials**: Will need manual recreation — PBR values map to `PBRMaterial`
+4. **Textures**: Export as PNG/KTX2. Flip green channel on normal maps if using DirectX convention.
+5. **Prefabs**: Export each prefab's mesh hierarchy as a separate `.glb`
+6. **Scenes**: Export scene layout as JSON config (position, rotation, scale per object)
+7. **Audio**: Export as `.ogg` (web-compatible, small size)
+8. **Terrain Data**: Export heightmaps as 16-bit PNG or raw float arrays
+
+---
+
+*This document covers the complete HeavyWater game engine architecture and provides 1:1 implementation blueprints for every system in Babylon.js. Each section contains the Unity source contract, the Babylon.js equivalent, and key API mappings.*

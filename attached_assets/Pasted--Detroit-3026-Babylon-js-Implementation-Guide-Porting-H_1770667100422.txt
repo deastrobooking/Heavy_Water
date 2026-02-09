@@ -1,0 +1,2360 @@
+# Detroit 3026: Babylon.js Implementation Guide
+
+> Porting HeavyWater's Unity C# game systems to a Babylon.js + TypeScript web environment.
+> Reference project: **Detroit Genesis — Detroit 3026: The First Attack**
+
+---
+
+## Table of Contents
+
+1. [Architecture Overview](#1-architecture-overview)
+2. [Project Structure](#2-project-structure)
+3. [Engine Setup — BabylonEngine.ts](#3-engine-setup--babylonenginets)
+4. [Player Controller — PlayerController.ts](#4-player-controller--playercontrollerts)
+5. [State Machine — StateMachine.ts](#5-state-machine--statemachinets)
+6. [Combat & Combo System — ComboSystem.ts](#6-combat--combo-system--combosystemts)
+7. [Weapons System — WeaponsSystem.ts](#7-weapons-system--weaponssystemts)
+8. [Projectile & Explosion — Projectile.ts](#8-projectile--explosion--projectilets)
+9. [Damage System — DamageSystem.ts](#9-damage-system--damagesystemts)
+10. [Enemy System — EnemySystem.ts](#10-enemy-system--enemysystemts)
+11. [Loot & Chest System — ChestSystem.ts](#11-loot--chest-system--chestsystemts)
+12. [City Generator — CityGenerator.ts](#12-city-generator--citygeneratorts)
+13. [Terrain & Water — TerrainSystem.ts](#13-terrain--water--terrainsystemts)
+14. [Inventory & Crafting — InventorySystem.ts](#14-inventory--crafting--inventorysystemts)
+15. [Building System — BuildingSystem.ts](#15-building-system--buildingsystemts)
+16. [UI Layer — GameUI.tsx](#16-ui-layer--gameuistsx)
+17. [Cell-Shaded Anime Graphics](#17-cell-shaded-anime-graphics)
+18. [Post-Processing Pipeline](#18-post-processing-pipeline)
+19. [Performance Considerations](#19-performance-considerations)
+20. [Migration Cheat Sheet](#20-migration-cheat-sheet)
+
+---
+
+## 1. Architecture Overview
+
+### Unity (Current) → Babylon.js (Target)
+
+| Unity Concept | Babylon.js Equivalent |
+|---|---|
+| `MonoBehaviour` | Custom class with `scene.onBeforeRenderObservable` |
+| `GameObject` + Components | `TransformNode` / `Mesh` + attached behaviors |
+| `[SerializeField]` properties | Constructor config objects / JSON configs |
+| `Update()` loop | `scene.registerBeforeRender()` or `scene.onBeforeRenderObservable` |
+| `CharacterController` | Custom physics or `PhysicsAggregate` with Havok/Cannon |
+| `NavMeshAgent` | Recast.js navigation plugin (`RecastJSPlugin`) |
+| `Animator` + `CrossFade` | `AnimationGroup.start()` with blending weights |
+| `Physics.OverlapBox` | `PhysicsEngine.raycast` + custom AABB checks |
+| `Rigidbody.AddForce` | `PhysicsBody.applyImpulse()` |
+| `Instantiate(prefab)` | `mesh.clone()` or `mesh.createInstance()` |
+| `ScriptableObject` | Plain TypeScript interfaces / JSON data files |
+| `Coroutine` / `Invoke` | `setTimeout`, `setInterval`, or `Observable`-based timers |
+| `Input.GetKey` | `scene.onKeyboardObservable` / `ActionManager` |
+| `EventManager` (static bus) | Custom `EventEmitter` or RxJS `Subject` |
+| `Destroy(obj, delay)` | `setTimeout(() => mesh.dispose(), delay)` |
+
+### Tech Stack
+
+```
+Frontend:  React 18 + TypeScript + Vite
+Engine:    Babylon.js 7.x (WebGL2 / WebGPU)
+Physics:   Havok Physics or Cannon.js
+Nav Mesh:  Recast.js plugin
+Audio:     Babylon.js Sound API
+Backend:   Express.js (leaderboards, saves)
+```
+
+---
+
+## 2. Project Structure
+
+```
+client/
+  src/
+    game/
+      core/
+        BabylonEngine.ts          ← Scene, camera, lights, render loop
+        StateMachine.ts           ← Generic state machine (from Starfall.Core)
+        EventBus.ts               ← Type-safe event system (from EventManager.cs)
+        DamageSystem.ts           ← IDamageable, DamageInfo, DamageResult
+        GameManager.ts            ← Singleton game state orchestrator
+      player/
+        PlayerController.ts       ← FPS movement, dodge, parry, jetpack
+        PlayerStats.ts            ← Health, stamina, XP, leveling
+        PlayerCombat.ts           ← Attack dispatch + combo bridge
+      combat/
+        ComboSystem.ts            ← Combo chains, input buffering, hitboxes
+        WeaponsSystem.ts          ← 6 weapon types with switching
+        Projectile.ts             ← Homing projectiles with physics
+        Explosion.ts              ← AoE damage, force, VFX
+      enemies/
+        EnemyBase.ts              ← Base class (from EnemyTemplate.cs)
+        EnemyStateMachine.ts      ← Patrol → Chase → Attack → Stunned → Dead
+        EnemyTypes.ts             ← Drone, Soldier, Heavy, Insectoid, Hybrid
+        HoverbotAI.ts             ← Flying ranged unit
+        MeleeEnemy.ts             ← Cone-attack melee unit
+        WaveSpawner.ts            ← Wave-based spawning with difficulty scaling
+      world/
+        CityGenerator.ts          ← Procedural Detroit 3026 cityscape
+        TerrainSystem.ts          ← Multi-algorithm procedural terrain
+        WaterSystem.ts            ← River + wave shader
+        VegetationSystem.ts       ← Grass, rocks, bushes instancing
+      loot/
+        ChestSystem.ts            ← Loot containers, interaction
+        LootTables.ts             ← Probability matrices (from LootTables.cs)
+        ItemDatabase.ts           ← Item definitions, rarities, types
+      inventory/
+        InventorySystem.ts        ← Slot-based inventory with stacking
+        CraftingSystem.ts         ← Recipes, crafting stations
+        BuildingSystem.ts         ← Grid-based placement with preview
+      shaders/
+        CellShader.ts             ← Anime toon shading material
+        NeonGlow.ts               ← Neon sign emissive shader
+        WaterShader.ts            ← Wave displacement + foam
+      ui/
+        GameUI.tsx                ← HUD (health, ammo, compass, minimap)
+        MainMenu.tsx              ← Start screen
+        InventoryUI.tsx           ← Inventory grid
+        Game.tsx                  ← Orchestrator component
+    App.tsx
+    main.tsx
+```
+
+---
+
+## 3. Engine Setup — BabylonEngine.ts
+
+### C# Source Reference: `GameManager.cs`, Scene setup
+
+The Unity project uses a singleton `GameManager` with `GameState` enum and references to all subsystems. In Babylon.js this becomes the engine bootstrap.
+
+```typescript
+// BabylonEngine.ts
+import {
+  Engine, Scene, FreeCamera, HemisphericLight, DirectionalLight,
+  Vector3, Color3, Color4, PointerEventTypes, KeyboardEventTypes,
+  GlowLayer, DefaultRenderingPipeline
+} from "@babylonjs/core";
+
+export class BabylonEngine {
+  engine: Engine;
+  scene: Scene;
+  camera: FreeCamera;
+
+  constructor(canvas: HTMLCanvasElement) {
+    // Engine with WebGPU fallback to WebGL2
+    this.engine = new Engine(canvas, true, {
+      preserveDrawingBuffer: true,
+      stencil: true,
+      antialias: true
+    });
+
+    this.scene = new Scene(this.engine);
+    this.scene.clearColor = new Color4(0.02, 0.02, 0.08, 1); // Dark sci-fi sky
+    this.scene.collisionsEnabled = true;
+    this.scene.gravity = new Vector3(0, -9.81, 0);
+
+    // FPS Camera (replaces Unity's CameraController + PlayerCamera)
+    this.camera = new FreeCamera("playerCam", new Vector3(0, 5, -10), this.scene);
+    this.camera.attachControl(canvas, true);
+    this.camera.applyGravity = true;
+    this.camera.checkCollisions = true;
+    this.camera.ellipsoid = new Vector3(0.5, 1, 0.5);
+    this.camera.minZ = 0.1;
+    this.camera.speed = 0.6;       // ← from moveSpeed = 6f
+    this.camera.angularSensibility = 2000;
+
+    // Pointer lock (replaces Unity's Cursor.lockState)
+    this.scene.onPointerObservable.add((pointerInfo) => {
+      if (pointerInfo.type === PointerEventTypes.POINTERDOWN) {
+        canvas.requestPointerLock();
+      }
+    });
+
+    this.setupLighting();
+    this.setupPostProcessing();
+    this.startRenderLoop();
+  }
+
+  private setupLighting(): void {
+    // Ambient (replaces Unity's RenderSettings.ambientLight)
+    const ambient = new HemisphericLight("ambient", new Vector3(0, 1, 0), this.scene);
+    ambient.intensity = 0.3;
+    ambient.diffuse = new Color3(0.6, 0.6, 0.8);
+
+    // Directional sun
+    const sun = new DirectionalLight("sun", new Vector3(-1, -2, -1), this.scene);
+    sun.intensity = 0.8;
+
+    // Neon glow layer (replaces Unity's bloom for neon signs)
+    const glowLayer = new GlowLayer("glow", this.scene);
+    glowLayer.intensity = 0.8;
+  }
+
+  private setupPostProcessing(): void {
+    // DefaultRenderingPipeline replaces Unity's URP post-process stack
+    const pipeline = new DefaultRenderingPipeline("pipeline", true, this.scene, [this.camera]);
+    pipeline.bloomEnabled = true;
+    pipeline.bloomThreshold = 0.7;
+    pipeline.bloomWeight = 0.3;
+    pipeline.chromaticAberrationEnabled = true;
+    pipeline.chromaticAberration.aberrationAmount = 30;
+    pipeline.fxaaEnabled = true;
+    pipeline.imageProcessing.toneMappingEnabled = true;
+  }
+
+  private startRenderLoop(): void {
+    this.engine.runRenderLoop(() => {
+      this.scene.render();
+    });
+    window.addEventListener("resize", () => this.engine.resize());
+  }
+
+  dispose(): void {
+    this.scene.dispose();
+    this.engine.dispose();
+  }
+}
+```
+
+**Key migration notes:**
+- Unity's `Time.deltaTime` → `scene.getEngine().getDeltaTime() / 1000` (Babylon returns ms)
+- Unity's `Update()` → `scene.registerBeforeRender(callback)`
+- Unity's `FixedUpdate()` → Use physics step callbacks if using Havok
+
+---
+
+## 4. Player Controller — PlayerController.ts
+
+### C# Source Reference: `PlayerController.cs` (590 lines)
+
+The Unity player uses `CharacterController.Move()` with manual gravity, dodge (i-frames), parry, lock-on targeting, jetpack, and solar-system gravity reorientation.
+
+```typescript
+// PlayerController.ts
+import { Scene, FreeCamera, Vector3, KeyboardEventTypes, Scalar } from "@babylonjs/core";
+
+interface PlayerConfig {
+  moveSpeed: number;      // Unity: 6f
+  sprintSpeed: number;    // Unity: 9f
+  jumpForce: number;      // Unity: 20f
+  gravity: number;        // Unity: -9.81f
+  dodgeSpeed: number;     // Unity: 15f
+  dodgeDuration: number;  // Unity: 0.3f
+  dodgeCooldown: number;  // Unity: 1f
+  parryWindow: number;    // Unity: 0.2f
+  parryCooldown: number;  // Unity: 1f
+  parryInvincibilityDuration: number; // Unity: 0.5f
+  jetpackForce: number;   // Unity: 10f
+  jetpackDuration: number; // Unity: 2f
+}
+
+const DEFAULT_CONFIG: PlayerConfig = {
+  moveSpeed: 6,
+  sprintSpeed: 9,
+  jumpForce: 20,
+  gravity: -9.81,
+  dodgeSpeed: 15,
+  dodgeDuration: 0.3,
+  dodgeCooldown: 1,
+  parryWindow: 0.2,
+  parryCooldown: 1,
+  parryInvincibilityDuration: 0.5,
+  jetpackForce: 10,
+  jetpackDuration: 2
+};
+
+export class PlayerController {
+  private scene: Scene;
+  private camera: FreeCamera;
+  private config: PlayerConfig;
+
+  // Movement state (mirrors Unity's private fields)
+  private velocity = Vector3.Zero();
+  private gravityVelocity = Vector3.Zero();
+  private externalVelocity = Vector3.Zero();
+  private isGrounded = false;
+  private isSprinting = false;
+
+  // Dodge state
+  private isDodging = false;
+  private dodgeTimer = 0;
+  private dodgeCooldownTimer = 0;
+  private dodgeDirection = Vector3.Zero();
+
+  // Parry state
+  private isParrying = false;
+  private parryTimer = 0;
+  private parryCooldownTimer = 0;
+
+  // Input map
+  private keys: Record<string, boolean> = {};
+
+  constructor(scene: Scene, camera: FreeCamera, config?: Partial<PlayerConfig>) {
+    this.scene = scene;
+    this.camera = camera;
+    this.config = { ...DEFAULT_CONFIG, ...config };
+
+    this.setupInput();
+    this.scene.registerBeforeRender(() => this.update());
+  }
+
+  /** Mirrors Unity Awake() — input event subscription */
+  private setupInput(): void {
+    this.scene.onKeyboardObservable.add((kbInfo) => {
+      const key = kbInfo.event.key.toLowerCase();
+      this.keys[key] = kbInfo.type === KeyboardEventTypes.KEYDOWN;
+
+      // Dodge on Shift press (mirrors inputManager.OnDodgePressed)
+      if (key === "shift" && kbInfo.type === KeyboardEventTypes.KEYDOWN) {
+        this.onDodge();
+      }
+    });
+  }
+
+  /** Mirrors Unity Update() — sequential system calls */
+  private update(): void {
+    const dt = this.scene.getEngine().getDeltaTime() / 1000;
+    this.handleGroundCheck();
+    this.handleMovement(dt);
+    this.handleDodge(dt);
+    this.handleParry(dt);
+    this.handleGravity(dt);
+    this.applyMovement(dt);
+  }
+
+  /**
+   * Mirrors HandleGroundCheck()
+   * Unity: characterController.isGrounded
+   * Babylon: Ray cast downward from player position
+   */
+  private handleGroundCheck(): void {
+    const ray = new BABYLON.Ray(this.camera.position, Vector3.Down(), 1.2);
+    const hit = this.scene.pickWithRay(ray);
+    this.isGrounded = hit?.hit ?? false;
+  }
+
+  /**
+   * Mirrors HandleMovement()
+   * Unity: Camera-relative WASD with sprint toggle
+   */
+  private handleMovement(dt: number): void {
+    if (this.isDodging) return;
+
+    const forward = this.camera.getDirection(Vector3.Forward());
+    const right = this.camera.getDirection(Vector3.Right());
+
+    // Flatten to horizontal (mirrors Unity's Vector3.Project removal)
+    forward.y = 0; forward.normalize();
+    right.y = 0; right.normalize();
+
+    let inputX = 0, inputZ = 0;
+    if (this.keys["w"]) inputZ += 1;
+    if (this.keys["s"]) inputZ -= 1;
+    if (this.keys["a"]) inputX -= 1;
+    if (this.keys["d"]) inputX += 1;
+
+    this.isSprinting = this.keys["shift"] ?? false;
+    const speed = this.isSprinting ? this.config.sprintSpeed : this.config.moveSpeed;
+
+    const direction = forward.scale(inputZ).add(right.scale(inputX));
+    if (direction.length() > 0.1) direction.normalize();
+
+    this.velocity = direction.scale(speed);
+  }
+
+  /**
+   * Mirrors HandleDodge() + OnDodge()
+   * Provides i-frames via PlayerStats.SetInvincible
+   */
+  private onDodge(): void {
+    if (this.dodgeCooldownTimer > 0) return;
+
+    this.isDodging = true;
+    this.dodgeTimer = this.config.dodgeDuration;
+    this.dodgeCooldownTimer = this.config.dodgeCooldown;
+
+    // Dodge in movement direction or forward
+    this.dodgeDirection = this.velocity.length() > 0.1
+      ? this.velocity.normalize()
+      : this.camera.getDirection(Vector3.Forward());
+
+    // i-frames: set invincible on PlayerStats
+    // playerStats.setInvincible(true);
+    // setTimeout(() => playerStats.setInvincible(false), this.config.dodgeDuration * 1000);
+  }
+
+  private handleDodge(dt: number): void {
+    if (this.isDodging) {
+      this.dodgeTimer -= dt;
+      if (this.dodgeTimer <= 0) {
+        this.isDodging = false;
+      }
+    }
+    if (this.dodgeCooldownTimer > 0) {
+      this.dodgeCooldownTimer -= dt;
+    }
+  }
+
+  /**
+   * Mirrors HandleParry() + OnParry()
+   * i-frames with parryWindow timing
+   */
+  private handleParry(dt: number): void {
+    if (this.isParrying) {
+      this.parryTimer -= dt;
+      if (this.parryTimer <= 0) this.isParrying = false;
+    }
+    if (this.parryCooldownTimer > 0) {
+      this.parryCooldownTimer -= dt;
+    }
+  }
+
+  /**
+   * Mirrors HandleGravity()
+   * Applies gravity when not grounded, jump impulse when grounded + space
+   */
+  private handleGravity(dt: number): void {
+    if (this.isGrounded) {
+      if (this.keys[" "]) {
+        this.gravityVelocity = new Vector3(0, this.config.jumpForce, 0);
+      } else {
+        this.gravityVelocity = new Vector3(0, -2, 0); // Stick to ground
+      }
+    } else {
+      this.gravityVelocity.y += this.config.gravity * dt;
+    }
+  }
+
+  /**
+   * Mirrors ApplyMovement()
+   * Unity: characterController.Move(totalVelocity * dt)
+   * Babylon: camera.position += totalVelocity * dt (with collision)
+   */
+  private applyMovement(dt: number): void {
+    const horizontalVel = this.isDodging
+      ? this.dodgeDirection.scale(this.config.dodgeSpeed)
+      : this.velocity.add(this.externalVelocity);
+
+    const totalVelocity = horizontalVel.add(this.gravityVelocity);
+    this.camera.position.addInPlace(totalVelocity.scale(dt));
+
+    // Damp external velocity (mirrors externalVelocityDamp)
+    if (this.externalVelocity.length() > 0.01) {
+      this.externalVelocity = Vector3.Lerp(this.externalVelocity, Vector3.Zero(), 5 * dt);
+    }
+  }
+
+  /**
+   * Mirrors ApplyKnockback(Vector3 force)
+   * Called from DamageSystem when player takes a hit
+   */
+  applyKnockback(force: Vector3): void {
+    this.externalVelocity.addInPlace(force);
+    if (this.isDodging) {
+      this.isDodging = false;
+      this.dodgeTimer = 0;
+    }
+  }
+}
+```
+
+**Migration notes for `PlayerController.cs`:**
+- Unity's `CharacterController.Move()` handles collision internally; in Babylon.js use `camera.checkCollisions = true` or implement a custom collision sweep
+- Lock-on targeting (`FindNearestEnemy`) maps to iterating `scene.getMeshesByTags("enemy")` and sorting by distance
+- Camera reparenting for vehicles (`AttachCameraTo`/`ExitFromSpaceship`) maps to `camera.parent = targetNode`
+
+---
+
+## 5. State Machine — StateMachine.ts
+
+### C# Source Reference: `Starfall.Core.StateMachine` — `IState.cs`, `BaseState.cs`, `StateMachine.cs`, `StateContainer.cs`
+
+The Unity project features a sophisticated generic state machine with history tracking (up to 10 states), `GoBack()` support, and typed state containers.
+
+```typescript
+// StateMachine.ts
+export interface IState {
+  onBecameActive(): void;
+  onBecameInactive(): void;
+  update(dt: number): void;
+  lateUpdate?(dt: number): void;
+  parameterForEnteringState?: any;
+}
+
+export class StateMachine {
+  private currentState: IState | null = null;
+  private stateHistory: IState[] = [];
+  private static MAX_HISTORY = 10; // Mirrors Unity's MaxHistorySize
+
+  /** Mirrors SwitchState() — deactivate old, push history, activate new */
+  switchState(newState: IState): void {
+    if (this.currentState) {
+      this.currentState.onBecameInactive();
+      this.stateHistory.push(this.currentState);
+      if (this.stateHistory.length > StateMachine.MAX_HISTORY) {
+        this.stateHistory.shift();
+      }
+    }
+    this.currentState = newState;
+    this.currentState.onBecameActive();
+  }
+
+  /** Mirrors SwitchStateWithParameter() */
+  switchStateWithParameter(newState: IState, param: any): void {
+    newState.parameterForEnteringState = param;
+    this.switchState(newState);
+  }
+
+  /** Mirrors GoBack() — pop history, restore previous state */
+  goBack(): boolean {
+    if (this.stateHistory.length === 0) return false;
+    const previousState = this.stateHistory.pop()!;
+    if (this.currentState) this.currentState.onBecameInactive();
+    this.currentState = previousState;
+    this.currentState.onBecameActive();
+    return true;
+  }
+
+  update(dt: number): void { this.currentState?.update(dt); }
+  lateUpdate(dt: number): void { this.currentState?.lateUpdate?.(dt); }
+  getCurrentState(): IState | null { return this.currentState; }
+}
+
+/**
+ * Typed state container — mirrors StateContainer<T>
+ * Lookup by constructor type
+ */
+export class StateContainer<T extends IState> {
+  private states: Map<Function, T> = new Map();
+
+  addState(state: T): void {
+    this.states.set(state.constructor, state);
+  }
+
+  getState<S extends T>(ctor: new (...args: any[]) => S): S | undefined {
+    return this.states.get(ctor) as S | undefined;
+  }
+}
+```
+
+### Player State Machine (from `PlayerStateMachine.cs`)
+
+```typescript
+// PlayerStateMachine.ts — simplified enum-based version
+export enum PlayerState { Idle, Moving, Attacking, Dodging, Stunned, Dead }
+
+export class PlayerStateMachine {
+  private currentState: PlayerState = PlayerState.Idle;
+
+  changeState(newState: PlayerState): void {
+    this.exitState(this.currentState);
+    this.currentState = newState;
+    this.enterState(newState);
+  }
+
+  // Mirrors CanAttack() gate logic
+  canAttack(): boolean {
+    return this.currentState !== PlayerState.Attacking
+        && this.currentState !== PlayerState.Dodging
+        && this.currentState !== PlayerState.Stunned;
+  }
+
+  // Mirrors CanMove() gate logic
+  canMove(): boolean {
+    return this.currentState !== PlayerState.Attacking
+        && this.currentState !== PlayerState.Stunned;
+  }
+
+  private enterState(state: PlayerState): void {
+    // Trigger animation group transitions here
+    // animationGroup.start() with blending
+  }
+
+  private exitState(state: PlayerState): void {
+    // Cleanup state-specific logic
+  }
+
+  getCurrentState(): PlayerState { return this.currentState; }
+}
+```
+
+---
+
+## 6. Combat & Combo System — ComboSystem.ts
+
+### C# Source Reference: `ComboSystem.cs` (230 lines)
+
+The Unity combo system features:
+- **Combo chains** with indexed attack progression (`ComboChain.currentAttackIndex`)
+- **Input buffering** during active attacks (`inputBufferTime = 0.2f`)
+- **Timed combo windows** — must press attack within `comboWindow` seconds to continue
+- **Auto-reset** after `resetTime = 1.5f` of inactivity
+- **Physics hitboxes** via `Physics.OverlapBox` with knockback
+
+```typescript
+// ComboSystem.ts
+
+/** Mirrors AttackData class */
+interface AttackData {
+  animationName: string;
+  damage: number;          // Default: 15
+  knockback: number;       // Default: 3
+  attackDuration: number;  // Default: 0.6s
+  comboWindow: number;     // Default: 0.3s (0 = last hit)
+  hitboxSize: { x: number; y: number; z: number };  // Default: 1×1×2
+  hitboxOffset: { x: number; y: number; z: number }; // Default: 0×1×1
+}
+
+/** Mirrors ComboChain class */
+interface ComboChain {
+  comboName: string;
+  attacks: AttackData[];
+  resetTime: number;      // Default: 1.5s
+  currentAttackIndex: number;
+  lastAttackTime: number;
+  canCombo: boolean;
+}
+
+export class ComboSystem {
+  private lightAttackCombo: ComboChain;
+  private heavyAttackCombo: ComboChain;
+  private currentCombo: ComboChain | null = null;
+  private isAttacking = false;
+
+  // Input buffering (mirrors Unity's inputBufferTime)
+  private inputBufferTime = 0.2;  // seconds
+  private inputBufferTimer = 0;
+  private inputBuffered = false;
+
+  constructor() {
+    // Initialize default combos (mirrors InitializeCombo())
+    this.lightAttackCombo = this.createDefaultCombo("Light Combo", [
+      { animationName: "Attack1", damage: 15, knockback: 3,
+        attackDuration: 0.6, comboWindow: 0.3,
+        hitboxSize: { x: 1, y: 1, z: 2 }, hitboxOffset: { x: 0, y: 1, z: 1 } },
+      { animationName: "Attack2", damage: 20, knockback: 4,
+        attackDuration: 0.7, comboWindow: 0.3,
+        hitboxSize: { x: 1, y: 1, z: 2 }, hitboxOffset: { x: 0, y: 1, z: 1 } },
+      { animationName: "Attack3", damage: 30, knockback: 6,
+        attackDuration: 0.8, comboWindow: 0,    // Last attack — no continuation
+        hitboxSize: { x: 1.5, y: 1, z: 2.5 }, hitboxOffset: { x: 0, y: 1, z: 1.2 } },
+    ]);
+
+    this.heavyAttackCombo = this.createDefaultCombo("Heavy Combo", [
+      { animationName: "HeavyAttack1", damage: 25, knockback: 6,
+        attackDuration: 0.8, comboWindow: 0.4,
+        hitboxSize: { x: 1.5, y: 1.5, z: 2.5 }, hitboxOffset: { x: 0, y: 1, z: 1.5 } },
+      { animationName: "HeavyAttack2", damage: 40, knockback: 8,
+        attackDuration: 1.0, comboWindow: 0,
+        hitboxSize: { x: 2, y: 1.5, z: 3 }, hitboxOffset: { x: 0, y: 1, z: 1.5 } },
+    ]);
+  }
+
+  /**
+   * Mirrors OnLightAttack()
+   * Three-path logic: start new combo, continue existing, or buffer input
+   */
+  onLightAttack(canAttack: boolean): void {
+    if (canAttack) {
+      this.startAttack(this.lightAttackCombo);
+    } else if (this.currentCombo?.canCombo) {
+      this.continueCombo();
+    } else {
+      this.bufferInput();
+    }
+  }
+
+  /**
+   * Mirrors ExecuteAttack(AttackData)
+   * Schedules hitbox activation, combo window, and attack end
+   */
+  private executeAttack(attack: AttackData): void {
+    this.isAttacking = true;
+
+    // Hitbox activation after 200ms (mirrors WaitForSeconds(0.2f))
+    setTimeout(() => this.activateHitbox(attack), 200);
+
+    // Enable combo window (mirrors Invoke(EnableComboWindow))
+    setTimeout(() => {
+      if (this.currentCombo) this.currentCombo.canCombo = true;
+    }, attack.comboWindow * 1000);
+
+    // End attack after duration (mirrors Invoke(EndAttack))
+    setTimeout(() => this.endAttack(), attack.attackDuration * 1000);
+  }
+
+  /**
+   * Mirrors ActivateHitbox coroutine
+   * Unity: Physics.OverlapBox → Babylon: custom AABB intersection test
+   */
+  private activateHitbox(attack: AttackData): void {
+    // In Babylon.js, get all enemy meshes and check AABB overlap
+    // const enemies = scene.getMeshesByTags("enemy");
+    // For each enemy, check if within hitbox bounds relative to player
+    // Apply damage and knockback via DamageSystem
+  }
+
+  update(dt: number): void {
+    // Mirrors UpdateComboTimers() — auto-reset after resetTime
+    if (this.currentCombo) {
+      const elapsed = performance.now() / 1000 - this.currentCombo.lastAttackTime;
+      if (elapsed > this.currentCombo.resetTime) {
+        this.resetCombo();
+      }
+    }
+
+    // Mirrors UpdateInputBuffer()
+    if (this.inputBufferTimer > 0) {
+      this.inputBufferTimer -= dt;
+      if (this.inputBufferTimer <= 0) this.inputBuffered = false;
+    }
+  }
+
+  // ... startAttack, continueCombo, endAttack, resetCombo, bufferInput helpers
+}
+```
+
+---
+
+## 7. Weapons System — WeaponsSystem.ts
+
+### C# Source Reference: `WeaponSystem.cs` (124 lines)
+
+The Unity weapon system manages a list of weapons with switching cooldowns and combo data per weapon. For Detroit 3026, we expand this to 6 ranged weapon types.
+
+```typescript
+// WeaponsSystem.ts
+
+export enum WeaponType {
+  PlasmaPistol,    // Semi-auto sidearm
+  PulseRifle,      // Automatic assault weapon
+  ScatterBlaster,  // 8-pellet shotgun
+  NovaLauncher,    // Explosive rockets
+  PhotonBeam,      // Rapid-fire laser
+  FusionGrenades   // Arc-thrown explosives
+}
+
+interface WeaponDef {
+  name: string;
+  type: WeaponType;
+  damage: number;
+  fireRate: number;         // shots per second
+  ammoCapacity: number;
+  reloadTime: number;       // seconds
+  projectileSpeed: number;
+  isAutomatic: boolean;
+  spreadAngle: number;      // degrees (0 = perfect accuracy)
+  pelletCount: number;      // > 1 for shotgun
+  explosionRadius: number;  // 0 = no explosion
+  damageMultiplier: number; // Mirrors Weapon.damageMultiplier
+  speedMultiplier: number;  // Mirrors Weapon.speedMultiplier
+}
+
+/** All 6 weapons with tuned stats */
+const WEAPON_DEFS: WeaponDef[] = [
+  {
+    name: "Plasma Pistol", type: WeaponType.PlasmaPistol,
+    damage: 15, fireRate: 4, ammoCapacity: 20, reloadTime: 1.2,
+    projectileSpeed: 80, isAutomatic: false, spreadAngle: 1,
+    pelletCount: 1, explosionRadius: 0, damageMultiplier: 1, speedMultiplier: 1
+  },
+  {
+    name: "Pulse Rifle", type: WeaponType.PulseRifle,
+    damage: 10, fireRate: 10, ammoCapacity: 40, reloadTime: 1.8,
+    projectileSpeed: 100, isAutomatic: true, spreadAngle: 2,
+    pelletCount: 1, explosionRadius: 0, damageMultiplier: 1, speedMultiplier: 1.2
+  },
+  {
+    name: "Scatter Blaster", type: WeaponType.ScatterBlaster,
+    damage: 8, fireRate: 1.5, ammoCapacity: 8, reloadTime: 2.5,
+    projectileSpeed: 60, isAutomatic: false, spreadAngle: 15,
+    pelletCount: 8, explosionRadius: 0, damageMultiplier: 1.2, speedMultiplier: 0.8
+  },
+  {
+    name: "Nova Launcher", type: WeaponType.NovaLauncher,
+    damage: 80, fireRate: 0.8, ammoCapacity: 4, reloadTime: 3.0,
+    projectileSpeed: 40, isAutomatic: false, spreadAngle: 0,
+    pelletCount: 1, explosionRadius: 5, damageMultiplier: 2, speedMultiplier: 0.6
+  },
+  {
+    name: "Photon Beam", type: WeaponType.PhotonBeam,
+    damage: 5, fireRate: 20, ammoCapacity: 100, reloadTime: 2.0,
+    projectileSpeed: 200, isAutomatic: true, spreadAngle: 0.5,
+    pelletCount: 1, explosionRadius: 0, damageMultiplier: 0.8, speedMultiplier: 1.5
+  },
+  {
+    name: "Fusion Grenades", type: WeaponType.FusionGrenades,
+    damage: 60, fireRate: 0.5, ammoCapacity: 6, reloadTime: 2.0,
+    projectileSpeed: 25, isAutomatic: false, spreadAngle: 0,
+    pelletCount: 1, explosionRadius: 6, damageMultiplier: 1.5, speedMultiplier: 0.7
+  }
+];
+
+export class WeaponsSystem {
+  private weapons: WeaponDef[] = WEAPON_DEFS;
+  private currentWeaponIndex = 0;
+  private switchCooldown = 0.5;  // Mirrors Unity: switchCooldown = 0.5f
+  private switchTimer = 0;
+  private currentAmmo: number[] = [];
+  private lastFireTime = 0;
+
+  constructor() {
+    this.currentAmmo = this.weapons.map(w => w.ammoCapacity);
+  }
+
+  /**
+   * Mirrors SwitchWeapon(int index)
+   * Keys 1-6 map to weapon slots
+   */
+  switchWeapon(index: number): void {
+    if (index < 0 || index >= this.weapons.length) return;
+    if (this.switchTimer > 0) return;
+
+    this.currentWeaponIndex = index;
+    this.switchTimer = this.switchCooldown;
+    // Play switch animation
+  }
+
+  /** Mirrors SwitchToNextWeapon() — Q key cycling */
+  switchToNext(): void {
+    this.switchWeapon((this.currentWeaponIndex + 1) % this.weapons.length);
+  }
+
+  /**
+   * Fire the current weapon
+   * Returns projectile spawn data for Projectile system
+   */
+  fire(origin: Vector3, direction: Vector3): ProjectileSpawnData[] | null {
+    const weapon = this.weapons[this.currentWeaponIndex];
+    const now = performance.now() / 1000;
+
+    if (now - this.lastFireTime < 1 / weapon.fireRate) return null;
+    if (this.currentAmmo[this.currentWeaponIndex] <= 0) return null;
+
+    this.currentAmmo[this.currentWeaponIndex]--;
+    this.lastFireTime = now;
+
+    // Generate projectile(s) — pelletCount > 1 for scatter
+    const projectiles: ProjectileSpawnData[] = [];
+    for (let i = 0; i < weapon.pelletCount; i++) {
+      const spread = this.applySpread(direction, weapon.spreadAngle);
+      projectiles.push({
+        origin: origin.clone(),
+        direction: spread,
+        speed: weapon.projectileSpeed,
+        damage: weapon.damage * weapon.damageMultiplier,
+        explosionRadius: weapon.explosionRadius,
+        lifetime: 5
+      });
+    }
+    return projectiles;
+  }
+
+  /** Mirrors GetDamageMultiplier() */
+  getDamageMultiplier(): number {
+    return this.weapons[this.currentWeaponIndex]?.damageMultiplier ?? 1;
+  }
+
+  update(dt: number): void {
+    if (this.switchTimer > 0) this.switchTimer -= dt;
+  }
+}
+```
+
+---
+
+## 8. Projectile & Explosion — Projectile.ts
+
+### C# Source Reference: `Starfall.Weapons.Projectile` (homing, speed/acceleration) + `Starfall.Weapons.Explosion` (AoE + physics force)
+
+```typescript
+// Projectile.ts
+import { Scene, MeshBuilder, Mesh, Vector3, Ray, StandardMaterial, Color3 } from "@babylonjs/core";
+
+interface ProjectileConfig {
+  speed: number;         // Unity: _speed = 20
+  acceleration: number;  // Unity: _acceleration = 0
+  maxSpeed: number;      // Unity: _maxSpeed = 100
+  rotationSpeed: number; // Unity: _rotationSpeed = 0 (> 0 = homing)
+  directDamage: number;  // Unity: _directDamage = 50
+  explosionDamage: number; // Unity: _explosionDamage = 100
+  explosionRadius: number; // Unity: _explosionRadius = 5
+  lifetime: number;      // Unity default: 5s
+}
+
+export class ProjectileManager {
+  private projectiles: ActiveProjectile[] = [];
+  private scene: Scene;
+
+  constructor(scene: Scene) {
+    this.scene = scene;
+    scene.registerBeforeRender(() => this.update());
+  }
+
+  /**
+   * Spawn a new projectile
+   * Mirrors Projectile.Initialize(shooter, target)
+   */
+  spawn(origin: Vector3, direction: Vector3, config: ProjectileConfig, target?: Mesh): void {
+    const mesh = MeshBuilder.CreateSphere("projectile", { diameter: 0.2 }, this.scene);
+    mesh.position = origin.clone();
+    const mat = new StandardMaterial("projMat", this.scene);
+    mat.emissiveColor = new Color3(0, 1, 1); // Cyan glow
+    mesh.material = mat;
+
+    this.projectiles.push({
+      mesh, direction: direction.normalize(), config,
+      target, currentSpeed: config.speed,
+      spawnTime: performance.now() / 1000
+    });
+  }
+
+  private update(): void {
+    const dt = this.scene.getEngine().getDeltaTime() / 1000;
+    const now = performance.now() / 1000;
+
+    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+      const p = this.projectiles[i];
+
+      // Lifetime check (mirrors Destroy(gameObject, lifetime))
+      if (now - p.spawnTime > p.config.lifetime) {
+        this.destroyProjectile(i);
+        continue;
+      }
+
+      // Homing (mirrors rotationSpeed > 0 turning toward target)
+      if (p.target && p.config.rotationSpeed > 0) {
+        const toTarget = p.target.position.subtract(p.mesh.position).normalize();
+        p.direction = Vector3.Lerp(p.direction, toTarget, p.config.rotationSpeed * dt);
+        p.direction.normalize();
+      }
+
+      // Acceleration (mirrors _acceleration, _maxSpeed)
+      p.currentSpeed = Math.min(
+        p.currentSpeed + p.config.acceleration * dt,
+        p.config.maxSpeed
+      );
+
+      // Move
+      p.mesh.position.addInPlace(p.direction.scale(p.currentSpeed * dt));
+
+      // Collision via ray (mirrors OnTriggerEnter)
+      const ray = new Ray(p.mesh.position, p.direction, p.currentSpeed * dt);
+      const hit = this.scene.pickWithRay(ray);
+      if (hit?.hit && hit.pickedMesh) {
+        this.onHit(p, hit.pickedMesh, hit.pickedPoint!);
+        this.destroyProjectile(i);
+      }
+    }
+  }
+
+  /**
+   * Mirrors OnTriggerEnter + Explode()
+   * Applies direct damage + optional AoE
+   */
+  private onHit(p: ActiveProjectile, hitMesh: any, hitPoint: Vector3): void {
+    // Direct damage to hit target
+    // damageSystem.applyDamage(hitMesh, p.config.directDamage)
+
+    // AoE explosion (mirrors Explosion.ApplyDamage + Damageable.DamageInArea)
+    if (p.config.explosionRadius > 0) {
+      this.explode(hitPoint, p.config.explosionDamage, p.config.explosionRadius);
+    }
+  }
+
+  /**
+   * Mirrors Explosion class
+   * AoE damage with distance falloff + physics force
+   */
+  private explode(center: Vector3, damage: number, radius: number): void {
+    // Visual: particle burst + light flash
+    // Damage: iterate all enemies within radius
+    //   const falloff = 1 - (distance / radius);  // linear falloff
+    //   const finalDamage = damage * Math.max(0, falloff);
+    //   Apply to IDamageable
+    // Force: push rigidbodies (mirrors AddExplosionForce)
+  }
+
+  private destroyProjectile(index: number): void {
+    this.projectiles[index].mesh.dispose();
+    this.projectiles.splice(index, 1);
+  }
+}
+```
+
+---
+
+## 9. Damage System — DamageSystem.ts
+
+### C# Source Reference: `Damageable.cs`, `DamageInfo`, `DamageResult`, `DamageType`, `DamageResistance`, `DamageableExtensions.cs`, `VehicleDamageSystem.cs`
+
+The Unity project has a rich damage framework in the `Starfall.Damage` namespace with per-type resistance, global events, AoE falloff curves, and vehicle-specific deformation.
+
+```typescript
+// DamageSystem.ts
+
+/** Mirrors DamageType enum */
+export enum DamageType {
+  Bullet = "Bullet",
+  Explosion = "Explosion",
+  Melee = "Melee",
+  Fire = "Fire",
+  Collision = "Collision",
+  Fall = "Fall",
+  Drowning = "Drowning",
+  Other = "Other"
+}
+
+/** Mirrors DamageInfo class */
+export interface DamageInfo {
+  amount: number;
+  hitPoint?: Vector3;
+  hitDirection?: Vector3;
+  hitNormal?: Vector3;
+  attacker?: any;          // Entity reference
+  damageType: DamageType;
+}
+
+/** Mirrors DamageResult class */
+export interface DamageResult {
+  damageAmount: number;
+  wasKilled: boolean;
+}
+
+/** Mirrors DamageResistance — per-type percentage reduction */
+export interface DamageResistance {
+  damageType: DamageType;
+  resistancePercent: number; // 0-1
+}
+
+/** Mirrors IDamageable interface */
+export interface IDamageable {
+  health: number;
+  maxHealth: number;
+  isAlive: boolean;
+  isInvulnerable: boolean;
+  resistances: DamageResistance[];
+  takeDamage(info: DamageInfo): DamageResult;
+  heal(amount: number): void;
+  onDamaged?: (info: DamageInfo, result: DamageResult) => void;
+  onDeath?: () => void;
+}
+
+/** Global event bus for damage (mirrors Damageable.OnAnyDamaged, OnAnyDeath) */
+export class DamageEvents {
+  private static listeners = {
+    damaged: [] as Array<(target: IDamageable, info: DamageInfo, result: DamageResult) => void>,
+    death: [] as Array<(target: IDamageable) => void>
+  };
+
+  static onAnyDamaged(fn: typeof DamageEvents.listeners.damaged[0]): void {
+    this.listeners.damaged.push(fn);
+  }
+
+  static onAnyDeath(fn: typeof DamageEvents.listeners.death[0]): void {
+    this.listeners.death.push(fn);
+  }
+
+  static emitDamaged(target: IDamageable, info: DamageInfo, result: DamageResult): void {
+    this.listeners.damaged.forEach(fn => fn(target, info, result));
+  }
+
+  static emitDeath(target: IDamageable): void {
+    this.listeners.death.forEach(fn => fn(target));
+  }
+}
+
+/**
+ * Mirrors Damageable.CalculateDamage() with resistance modifiers
+ * and Damageable.TakeDamage() flow
+ */
+export function applyDamage(target: IDamageable, info: DamageInfo): DamageResult {
+  if (!target.isAlive || target.isInvulnerable) {
+    return { damageAmount: 0, wasKilled: false };
+  }
+
+  // Apply resistance (mirrors DamageResistance lookup)
+  let finalDamage = info.amount;
+  const resistance = target.resistances.find(r => r.damageType === info.damageType);
+  if (resistance) {
+    finalDamage *= (1 - resistance.resistancePercent);
+  }
+
+  finalDamage = Math.max(1, finalDamage);
+  target.health = Math.max(0, target.health - finalDamage);
+
+  const result: DamageResult = {
+    damageAmount: finalDamage,
+    wasKilled: target.health <= 0
+  };
+
+  DamageEvents.emitDamaged(target, info, result);
+  target.onDamaged?.(info, result);
+
+  if (result.wasKilled) {
+    DamageEvents.emitDeath(target);
+    target.onDeath?.();
+  }
+
+  return result;
+}
+
+/**
+ * Mirrors Damageable.DamageInArea() — static AoE with falloff
+ * Used by Explosion class and grenade impacts
+ */
+export function damageInArea(
+  center: Vector3,
+  radius: number,
+  baseDamage: number,
+  damageType: DamageType,
+  attacker: any,
+  targets: IDamageable[]
+): void {
+  for (const target of targets) {
+    // const distance = Vector3.Distance(targetPos, center);
+    // const falloff = 1 - (distance / radius);
+    // if (falloff > 0) applyDamage(target, adjusted info);
+  }
+}
+```
+
+---
+
+## 10. Enemy System — EnemySystem.ts
+
+### C# Source Reference: `EnemyStateMachine.cs` (240 lines), `EnemyStats.cs` (133 lines), `EnemyTemplate.cs`, `HoverbotAI.cs`, `MeleeEnemy.cs`
+
+### Enemy Types for Detroit 3026
+
+| Type | C# Base | HP | Damage | Speed | Behavior |
+|------|---------|-----|--------|-------|----------|
+| Drone | `HoverbotAI` | 50 | 8 | 8 | Flying, ranged projectiles |
+| Soldier | `EnemyTemplate` + `MeleeEnemy` | 100 | 15 | 4 | Humanoid, melee + ranged |
+| Heavy | `EnemyTemplate` | 300 | 25 | 2 | Armored tank, slow |
+| Insectoid | `EnemyTemplate` | 80 | 20 | 6 | Fast, melee, cone attack |
+| Hybrid | `BossAI` | 1000 | 40 | 3 | Multi-phase boss |
+
+```typescript
+// EnemySystem.ts
+
+/** Mirrors EnemyStats.cs fields */
+interface EnemyConfig {
+  maxHealth: number;       // Unity default: 100
+  attackDamage: number;    // Unity default: 15
+  defense: number;         // Unity default: 5
+  movementSpeed: number;   // Unity default: 3
+  attackCooldown: number;  // Unity default: 1.5
+  knockbackForce: number;  // Unity default: 500
+  experienceValue: number; // Unity default: 50
+  detectionRange: number;  // Unity default: 10 (StateMachine) / 15 (Template)
+  chaseRange: number;      // Unity default: 15 (StateMachine) / 20 (Template)
+  attackRange: number;     // Unity default: 2
+  patrolSpeed: number;     // Unity default: 2
+  chaseSpeed: number;      // Unity default: 4
+}
+
+/** Mirrors EnemyState enum */
+enum EnemyState { Idle, Patrol, Chase, Attack, Stunned, Dead }
+
+export class EnemyUnit implements IDamageable {
+  health: number;
+  maxHealth: number;
+  isAlive = true;
+  isInvulnerable = false;
+  resistances: DamageResistance[] = [];
+
+  private state: EnemyState = EnemyState.Patrol;
+  private config: EnemyConfig;
+  private mesh: Mesh;
+  private attackTimer = 0;
+  private stunTimer = 0;
+
+  constructor(mesh: Mesh, config: EnemyConfig) {
+    this.mesh = mesh;
+    this.config = config;
+    this.health = config.maxHealth;
+    this.maxHealth = config.maxHealth;
+  }
+
+  /**
+   * Mirrors EnemyStateMachine.Update() — state dispatch
+   */
+  update(dt: number, playerPosition: Vector3): void {
+    if (!this.isAlive) return;
+
+    switch (this.state) {
+      case EnemyState.Patrol: this.updatePatrol(dt, playerPosition); break;
+      case EnemyState.Chase:  this.updateChase(dt, playerPosition); break;
+      case EnemyState.Attack: this.updateAttack(dt, playerPosition); break;
+      case EnemyState.Stunned: this.updateStunned(dt); break;
+    }
+  }
+
+  /**
+   * Mirrors CheckForPlayer() — line-of-sight + range detection
+   * Unity: Physics.Raycast for LOS check
+   * Babylon: scene.pickWithRay for LOS check
+   */
+  private updatePatrol(dt: number, playerPos: Vector3): void {
+    const dist = Vector3.Distance(this.mesh.position, playerPos);
+    if (dist <= this.config.detectionRange) {
+      // Raycast LOS check before transitioning to Chase
+      this.changeState(EnemyState.Chase);
+    }
+    // Move along patrol points
+  }
+
+  /**
+   * Mirrors UpdateChase()
+   * Move toward player, transition to Attack when in range
+   */
+  private updateChase(dt: number, playerPos: Vector3): void {
+    const direction = playerPos.subtract(this.mesh.position).normalize();
+    direction.y = 0;
+    this.mesh.position.addInPlace(direction.scale(this.config.chaseSpeed * dt));
+
+    // Face player (mirrors Quaternion.LookRotation)
+    this.mesh.lookAt(playerPos);
+
+    const dist = Vector3.Distance(this.mesh.position, playerPos);
+    if (dist <= this.config.attackRange) {
+      this.changeState(EnemyState.Attack);
+    }
+    if (dist > this.config.detectionRange * 1.5) {
+      this.changeState(EnemyState.Patrol);
+    }
+  }
+
+  /**
+   * Mirrors UpdateAttack() + PerformAttack()
+   * Cooldown-gated damage application
+   */
+  private updateAttack(dt: number, playerPos: Vector3): void {
+    this.attackTimer -= dt;
+    if (this.attackTimer <= 0) {
+      // Apply damage if player still in range * 1.2 (mirrors attackRange * 1.2f leniency)
+      const dist = Vector3.Distance(this.mesh.position, playerPos);
+      if (dist <= this.config.attackRange * 1.2) {
+        // Apply damage to player via DamageSystem
+      }
+      this.attackTimer = this.config.attackCooldown;
+    }
+
+    // Return to Chase if player leaves range
+    const dist = Vector3.Distance(this.mesh.position, playerPos);
+    if (dist > this.config.attackRange) {
+      this.changeState(EnemyState.Chase);
+    }
+  }
+
+  /**
+   * Mirrors UpdateStunned() — 2-second stun then resume Chase
+   * Unity: stateTimer = 2f
+   */
+  private updateStunned(dt: number): void {
+    this.stunTimer -= dt;
+    if (this.stunTimer <= 0) {
+      this.changeState(EnemyState.Chase);
+    }
+  }
+
+  /**
+   * Mirrors EnemyStats.TakeDamage()
+   * Applies defense reduction: finalDamage = max(1, damage - defense)
+   */
+  takeDamage(info: DamageInfo): DamageResult {
+    const finalDamage = Math.max(1, info.amount - this.config.defense);
+    this.health -= finalDamage;
+
+    if (this.health <= 0) {
+      this.die();
+      return { damageAmount: finalDamage, wasKilled: true };
+    }
+
+    // Stun on damage (mirrors OnDamaged → ChangeState(Stunned))
+    this.changeState(EnemyState.Stunned);
+    this.stunTimer = 2;
+
+    return { damageAmount: finalDamage, wasKilled: false };
+  }
+
+  /**
+   * Mirrors Die()
+   * Drop loot, grant XP, dispose mesh after delay
+   */
+  private die(): void {
+    this.isAlive = false;
+    this.changeState(EnemyState.Dead);
+    // Drop loot items
+    // Grant experienceValue XP to player
+    setTimeout(() => this.mesh.dispose(), 3000); // Mirrors Destroy(gameObject, 3f)
+  }
+
+  private changeState(newState: EnemyState): void {
+    this.state = newState;
+    if (newState === EnemyState.Attack) this.attackTimer = 0.5; // Initial delay
+    if (newState === EnemyState.Stunned) this.stunTimer = 2;
+  }
+
+  heal(amount: number): void { this.health = Math.min(this.maxHealth, this.health + amount); }
+}
+
+/**
+ * Mirrors MeleeEnemy.ApplyAttackDamage()
+ * Cone-based attack (120° arc, 2.5m range)
+ */
+function meleeConeDamage(
+  attackerPos: Vector3, attackerForward: Vector3,
+  targetPos: Vector3, damage: number, coneAngle: number = 60
+): boolean {
+  const toTarget = targetPos.subtract(attackerPos).normalize();
+  const angle = Math.acos(Vector3.Dot(attackerForward, toTarget)) * (180 / Math.PI);
+  return angle <= coneAngle;
+}
+```
+
+### Hoverbot (Drone) Variant
+
+```typescript
+/**
+ * Mirrors HoverbotAI.cs
+ * Flying unit with hoverHeight offset and ranged projectile attacks
+ */
+class HoverbotEnemy extends EnemyUnit {
+  private hoverHeight = 2;         // Mirrors hoverHeight = 2f
+  private patrolRadius = 10;       // Mirrors patrolRadius = 10f
+  private projectileSpeed = 10;    // Mirrors projectileSpeed = 10f
+
+  updatePatrol(dt: number, playerPos: Vector3): void {
+    // Maintain hover height (mirrors navAgent.baseOffset = hoverHeight)
+    this.mesh.position.y = this.hoverHeight;
+
+    // Random patrol within radius (mirrors Random.insideUnitSphere * patrolRadius)
+    // ...
+  }
+
+  /** Mirrors FireProjectile() — spawns projectile aimed at player */
+  fireProjectile(playerPos: Vector3): void {
+    const direction = playerPos.subtract(this.mesh.position).normalize();
+    // projectileManager.spawn(this.mesh.position, direction, { speed: this.projectileSpeed, ... });
+  }
+}
+```
+
+### Wave Spawner
+
+```typescript
+/** 
+ * Wave-based enemy spawning with increasing difficulty
+ * Suggested implementation not directly in Unity source but referenced in game design
+ */
+export class WaveSpawner {
+  private currentWave = 0;
+  private enemiesPerWave = 5;
+  private difficultyScale = 1.2; // Each wave 20% harder
+
+  spawnWave(spawnPoints: Vector3[]): EnemyUnit[] {
+    this.currentWave++;
+    const count = Math.floor(this.enemiesPerWave * Math.pow(this.difficultyScale, this.currentWave - 1));
+    const enemies: EnemyUnit[] = [];
+
+    for (let i = 0; i < count; i++) {
+      const spawnPos = spawnPoints[i % spawnPoints.length];
+      const type = this.selectEnemyType();
+      // Create enemy at spawnPos with scaled stats
+    }
+
+    return enemies;
+  }
+
+  private selectEnemyType(): string {
+    // More dangerous types appear in later waves
+    const roll = Math.random();
+    if (this.currentWave >= 5 && roll < 0.05) return "Hybrid";   // Boss
+    if (this.currentWave >= 3 && roll < 0.15) return "Heavy";
+    if (roll < 0.3) return "Insectoid";
+    if (roll < 0.5) return "Drone";
+    return "Soldier";
+  }
+}
+```
+
+---
+
+## 11. Loot & Chest System — ChestSystem.ts
+
+### C# Source Reference: `LootSpawner.cs` (LootContainer, EnemyLootDrop, WeightedLootTable), `LootTables.cs` (13 LootChanceMatrix tables with diminishing rolls)
+
+The Unity project features a sophisticated Daggerfall-inspired loot generation engine with probability matrices.
+
+```typescript
+// ChestSystem.ts
+
+/** Mirrors LootChanceMatrix — probability per item category */
+interface LootChanceMatrix {
+  key: string;
+  weapons: number;        // 0-100
+  armor: number;
+  consumables: number;
+  ingredients: number;
+  miscItems: number;
+  magicItems: number;
+  clothing: number;
+  books: number;
+  ammo: number;
+  rareItems: number;
+  minGold: number;
+  maxGold: number;
+}
+
+/** Mirrors the 13 pre-defined loot tables from LootTables.cs */
+const LOOT_TABLES: Record<string, LootChanceMatrix> = {
+  A: { key: "A", weapons: 10, armor: 10, consumables: 30, ingredients: 20,
+       miscItems: 30, magicItems: 2, clothing: 20, books: 5, ammo: 15,
+       rareItems: 1, minGold: 0, maxGold: 20 },  // Basic humanoid
+  D: { key: "D", weapons: 30, armor: 30, consumables: 30, ingredients: 20,
+       miscItems: 30, magicItems: 15, clothing: 10, books: 10, ammo: 30,
+       rareItems: 5, minGold: 10, maxGold: 100 }, // Dungeon chest
+  J: { key: "J", weapons: 40, armor: 40, consumables: 40, ingredients: 30,
+       miscItems: 40, magicItems: 20, clothing: 15, books: 15, ammo: 40,
+       rareItems: 10, minGold: 50, maxGold: 500 }, // Treasure chest
+  K: { key: "K", weapons: 50, armor: 50, consumables: 50, ingredients: 40,
+       miscItems: 50, magicItems: 30, clothing: 20, books: 20, ammo: 50,
+       rareItems: 15, minGold: 100, maxGold: 1000 }, // Boss drop
+  // ... E (elite), H (heavy), N (normal), R (rare), S (shop), etc.
+};
+
+/** Mirrors LootContainer — interactive chest with items */
+export class LootContainer {
+  items: GeneratedItem[] = [];
+  interactionRange = 2;    // Mirrors InteractionRange = 2f
+  isOpened = false;
+
+  /** Mirrors LootSpawner.GenerateLoot() — roll each category with diminishing returns */
+  generateLoot(tableKey: string, playerLevel: number): void {
+    const table = LOOT_TABLES[tableKey] ?? LOOT_TABLES["D"];
+    this.items = [];
+
+    // Roll each category (mirrors LootTables.GenerateLoot logic)
+    const categories = [
+      { name: "weapon", chance: table.weapons },
+      { name: "armor", chance: table.armor },
+      { name: "consumable", chance: table.consumables },
+      { name: "ammo", chance: table.ammo },
+      // ...
+    ];
+
+    for (const cat of categories) {
+      let roll = Math.random() * 100;
+      // Diminishing rolls: keep generating while roll < chance, halve each time
+      while (roll < cat.chance) {
+        this.items.push(this.generateItem(cat.name, playerLevel));
+        cat.chance /= 2; // Diminishing returns
+        roll = Math.random() * 100;
+      }
+    }
+
+    // Gold drop
+    if (table.maxGold > 0) {
+      const gold = Math.floor(
+        table.minGold + Math.random() * (table.maxGold - table.minGold)
+      );
+      if (gold > 0) this.items.push({ name: "Credits", type: "currency", quantity: gold });
+    }
+  }
+
+  /** Mirrors LootContainer.TakeItem / TakeAll */
+  takeItem(index: number): GeneratedItem | null {
+    if (index < 0 || index >= this.items.length) return null;
+    return this.items.splice(index, 1)[0];
+  }
+
+  takeAll(): GeneratedItem[] {
+    const all = [...this.items];
+    this.items = [];
+    return all;
+  }
+}
+
+/** Mirrors EnemyLootDrop — attach to enemies for death-triggered loot */
+export class EnemyLootDrop {
+  primaryTableKey: string;
+  bonusTables: { key: string; weight: number }[] = [];
+
+  dropLoot(position: Vector3, playerLevel: number): LootContainer {
+    const container = new LootContainer();
+    container.generateLoot(this.primaryTableKey, playerLevel);
+    // Bonus rolls from weighted tables
+    return container;
+  }
+}
+```
+
+---
+
+## 12. City Generator — CityGenerator.ts
+
+### C# Source Reference: No direct equivalent — new system for Detroit 3026
+
+The city generator creates a massive explorable futuristic Detroit cityscape. Zones are defined procedurally with distinct architectural styles.
+
+```typescript
+// CityGenerator.ts
+import {
+  Scene, MeshBuilder, Mesh, Vector3, Color3, Color4,
+  StandardMaterial, TransformNode
+} from "@babylonjs/core";
+
+interface CityConfig {
+  gridSize: number;            // Number of blocks per axis
+  blockSize: number;           // Meters per city block
+  streetWidth: number;         // Space between blocks
+  riverPosition: number;       // Z-coordinate for south-side river
+  riverWidth: number;
+  maxBuildingHeight: number;
+}
+
+const DEFAULT_CITY_CONFIG: CityConfig = {
+  gridSize: 20,
+  blockSize: 40,
+  streetWidth: 12,
+  riverPosition: -400,        // South side
+  riverWidth: 60,
+  maxBuildingHeight: 200
+};
+
+/** Zone types matching the theme document */
+enum CityZone {
+  Downtown,        // Tall skyscrapers, neon-heavy
+  Industrial,      // Factories, chimneys, pipes
+  Residential,     // Medium buildings, apartment blocks
+  Spaceport,       // Landing pads, spacecraft
+  Waterfront,      // Docks, water treatment, AI labs
+  Highway          // Elevated roads with pillars
+}
+
+export class CityGenerator {
+  private scene: Scene;
+  private config: CityConfig;
+  private cityRoot: TransformNode;
+
+  constructor(scene: Scene, config?: Partial<CityConfig>) {
+    this.scene = scene;
+    this.config = { ...DEFAULT_CITY_CONFIG, ...config };
+    this.cityRoot = new TransformNode("cityRoot", scene);
+  }
+
+  generate(): void {
+    this.generateGround();
+    this.generateBuildings();
+    this.generateHighways();
+    this.generateRiver();
+    this.generateSpaceports();
+    this.generateNeonSigns();
+    this.generateStreetLights();
+  }
+
+  /** Cell-shaded building material */
+  private createCellShadedMaterial(name: string, baseColor: Color3): StandardMaterial {
+    const mat = new StandardMaterial(name, this.scene);
+    mat.diffuseColor = baseColor;
+    mat.specularColor = Color3.Black();
+    mat.emissiveColor = baseColor.scale(0.05);
+    // Apply cel-shade via custom ShaderMaterial (see Section 17)
+    return mat;
+  }
+
+  private generateBuildings(): void {
+    const { gridSize, blockSize, streetWidth } = this.config;
+
+    for (let x = 0; x < gridSize; x++) {
+      for (let z = 0; z < gridSize; z++) {
+        const worldX = (x - gridSize / 2) * (blockSize + streetWidth);
+        const worldZ = (z - gridSize / 2) * (blockSize + streetWidth);
+
+        // Skip river zone
+        if (worldZ < this.config.riverPosition + this.config.riverWidth / 2
+            && worldZ > this.config.riverPosition - this.config.riverWidth / 2) continue;
+
+        const zone = this.getZone(x, z);
+        this.generateBlock(worldX, worldZ, zone);
+      }
+    }
+  }
+
+  private generateBlock(x: number, z: number, zone: CityZone): void {
+    switch (zone) {
+      case CityZone.Downtown:
+        this.generateSkyscraper(x, z);
+        break;
+      case CityZone.Industrial:
+        this.generateFactory(x, z);
+        break;
+      case CityZone.Residential:
+        this.generateApartment(x, z);
+        break;
+      case CityZone.Spaceport:
+        this.generateLandingPad(x, z);
+        break;
+    }
+  }
+
+  private generateSkyscraper(x: number, z: number): void {
+    const height = 60 + Math.random() * 140; // 60-200m
+    const width = 15 + Math.random() * 20;
+    const depth = 15 + Math.random() * 20;
+
+    const building = MeshBuilder.CreateBox(`skyscraper_${x}_${z}`, {
+      width, height, depth
+    }, this.scene);
+    building.position = new Vector3(x, height / 2, z);  // Rest on ground
+    building.parent = this.cityRoot;
+    building.checkCollisions = true;
+
+    // Cell-shaded material
+    const colors = [
+      new Color3(0.15, 0.15, 0.25),  // Dark blue-gray
+      new Color3(0.1, 0.12, 0.2),    // Slate
+      new Color3(0.2, 0.18, 0.22),   // Purple-gray
+    ];
+    building.material = this.createCellShadedMaterial(
+      `skyscraperMat_${x}`, colors[Math.floor(Math.random() * colors.length)]
+    );
+  }
+
+  private generateFactory(x: number, z: number): void {
+    const height = 15 + Math.random() * 25;
+
+    // Main factory body
+    const factory = MeshBuilder.CreateBox(`factory_${x}_${z}`, {
+      width: 30, height, depth: 25
+    }, this.scene);
+    factory.position = new Vector3(x, height / 2, z);
+    factory.parent = this.cityRoot;
+    factory.checkCollisions = true;
+
+    // Chimney on top (rest on factory roof)
+    const chimney = MeshBuilder.CreateCylinder(`chimney_${x}_${z}`, {
+      height: 15, diameter: 3
+    }, this.scene);
+    chimney.position = new Vector3(x + 10, height + 7.5, z); // On top of factory
+    chimney.parent = this.cityRoot;
+  }
+
+  private generateRiver(): void {
+    const river = MeshBuilder.CreateGround("river", {
+      width: this.config.gridSize * (this.config.blockSize + this.config.streetWidth),
+      height: this.config.riverWidth
+    }, this.scene);
+    river.position = new Vector3(0, -0.5, this.config.riverPosition);
+    // Apply water shader (see Section 13)
+  }
+
+  private generateHighways(): void {
+    // Elevated highways with support pillars
+    // Use extruded shapes for road surface
+    // Cylinder pillars at regular intervals
+  }
+
+  private generateSpaceports(): void {
+    // Landing platforms with metallic materials
+    // Disc-shaped pads elevated on columns
+  }
+
+  private generateNeonSigns(): void {
+    // Emissive planes attached to building facades
+    // Add to GlowLayer for bloom effect
+    // Colors: cyan, magenta, orange, green
+  }
+}
+```
+
+---
+
+## 13. Terrain & Water — TerrainSystem.ts
+
+### C# Source Reference: `ProceduralTerrainGenerator.cs` (604 lines, 7 algorithms), `WaterSystem.cs`, `VegetationManager.cs`
+
+```typescript
+// TerrainSystem.ts
+
+/** Mirrors TerrainAlgorithm enum */
+enum TerrainAlgorithm {
+  PerlinNoise, SimplexNoise, DiamondSquare,
+  FaultLines, RidgedNoise, BillowNoise, MultiFractal
+}
+
+/** Mirrors TerrainParameters class */
+interface TerrainParams {
+  algorithm: TerrainAlgorithm;
+  resolution: number;      // Unity default: 257
+  heightScale: number;     // Unity default: 100
+  baseHeight: number;
+  frequency: number;       // Unity default: 0.01
+  amplitude: number;
+  octaves: number;         // Unity default: 4
+  persistence: number;     // Unity default: 0.5
+  lacunarity: number;      // Unity default: 2
+  seed: number;
+  applyErosion: boolean;
+  erosionIterations: number; // Unity default: 10
+  applySmoothing: boolean;
+  smoothIterations: number;  // Unity default: 1
+}
+
+export class TerrainSystem {
+  private scene: Scene;
+  private heightmapCache = new Map<string, Float32Array>();
+
+  /**
+   * Mirrors ProceduralTerrainGenerator.GenerateHeightmap()
+   * Chunk-based generation with caching
+   */
+  generateChunk(chunkX: number, chunkZ: number, params: TerrainParams): Mesh {
+    const key = `${chunkX}_${chunkZ}`;
+
+    if (!this.heightmapCache.has(key)) {
+      const heightmap = this.generateHeightmap(chunkX, chunkZ, params);
+      this.heightmapCache.set(key, heightmap);
+    }
+
+    return this.createMeshFromHeightmap(this.heightmapCache.get(key)!, params);
+  }
+
+  /**
+   * Mirrors the multi-algorithm heightmap generation
+   * Uses Babylon.js PerlinNoise or manual Simplex implementation
+   */
+  private generateHeightmap(cx: number, cz: number, params: TerrainParams): Float32Array {
+    const size = params.resolution;
+    const heightmap = new Float32Array(size * size);
+
+    for (let z = 0; z < size; z++) {
+      for (let x = 0; x < size; x++) {
+        let height = params.baseHeight;
+
+        // Fractal noise (mirrors octave loop in Unity's PerlinNoise algorithm)
+        let freq = params.frequency;
+        let amp = params.amplitude;
+        for (let o = 0; o < params.octaves; o++) {
+          const nx = (cx * size + x) * freq + params.seed;
+          const nz = (cz * size + z) * freq + params.seed;
+          // Use a Perlin noise function (e.g., from a lib or manual)
+          const noiseVal = perlinNoise2D(nx, nz); // Returns -1 to 1
+          height += noiseVal * amp;
+          freq *= params.lacunarity;
+          amp *= params.persistence;
+        }
+
+        heightmap[z * size + x] = height * params.heightScale;
+      }
+    }
+
+    return heightmap;
+  }
+
+  /** Mirrors GenerateTerrainMesh — vertex/UV/triangle assembly */
+  private createMeshFromHeightmap(heightmap: Float32Array, params: TerrainParams): Mesh {
+    // Use Babylon's VertexData API to build custom mesh from heightmap
+    // Similar to Unity's mesh.vertices / mesh.triangles / mesh.uv assignment
+    return MeshBuilder.CreateGround("terrain", {
+      width: params.resolution,
+      height: params.resolution,
+      subdivisions: params.resolution - 1,
+      updatable: true
+    }, this.scene);
+  }
+}
+
+/**
+ * Mirrors WaterSystem.cs
+ * Wave shader with animated displacement
+ */
+export class WaterSystem {
+  private waterLevel = 0;     // Mirrors waterLevel = 0f
+  private waveSpeed = 1.0;    // Mirrors waveSpeed = 1.0f
+  private waveHeight = 0.5;   // Mirrors waveHeight = 0.5f
+  private waveFrequency = 0.1; // Mirrors waveFrequency = 0.1f
+
+  create(scene: Scene, width: number, depth: number): Mesh {
+    // Use Babylon.js WaterMaterial from materials library
+    // or custom ShaderMaterial with vertex displacement
+    const water = MeshBuilder.CreateGround("water", {
+      width, height: depth, subdivisions: 64
+    }, scene);
+    water.position.y = this.waterLevel;
+
+    // Apply animated water shader
+    // scene.registerBeforeRender(() => {
+    //   material.setFloat("time", performance.now() / 1000 * this.waveSpeed);
+    // });
+
+    return water;
+  }
+}
+```
+
+---
+
+## 14. Inventory & Crafting — InventorySystem.ts
+
+### C# Source Reference: `CraftingInventoryManager.cs` (205 lines), `Item.cs`, `CraftingManager.cs`
+
+```typescript
+// InventorySystem.ts
+
+/** Mirrors Item.ItemType enum */
+enum ItemType { Resource, Tool, Weapon, Armor, Building, Consumable }
+
+/** Mirrors Item.ItemRarity enum */
+enum ItemRarity { Common, Uncommon, Rare, Epic, Legendary }
+
+/** Mirrors Item ScriptableObject */
+interface ItemDef {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;          // URL to icon sprite
+  maxStackSize: number;  // Unity default: 64
+  itemType: ItemType;
+  rarity: ItemRarity;
+  isCraftable: boolean;
+  recipeId?: string;
+}
+
+/** Mirrors InventorySlot class */
+interface InventorySlot {
+  item: ItemDef | null;
+  amount: number;
+}
+
+/**
+ * Mirrors CraftingInventoryManager singleton
+ * Slot-based inventory with stacking
+ */
+export class InventorySystem {
+  maxSlots = 36;         // Mirrors maxSlots = 36
+  maxStackSize = 64;     // Mirrors maxStackSize = 64
+  slots: InventorySlot[];
+  onChange?: () => void;  // Mirrors OnInventoryChanged event
+
+  constructor() {
+    this.slots = Array.from({ length: this.maxSlots }, () => ({
+      item: null, amount: 0
+    }));
+  }
+
+  /**
+   * Mirrors AddItem — tries existing stacks first, then empty slots
+   * Returns amount that couldn't be added (overflow)
+   */
+  addItem(item: ItemDef, amount: number): number {
+    let remaining = amount;
+
+    // Try existing stacks (mirrors Unity's foreach slot check)
+    for (const slot of this.slots) {
+      if (remaining <= 0) break;
+      if (slot.item?.id === item.id && slot.amount < item.maxStackSize) {
+        const canAdd = Math.min(remaining, item.maxStackSize - slot.amount);
+        slot.amount += canAdd;
+        remaining -= canAdd;
+      }
+    }
+
+    // Try empty slots
+    for (const slot of this.slots) {
+      if (remaining <= 0) break;
+      if (slot.item === null) {
+        const canAdd = Math.min(remaining, item.maxStackSize);
+        slot.item = item;
+        slot.amount = canAdd;
+        remaining -= canAdd;
+      }
+    }
+
+    this.onChange?.();
+    return remaining;
+  }
+
+  removeItem(itemId: string, amount: number): number {
+    let toRemove = amount;
+    for (const slot of this.slots) {
+      if (toRemove <= 0) break;
+      if (slot.item?.id === itemId) {
+        const removed = Math.min(toRemove, slot.amount);
+        slot.amount -= removed;
+        toRemove -= removed;
+        if (slot.amount <= 0) { slot.item = null; slot.amount = 0; }
+      }
+    }
+    this.onChange?.();
+    return toRemove;
+  }
+}
+
+/** Mirrors Recipe ScriptableObject */
+interface RecipeDef {
+  id: string;
+  name: string;
+  resultItemId: string;
+  resultAmount: number;
+  ingredients: { itemId: string; amount: number }[];
+  craftingTime: number;  // seconds, Unity default: 1
+  requiredStation: string; // "None" | "Workbench" | "Furnace" | "Anvil" | "Sawmill"
+}
+
+/** Mirrors CraftingManager */
+export class CraftingSystem {
+  private recipes: RecipeDef[] = [];
+  private inventory: InventorySystem;
+
+  canCraft(recipeId: string): boolean {
+    const recipe = this.recipes.find(r => r.id === recipeId);
+    if (!recipe) return false;
+    return recipe.ingredients.every(ing =>
+      this.inventory.getItemCount(ing.itemId) >= ing.amount
+    );
+  }
+
+  craft(recipeId: string): boolean {
+    if (!this.canCraft(recipeId)) return false;
+    const recipe = this.recipes.find(r => r.id === recipeId)!;
+
+    // Consume ingredients
+    for (const ing of recipe.ingredients) {
+      this.inventory.removeItem(ing.itemId, ing.amount);
+    }
+
+    // Add result after crafting time
+    setTimeout(() => {
+      // this.inventory.addItem(resultItem, recipe.resultAmount);
+    }, recipe.craftingTime * 1000);
+
+    return true;
+  }
+}
+```
+
+---
+
+## 15. Building System — BuildingSystem.ts
+
+### C# Source Reference: `BuildingManager.cs` (243 lines) — grid-based placement with preview ghost
+
+```typescript
+// BuildingSystem.ts
+
+/** Mirrors BuildingData ScriptableObject */
+interface BuildingDef {
+  id: string;
+  name: string;
+  prefabId: string;
+  requiredItemId: string;
+  requiredAmount: number;
+  category: "Wall" | "Floor" | "Roof" | "Door" | "Window" | "Furniture" | "Decoration" | "Utility";
+}
+
+/**
+ * Mirrors BuildingManager — grid-based placement with ghost preview
+ */
+export class BuildingSystem {
+  private gridSize = 1;            // Mirrors gridSize = 1f
+  private placementRange = 5;      // Mirrors placementRange = 5f
+  private snapToGrid = true;       // Mirrors snapToGrid = true
+  private previewMesh: Mesh | null = null;
+  private isPlacing = false;
+
+  /**
+   * Mirrors StartPlacement(BuildingData)
+   * Creates semi-transparent ghost preview at cursor
+   */
+  startPlacement(building: BuildingDef): void {
+    this.isPlacing = true;
+    // Create preview mesh with transparent green material (valid) / red (invalid)
+    // Mirrors validPlacementMaterial / invalidPlacementMaterial
+  }
+
+  /**
+   * Mirrors UpdatePlacementPreview()
+   * Raycast from camera, snap to grid, check obstruction
+   */
+  updatePreview(scene: Scene, camera: FreeCamera): void {
+    if (!this.isPlacing || !this.previewMesh) return;
+
+    // Raycast from camera center
+    const ray = scene.createPickingRay(
+      scene.getEngine().getRenderWidth() / 2,
+      scene.getEngine().getRenderHeight() / 2,
+      null, camera
+    );
+    const hit = scene.pickWithRay(ray);
+
+    if (hit?.hit && hit.pickedPoint) {
+      let pos = hit.pickedPoint;
+
+      // Grid snap (mirrors snapToGrid + gridSize)
+      if (this.snapToGrid) {
+        pos = new Vector3(
+          Math.round(pos.x / this.gridSize) * this.gridSize,
+          pos.y,
+          Math.round(pos.z / this.gridSize) * this.gridSize
+        );
+      }
+
+      this.previewMesh.position = pos;
+
+      // Obstruction check (mirrors obstructionLayer overlap)
+      const isValid = !this.checkObstruction(pos);
+      // Update material color: green = valid, red = blocked
+    }
+  }
+
+  /** Mirrors TryPlaceBuilding() */
+  place(): boolean {
+    if (!this.isPlacing) return false;
+    // Verify not obstructed, consume resources from inventory, place final mesh
+    return true;
+  }
+
+  /** Mirrors CancelPlacement() */
+  cancel(): void {
+    this.previewMesh?.dispose();
+    this.previewMesh = null;
+    this.isPlacing = false;
+  }
+}
+```
+
+---
+
+## 16. UI Layer — GameUI.tsx
+
+### C# Source Reference: Unity's UGUI system — mapped to React + CSS overlay
+
+```tsx
+// GameUI.tsx
+import React, { useState, useEffect } from "react";
+
+interface GameUIProps {
+  health: number;
+  maxHealth: number;
+  stamina: number;
+  maxStamina: number;
+  currentWeapon: string;
+  ammo: number;
+  maxAmmo: number;
+  level: number;
+  experience: number;
+  credits: number;
+  waveNumber: number;
+  enemiesRemaining: number;
+}
+
+export const GameUI: React.FC<GameUIProps> = (props) => {
+  return (
+    <div style={{
+      position: "absolute", top: 0, left: 0,
+      width: "100%", height: "100%",
+      pointerEvents: "none", fontFamily: "'Orbitron', monospace",
+      color: "#00ffff"
+    }}>
+      {/* Health Bar — mirrors Unity slider + fill image */}
+      <div style={{ position: "absolute", bottom: 40, left: 20 }}>
+        <div>HP</div>
+        <div style={{
+          width: 200, height: 12, background: "#333",
+          border: "1px solid #00ffff"
+        }}>
+          <div style={{
+            width: `${(props.health / props.maxHealth) * 100}%`,
+            height: "100%",
+            background: props.health > 30
+              ? "linear-gradient(90deg, #00ff88, #00ffcc)"
+              : "#ff3333"
+          }} />
+        </div>
+      </div>
+
+      {/* Weapon & Ammo */}
+      <div style={{ position: "absolute", bottom: 40, right: 20, textAlign: "right" }}>
+        <div style={{ fontSize: 14 }}>{props.currentWeapon}</div>
+        <div style={{ fontSize: 24 }}>{props.ammo} / {props.maxAmmo}</div>
+      </div>
+
+      {/* Crosshair */}
+      <div style={{
+        position: "absolute", top: "50%", left: "50%",
+        transform: "translate(-50%, -50%)",
+        width: 20, height: 20, border: "2px solid #00ffff",
+        borderRadius: "50%", opacity: 0.6
+      }} />
+
+      {/* Wave Info */}
+      <div style={{ position: "absolute", top: 20, width: "100%", textAlign: "center" }}>
+        <div style={{ fontSize: 18 }}>WAVE {props.waveNumber}</div>
+        <div style={{ fontSize: 12 }}>Enemies: {props.enemiesRemaining}</div>
+      </div>
+
+      {/* Weapon Slots 1-6 */}
+      <div style={{
+        position: "absolute", bottom: 80, left: "50%",
+        transform: "translateX(-50%)", display: "flex", gap: 4
+      }}>
+        {[1,2,3,4,5,6].map(i => (
+          <div key={i} style={{
+            width: 40, height: 40,
+            border: "1px solid #00ffff",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 12, background: "rgba(0,0,0,0.5)"
+          }}>{i}</div>
+        ))}
+      </div>
+    </div>
+  );
+};
+```
+
+---
+
+## 17. Cell-Shaded Anime Graphics
+
+Babylon.js custom shader for the retro 80s anime cell-shading aesthetic:
+
+```typescript
+// CellShader.ts
+import { ShaderMaterial, Scene, Effect, Color3 } from "@babylonjs/core";
+
+/** Register custom GLSL for toon/cel shading */
+export function createCellShadedMaterial(scene: Scene, name: string, baseColor: Color3): ShaderMaterial {
+
+  // Vertex Shader
+  Effect.ShadersStore["cellVertexShader"] = `
+    precision highp float;
+    attribute vec3 position;
+    attribute vec3 normal;
+    uniform mat4 worldViewProjection;
+    uniform mat4 world;
+    varying vec3 vNormal;
+    varying vec3 vWorldPos;
+
+    void main() {
+      gl_Position = worldViewProjection * vec4(position, 1.0);
+      vNormal = normalize((world * vec4(normal, 0.0)).xyz);
+      vWorldPos = (world * vec4(position, 1.0)).xyz;
+    }
+  `;
+
+  // Fragment Shader — 3-band cel shading with rim light
+  Effect.ShadersStore["cellFragmentShader"] = `
+    precision highp float;
+    varying vec3 vNormal;
+    varying vec3 vWorldPos;
+    uniform vec3 lightDirection;
+    uniform vec3 cameraPosition;
+    uniform vec3 baseColor;
+    uniform vec3 rimColor;
+
+    void main() {
+      // Cel-shade bands
+      float NdotL = dot(vNormal, normalize(-lightDirection));
+      float intensity;
+      if (NdotL > 0.7) intensity = 1.0;
+      else if (NdotL > 0.35) intensity = 0.6;
+      else if (NdotL > 0.05) intensity = 0.3;
+      else intensity = 0.15;
+
+      vec3 color = baseColor * intensity;
+
+      // Rim lighting (anime edge glow)
+      vec3 viewDir = normalize(cameraPosition - vWorldPos);
+      float rim = 1.0 - max(dot(viewDir, vNormal), 0.0);
+      rim = smoothstep(0.6, 1.0, rim);
+      color += rimColor * rim * 0.5;
+
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `;
+
+  const mat = new ShaderMaterial(name, scene, "cell", {
+    attributes: ["position", "normal"],
+    uniforms: ["worldViewProjection", "world", "lightDirection",
+               "cameraPosition", "baseColor", "rimColor"]
+  });
+
+  mat.setVector3("lightDirection", new BABYLON.Vector3(-1, -2, -1));
+  mat.setColor3("baseColor", baseColor);
+  mat.setColor3("rimColor", new Color3(0, 1, 1)); // Cyan rim
+
+  // Update camera position each frame
+  scene.registerBeforeRender(() => {
+    mat.setVector3("cameraPosition", scene.activeCamera!.position);
+  });
+
+  return mat;
+}
+```
+
+---
+
+## 18. Post-Processing Pipeline
+
+```typescript
+// PostProcessing.ts — mirrors Unity URP post-process stack
+
+const pipeline = new DefaultRenderingPipeline("default", true, scene, [camera]);
+
+// Bloom (neon glow on signs, projectiles, explosions)
+pipeline.bloomEnabled = true;
+pipeline.bloomThreshold = 0.7;
+pipeline.bloomWeight = 0.3;
+pipeline.bloomKernel = 64;
+
+// Chromatic Aberration (sci-fi lens effect)
+pipeline.chromaticAberrationEnabled = true;
+pipeline.chromaticAberration.aberrationAmount = 30;
+
+// FXAA Anti-aliasing
+pipeline.fxaaEnabled = true;
+
+// Tone mapping
+pipeline.imageProcessing.toneMappingEnabled = true;
+pipeline.imageProcessing.toneMappingType = 1; // ACES
+
+// Vignette (cinematic framing)
+pipeline.imageProcessing.vignetteEnabled = true;
+pipeline.imageProcessing.vignetteWeight = 1.5;
+
+// Optional: Grain for retro feel
+pipeline.grainEnabled = true;
+pipeline.grain.intensity = 10;
+pipeline.grain.animated = true;
+```
+
+---
+
+## 19. Performance Considerations
+
+| Technique | Unity Implementation | Babylon.js Equivalent |
+|---|---|---|
+| LOD / Culling | `LODGroup`, Frustum Culling | `mesh.useLODScreenCoverage`, `scene.freezeActiveMeshes()` |
+| Instancing | `GPU Instancing` material flag | `mesh.createInstance()` — hardware instanced |
+| Chunk Loading | Quadtree terrain streaming | Custom chunk manager with `scene.addMesh/removeMesh` |
+| Object Pooling | Manual pools | Pre-create meshes, toggle `.setEnabled()` |
+| Mesh Combining | `MeshCombineUtility.cs` | `Mesh.MergeMeshes()` |
+| Texture Atlasing | Sprite Atlas | `Texture.Pack` or manual UV remapping |
+| Collision Optimization | Layer masks | `mesh.checkCollisions` + octree: `scene.createOrUpdateSelectionOctree()` |
+| Vegetation Instancing | `VegetationManager` density maps | Thin instances: `mesh.thinInstanceAdd()` — 100k+ instances |
+
+### Key Optimizations for Detroit 3026
+
+1. **Thin Instances** for repetitive city elements (windows, street lights, pipes)
+2. **Octree spatial partitioning** for collision detection with 1000+ buildings
+3. **LOD levels** for distant buildings (swap to low-poly boxes)
+4. **Texture atlas** for all building facade variations
+5. **Frozen meshes** for static city geometry (`mesh.freezeWorldMatrix()`)
+6. **Web Workers** for off-thread terrain generation and pathfinding
+
+---
+
+## 20. Migration Cheat Sheet
+
+### Common Patterns
+
+```
+// UNITY C#                          → BABYLON.JS TYPESCRIPT
+//──────────────────────────────────────────────────────────────
+MonoBehaviour                        → class + registerBeforeRender()
+[SerializeField] float x = 5f       → config interface { x: number } // default 5
+Update() { }                         → scene.registerBeforeRender(() => { })
+Time.deltaTime                       → engine.getDeltaTime() / 1000
+Vector3.Distance(a, b)               → Vector3.Distance(a, b)
+Vector3.Lerp(a, b, t)                → Vector3.Lerp(a, b, t)
+Quaternion.Slerp(a, b, t)            → Quaternion.Slerp(a, b, t, result)
+Quaternion.LookRotation(dir)         → mesh.lookAt(targetPos)
+transform.position                   → mesh.position
+transform.forward                    → mesh.forward (or getDirection)
+transform.rotation                   → mesh.rotationQuaternion
+Physics.Raycast(origin, dir)         → scene.pickWithRay(new Ray(...))
+Physics.OverlapBox(center, half)     → mesh.intersectsMesh(other) or custom AABB
+Rigidbody.AddForce(f, Impulse)       → physicsBody.applyImpulse(f, contactPoint)
+NavMeshAgent.SetDestination(p)       → crowd.agentGoto(agentIdx, navPlugin.getClosestPoint(p))
+Instantiate(prefab)                  → mesh.clone() or mesh.createInstance()
+Destroy(obj)                         → mesh.dispose()
+Destroy(obj, delay)                  → setTimeout(() => mesh.dispose(), delay * 1000)
+Invoke(method, delay)                → setTimeout(() => this.method(), delay * 1000)
+StartCoroutine(routine)              → async/await or Observable patterns
+Animator.CrossFade("Anim", 0.1f)     → animationGroup.start(loop, speed, from, to)
+GetComponent<T>()                    → stored reference or mesh.metadata
+CompareTag("Enemy")                  → Tags.MatchesQuery(mesh, "enemy")
+FindGameObjectsWithTag("Enemy")      → scene.getMeshesByTags("enemy")
+Input.GetKeyDown(KeyCode.Alpha1)     → scene.onKeyboardObservable, check key === "1"
+ScriptableObject                     → JSON file or TypeScript interface
+PlayerPrefs                          → localStorage / IndexedDB
+AudioSource.PlayOneShot(clip)        → new Sound("name", url, scene).play()
+CanvasGroup.alpha                    → React state + CSS opacity
+```
+
+### Data Value Reference (from C# → TypeScript defaults)
+
+| System | Property | Unity Default | Suggested Babylon.js |
+|--------|----------|---------------|---------------------|
+| Player | moveSpeed | 6 | 6 |
+| Player | sprintSpeed | 9 | 9 |
+| Player | jumpForce | 20 | 20 |
+| Player | gravity | -9.81 | -9.81 |
+| Player | dodgeSpeed | 15 | 15 |
+| Player | dodgeDuration | 0.3s | 0.3s |
+| Player | dodgeCooldown | 1s | 1s |
+| Player | parryWindow | 0.2s | 0.2s |
+| Player | maxHealth | 100 | 100 |
+| Player | maxStamina | 100 | 100 |
+| Enemy | maxHealth | 100 | 100 (varies by type) |
+| Enemy | attackDamage | 15 | 15 |
+| Enemy | defense | 5 | 5 |
+| Enemy | detectionRange | 15 | 15 |
+| Enemy | attackRange | 2 | 2 |
+| Enemy | chaseSpeed | 4 | 4 |
+| Enemy | attackCooldown | 1.5s | 1.5s |
+| Enemy | stun duration | 2s | 2s |
+| Enemy | experienceValue | 50 | 50 |
+| Weapon | switchCooldown | 0.5s | 0.5s |
+| Combo | inputBufferTime | 0.2s | 0.2s |
+| Combo | comboResetTime | 1.5s | 1.5s |
+| Combo | attack1 damage | 15 | 15 |
+| Combo | attack2 damage | 20 | 20 |
+| Combo | attack3 damage | 30 | 30 |
+| Inventory | maxSlots | 36 | 36 |
+| Inventory | maxStackSize | 64 | 64 |
+| Building | gridSize | 1 | 1 |
+| Building | placementRange | 5 | 5 |
+| Terrain | resolution | 257 | 257 |
+| Terrain | heightScale | 100 | 100 |
+| Terrain | octaves | 4 | 4 |
+| Terrain | persistence | 0.5 | 0.5 |
+| Terrain | lacunarity | 2 | 2 |
+| Water | waveSpeed | 1.0 | 1.0 |
+| Water | waveHeight | 0.5 | 0.5 |
+| Loot | interactionRange | 2 | 2 |
+| Hoverbot | hoverHeight | 2 | 2 |
+| Hoverbot | projectileSpeed | 10 | 10 |
+| Melee | attackCone | 60° | 60° |
+
+---
+
+## Next Steps
+
+1. **Set up the Vite + React + Babylon.js project** with `@babylonjs/core` and `@babylonjs/gui`
+2. **Implement BabylonEngine.ts** — scene, camera, lighting, post-processing
+3. **Implement CityGenerator.ts** — procedural Detroit 3026 blocks
+4. **Implement PlayerController.ts** — FPS movement with dodge/parry
+5. **Implement WeaponsSystem.ts** — 6 weapon types with projectile spawning
+6. **Implement EnemySystem.ts** — 5 enemy types with state machine AI
+7. **Implement ChestSystem.ts** — loot tables and interactive containers
+8. **Implement GameUI.tsx** — HUD overlay with React
+9. **Apply CellShader.ts** — anime toon shading to all meshes
+10. **Add WaveSpawner** — progressive difficulty scaling
+
+---
+
+*Generated from HeavyWater Unity project analysis — February 2026*

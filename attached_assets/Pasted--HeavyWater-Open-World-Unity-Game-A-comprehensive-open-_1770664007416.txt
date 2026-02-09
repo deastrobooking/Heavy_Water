@@ -1,0 +1,150 @@
+# HeavyWater - Open World Unity Game
+
+A comprehensive open-world Unity game featuring procedural terrain, advanced building systems, crafting mechanics, and dynamic vegetation generation.
+
+## 🎮 Features
+
+### Core Systems
+- **Procedural Terrain Generation** - Quadtree-based terrain with biome data packing
+- **Advanced Building System** - Create and morph custom shapes with full creative freedom
+- **Crafting & Inventory** - Complete resource gathering and crafting mechanics
+- **Dynamic Vegetation** - Procedural grass, trees, bushes, rocks, and water systems
+- **Farm Management** - Early-game agricultural progression system
+
+### Building & Creation
+- **Shape Morphing Tools** - Scale, rotate, extrude, bevel, and color paint tools
+- **Material System** - RGB color picker, gradients, and texture mapping
+- **Building Progression** - From basic farms to advanced city structures
+- **Creative Mode** - Unlimited building possibilities with intuitive tools
+
+### Gameplay Features
+- **Resource Gathering** - Destructible objects with realistic physics
+- **Inventory Management** - Stackable items with crafting requirements
+- **Recipe System** - Multi-ingredient crafting with time-based production
+- **Building Placement** - Grid-based placement with collision detection
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Unity 2022.3.20f1 or later
+- Windows/Mac/Linux
+
+### Installation
+1. Clone or download the project
+2. Open in Unity Hub
+3. Open the `MAIN` scene from `Assets/Scenes/`
+4. Press Play to start
+
+### Basic Controls
+- **WASD** - Move character
+- **Mouse** - Look around
+- **E** - Interact with objects
+- **V** - Toggle shape building UI
+- **T** - Quick test shape building
+- **Mouse1** - Attack/destroy objects
+- **Tab** - Open inventory
+
+## 📚 Documentation
+
+### User Guides
+- [Getting Started](./docs/user-guides/getting-started.md)
+- [Building System Guide](./docs/user-guides/building-system.md)
+- [Crafting & Resources](./docs/user-guides/crafting-resources.md)
+- [Farm Management](./docs/user-guides/farm-management.md)
+- [Vegetation Systems](./docs/user-guides/vegetation-systems.md)
+
+### Technical Documentation
+- [Architecture Overview](./docs/technical/architecture.md)
+- [API Reference](./docs/technical/api-reference.md)
+- [Performance Optimization](./docs/technical/performance.md)
+- [ScriptableObject Usage](./docs/technical/scriptable-objects.md)
+
+## 🛠️ Development
+
+### Project Structure
+```
+Assets/
+├── Scripts/
+│   ├── AdvancedBuilding/     # Shape creation and morphing
+│   ├── Crafting/            # Inventory, crafting, building
+│   ├── Vegetation/          # Procedural generation systems
+│   └── Systems/             # Core game systems
+├── ScriptableObjects/       # Game data assets
+├── Scenes/                  # Game scenes
+└── TutorialInfo/           # Tutorial assets
+```
+
+### Key Components
+- **ShapeCreator.cs** - Procedural shape generation
+- **ShapeMorpher.cs** - Shape modification tools
+- **CraftingInventoryManager.cs** - Inventory system
+- **BuildingManager.cs** - Building placement logic
+- **VegetationManager.cs** - Vegetation generation coordinator
+
+### Building the Project
+1. Open in Unity Editor
+2. Go to File → Build Settings
+3. Select target platform
+4. Click "Build"
+
+## 🎯 Game Progression
+
+### Early Game
+- Gather basic resources (wood, stone)
+- Build simple structures
+- Learn crafting recipes
+- Establish your first farm
+
+### Mid Game
+- Expand farming operations
+- Unlock advanced crafting stations
+- Begin shape morphing construction
+- Create custom buildings
+
+### Late Game
+- Master shape morphing tools
+- Build complex structures
+- Create cities and settlements
+- Maximize resource production
+
+## 🐛 Troubleshooting
+
+### Common Issues
+- **Building UI not showing**: Ensure ShapeBuildingTest component is in scene
+- **Shapes not generating**: Check ShapeCreator component initialization
+- **Inventory not working**: Verify CraftingInventoryManager is present
+- **Performance issues**: Reduce vegetation density or shape complexity
+
+### Debug Mode
+- Press `F1` to toggle debug information
+- Check console for error messages
+- Use Unity Profiler for performance analysis
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
+
+### Code Standards
+- Use C# coding conventions
+- Add XML documentation comments
+- Follow Unity best practices
+- Test on multiple platforms
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🙏 Acknowledgments
+
+- Unity Technologies for the amazing engine
+- Open-source community for inspiration and tools
+- Beta testers and community feedback
+
+---
+
+**Happy Building!** 🏗️</content>
+<parameter name="filePath">/Users/home/Desktop/HeavyWater/README.md
