@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { PlayerStats } from "./PlayerController";
 import { Weapon } from "./WeaponsSystem";
 
@@ -11,6 +11,10 @@ interface GameUIProps {
   waveNumber: number;
   chestCount: number;
   showMessage: string | null;
+  jetpackFuel?: number;
+  maxJetpackFuel?: number;
+  playerState?: string;
+  comboInfo?: { name: string; index: number } | null;
 }
 
 export const GameUI: React.FC<GameUIProps> = ({
@@ -22,13 +26,17 @@ export const GameUI: React.FC<GameUIProps> = ({
   waveNumber,
   chestCount,
   showMessage,
+  jetpackFuel = 100,
+  maxJetpackFuel = 100,
+  playerState = "idle",
+  comboInfo = null,
 }) => {
   return (
     <div className="fixed inset-0 pointer-events-none" style={{ fontFamily: "'Press Start 2P', monospace" }}>
       <div className="absolute top-4 left-4 bg-black/80 border-2 border-cyan-400 p-4 rounded-lg">
         <div className="text-cyan-400 text-xs mb-2">DETROIT 3026</div>
-        
-        <div className="mb-3">
+
+        <div className="mb-2">
           <div className="text-red-400 text-xs mb-1">HEALTH</div>
           <div className="w-48 h-4 bg-gray-800 border border-red-500 rounded">
             <div
@@ -39,15 +47,35 @@ export const GameUI: React.FC<GameUIProps> = ({
           <div className="text-red-400 text-xs mt-1">{Math.floor(stats.health)} / {stats.maxHealth}</div>
         </div>
 
-        <div className="mb-3">
+        <div className="mb-2">
           <div className="text-blue-400 text-xs mb-1">ARMOR</div>
-          <div className="w-48 h-4 bg-gray-800 border border-blue-500 rounded">
+          <div className="w-48 h-3 bg-gray-800 border border-blue-500 rounded">
             <div
               className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded transition-all"
               style={{ width: `${(stats.armor / stats.maxArmor) * 100}%` }}
             />
           </div>
           <div className="text-blue-400 text-xs mt-1">{Math.floor(stats.armor)} / {stats.maxArmor}</div>
+        </div>
+
+        <div className="mb-2">
+          <div className="text-green-400 text-xs mb-1">STAMINA</div>
+          <div className="w-48 h-3 bg-gray-800 border border-green-500 rounded">
+            <div
+              className="h-full bg-gradient-to-r from-green-600 to-green-400 rounded transition-all"
+              style={{ width: `${(stats.stamina / stats.maxStamina) * 100}%` }}
+            />
+          </div>
+        </div>
+
+        <div className="mb-2">
+          <div className="text-yellow-400 text-xs mb-1">JETPACK</div>
+          <div className="w-48 h-3 bg-gray-800 border border-yellow-500 rounded">
+            <div
+              className="h-full bg-gradient-to-r from-yellow-600 to-yellow-400 rounded transition-all"
+              style={{ width: `${(jetpackFuel / maxJetpackFuel) * 100}%` }}
+            />
+          </div>
         </div>
 
         <div className="flex gap-4 text-xs">
@@ -60,6 +88,21 @@ export const GameUI: React.FC<GameUIProps> = ({
             <span className="text-white ml-2">{stats.level}</span>
           </div>
         </div>
+
+        {playerState !== "idle" && playerState !== "moving" && (
+          <div className="mt-2">
+            <span className={`text-xs px-2 py-1 rounded ${
+              playerState === "sprinting" ? "bg-green-900 text-green-400 border border-green-500" :
+              playerState === "dodging" ? "bg-cyan-900 text-cyan-400 border border-cyan-500" :
+              playerState === "attacking" ? "bg-red-900 text-red-400 border border-red-500" :
+              playerState === "jetpack" ? "bg-yellow-900 text-yellow-400 border border-yellow-500" :
+              playerState === "stunned" ? "bg-orange-900 text-orange-400 border border-orange-500" :
+              "bg-gray-900 text-gray-400 border border-gray-500"
+            }`}>
+              {playerState.toUpperCase()}
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="absolute top-4 right-4 bg-black/80 border-2 border-orange-400 p-4 rounded-lg">
@@ -76,6 +119,12 @@ export const GameUI: React.FC<GameUIProps> = ({
           <span className="text-yellow-400">CHESTS:</span>
           <span className="text-white ml-2">{chestCount}</span>
         </div>
+        {comboInfo && (
+          <div className="mt-2 text-xs">
+            <span className="text-pink-400">COMBO:</span>
+            <span className="text-white ml-2">{comboInfo.name} x{comboInfo.index + 1}</span>
+          </div>
+        )}
       </div>
 
       <div className="absolute bottom-4 left-4 bg-black/80 border-2 border-purple-400 p-4 rounded-lg">
@@ -99,12 +148,12 @@ export const GameUI: React.FC<GameUIProps> = ({
       <div className="absolute bottom-4 right-4 bg-black/80 border-2 border-gray-600 p-3 rounded-lg text-xs">
         <div className="text-gray-400 mb-2">CONTROLS</div>
         <div className="text-gray-300 space-y-1">
-          <div>WASD - Move</div>
-          <div>MOUSE - Look</div>
-          <div>LMB - Fire</div>
-          <div>1-6 - Weapons</div>
-          <div>R - Reload</div>
-          <div>SPACE - Jump</div>
+          <div>WASD - Move | SHIFT - Sprint</div>
+          <div>MOUSE - Look | LMB - Fire</div>
+          <div>1-6 - Weapons | R - Reload</div>
+          <div>SPACE - Jump/Jetpack</div>
+          <div>Q - Dodge | F - Parry</div>
+          <div>V - Melee | B - Heavy Melee</div>
         </div>
       </div>
 

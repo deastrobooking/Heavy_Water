@@ -5,6 +5,8 @@ import { PlayerController, PlayerStats } from "./PlayerController";
 import { WeaponsSystem, Weapon } from "./WeaponsSystem";
 import { EnemySystem } from "./EnemySystem";
 import { ChestSystem, Loot } from "./ChestSystem";
+import { CombatSystem } from "./CombatSystem";
+import { EventBus, GameEvents } from "./EventBus";
 import { GameUI } from "./GameUI";
 import { MainMenu } from "./MainMenu";
 
@@ -17,6 +19,7 @@ export const Game: React.FC = () => {
   const weaponsRef = useRef<WeaponsSystem | null>(null);
   const enemySystemRef = useRef<EnemySystem | null>(null);
   const chestSystemRef = useRef<ChestSystem | null>(null);
+  const combatSystemRef = useRef<CombatSystem | null>(null);
 
   const [gamePhase, setGamePhase] = useState<GamePhase>("menu");
   const [stats, setStats] = useState<PlayerStats>({
@@ -24,6 +27,8 @@ export const Game: React.FC = () => {
     maxHealth: 100,
     armor: 50,
     maxArmor: 100,
+    stamina: 100,
+    maxStamina: 100,
     credits: 0,
     experience: 0,
     level: 1,
@@ -35,6 +40,10 @@ export const Game: React.FC = () => {
   const [waveNumber, setWaveNumber] = useState(1);
   const [chestCount, setChestCount] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
+  const [jetpackFuel, setJetpackFuel] = useState(100);
+  const [maxJetpackFuel, setMaxJetpackFuel] = useState(100);
+  const [playerState, setPlayerState] = useState("idle");
+  const [comboInfo, setComboInfo] = useState<{ name: string; index: number } | null>(null);
 
   const showMessage = useCallback((msg: string, duration: number = 2000) => {
     setMessage(msg);
@@ -76,6 +85,9 @@ export const Game: React.FC = () => {
   const initializeGame = useCallback(() => {
     if (!canvasRef.current) return;
 
+    const bus = EventBus.getInstance();
+    bus.clear();
+
     const engine = new BabylonEngine(canvasRef.current);
     engineRef.current = engine;
 
@@ -87,12 +99,12 @@ export const Game: React.FC = () => {
 
     const weapons = new WeaponsSystem(engine.getScene(), engine.getCamera());
     weaponsRef.current = weapons;
-    
+
     weapons.setOnAmmoChange((a, m) => {
       setAmmo(a);
       setMaxAmmo(m);
     });
-    
+
     weapons.setOnWeaponChange((w) => {
       setCurrentWeapon(w);
     });
@@ -103,6 +115,14 @@ export const Game: React.FC = () => {
       setAmmo(initialWeapon.ammo);
       setMaxAmmo(initialWeapon.maxAmmo);
     }
+
+    const combatSystem = new CombatSystem(engine.getScene(), engine.getCamera());
+    combatSystemRef.current = combatSystem;
+
+    player.setMeleeCallbacks(
+      () => combatSystem.onLightAttack(),
+      () => combatSystem.onHeavyAttack()
+    );
 
     const enemySystem = new EnemySystem(engine.getScene());
     enemySystemRef.current = enemySystem;
@@ -116,6 +136,31 @@ export const Game: React.FC = () => {
       enemySystem.spawnEnemy(player.getPosition());
     }
 
+    bus.on(GameEvents.COMBO_HIT, (data: any) => {
+      setComboInfo({ name: data.comboName, index: data.comboIndex });
+      setTimeout(() => setComboInfo(null), 1000);
+    });
+
+    bus.on(GameEvents.ENEMY_KILLED, (data: any) => {
+      player.addCredits(data.credits);
+      player.addExperience(data.experience);
+      showMessage(`+${data.credits} CREDITS | +${data.experience} XP`, 1000);
+    });
+
+    bus.on(GameEvents.PLAYER_DODGE, () => {
+      showMessage("DODGE!", 500);
+    });
+
+    bus.on(GameEvents.PLAYER_PARRY, (data: any) => {
+      if (data?.success) {
+        showMessage("PARRY!", 500);
+      }
+    });
+
+    bus.on(GameEvents.PLAYER_LEVEL_UP, (data: any) => {
+      showMessage(`LEVEL UP! LVL ${data.level}`, 3000);
+    });
+
     let lastTime = performance.now();
     let waveTimer = 0;
 
@@ -123,25 +168,23 @@ export const Game: React.FC = () => {
       const now = performance.now();
       const deltaTime = now - lastTime;
       lastTime = now;
+      const dt = deltaTime / 1000;
 
-      player.update();
+      player.update(dt);
       const playerPos = player.getPosition();
+
+      combatSystem.update(dt);
 
       const enemyMeshes = enemySystem.getEnemyMeshes();
       const hits = weapons.update(enemyMeshes);
 
       for (const hit of hits) {
-        const result = enemySystem.damageEnemy(hit.hitEnemy, hit.damage);
-        if (result.killed) {
-          player.addCredits(result.credits);
-          player.addExperience(result.experience);
-          showMessage(`+${result.credits} CREDITS | +${result.experience} XP`, 1000);
-        }
+        enemySystem.damageEnemy(hit.hitEnemy, hit.damage);
       }
 
       const enemyResult = enemySystem.update(playerPos, deltaTime);
       if (enemyResult.damage > 0) {
-        player.takeDamage(enemyResult.damage);
+        player.takeDamageSimple(enemyResult.damage);
         showMessage(`-${Math.floor(enemyResult.damage)} DAMAGE!`, 500);
       }
 
@@ -150,6 +193,9 @@ export const Game: React.FC = () => {
       setStats(player.getStats());
       setEnemyCount(enemySystem.getEnemyCount());
       setChestCount(chestSystem.getChestCount());
+      setJetpackFuel(player.getJetpackFuel());
+      setMaxJetpackFuel(player.getMaxJetpackFuel());
+      setPlayerState(player.getPlayerState());
 
       if (player.getStats().health <= 0) {
         setGamePhase("gameover");
@@ -176,35 +222,46 @@ export const Game: React.FC = () => {
   }, [initializeGame]);
 
   const handleRestart = useCallback(() => {
+    if (combatSystemRef.current) {
+      combatSystemRef.current.dispose();
+    }
     if (engineRef.current) {
       engineRef.current.dispose();
       engineRef.current = null;
     }
+    EventBus.getInstance().clear();
     setStats({
       health: 100,
       maxHealth: 100,
       armor: 50,
       maxArmor: 100,
+      stamina: 100,
+      maxStamina: 100,
       credits: 0,
       experience: 0,
       level: 1,
     });
     setWaveNumber(1);
+    setComboInfo(null);
     initializeGame();
   }, [initializeGame]);
 
   useEffect(() => {
     return () => {
+      if (combatSystemRef.current) {
+        combatSystemRef.current.dispose();
+      }
       if (engineRef.current) {
         engineRef.current.dispose();
       }
+      EventBus.getInstance().clear();
     };
   }, []);
 
   return (
     <div className="w-full h-full bg-black">
       {gamePhase === "menu" && <MainMenu onStart={handleStart} />}
-      
+
       <canvas
         ref={canvasRef}
         className={`w-full h-full ${gamePhase === "menu" ? "hidden" : ""}`}
@@ -221,6 +278,10 @@ export const Game: React.FC = () => {
           waveNumber={waveNumber}
           chestCount={chestCount}
           showMessage={message}
+          jetpackFuel={jetpackFuel}
+          maxJetpackFuel={maxJetpackFuel}
+          playerState={playerState}
+          comboInfo={comboInfo}
         />
       )}
 

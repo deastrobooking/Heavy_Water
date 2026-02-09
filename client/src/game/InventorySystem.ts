@@ -1,0 +1,145 @@
+import { EventBus, GameEvents } from "./EventBus";
+
+export enum ItemType {
+  Weapon = "weapon",
+  Armor = "armor",
+  Consumable = "consumable",
+  Ammo = "ammo",
+  KeyItem = "keyItem",
+  Currency = "currency",
+  Material = "material",
+}
+
+export enum ItemRarity {
+  Common = "common",
+  Uncommon = "uncommon",
+  Rare = "rare",
+  Epic = "epic",
+  Legendary = "legendary",
+}
+
+export interface ItemDefinition {
+  id: string;
+  name: string;
+  type: ItemType;
+  rarity: ItemRarity;
+  maxStack: number;
+  value: number;
+  description: string;
+  icon?: string;
+  stats?: Record<string, number>;
+}
+
+export interface InventorySlot {
+  item: ItemDefinition;
+  quantity: number;
+}
+
+export class InventorySystem {
+  private slots: (InventorySlot | null)[];
+  private maxSlots: number;
+  private bus: EventBus;
+
+  constructor(maxSlots: number = 24) {
+    this.maxSlots = maxSlots;
+    this.slots = new Array(maxSlots).fill(null);
+    this.bus = EventBus.getInstance();
+  }
+
+  addItem(item: ItemDefinition, quantity: number = 1): number {
+    let remaining = quantity;
+
+    for (let i = 0; i < this.maxSlots && remaining > 0; i++) {
+      const slot = this.slots[i];
+      if (slot && slot.item.id === item.id && slot.quantity < item.maxStack) {
+        const canAdd = Math.min(remaining, item.maxStack - slot.quantity);
+        slot.quantity += canAdd;
+        remaining -= canAdd;
+      }
+    }
+
+    for (let i = 0; i < this.maxSlots && remaining > 0; i++) {
+      if (!this.slots[i]) {
+        const canAdd = Math.min(remaining, item.maxStack);
+        this.slots[i] = { item, quantity: canAdd };
+        remaining -= canAdd;
+      }
+    }
+
+    if (remaining < quantity) {
+      this.bus.emit(GameEvents.INVENTORY_CHANGED);
+    }
+
+    return remaining;
+  }
+
+  removeItem(itemId: string, quantity: number = 1): boolean {
+    let toRemove = quantity;
+
+    for (let i = this.maxSlots - 1; i >= 0 && toRemove > 0; i--) {
+      const slot = this.slots[i];
+      if (slot && slot.item.id === itemId) {
+        const canRemove = Math.min(toRemove, slot.quantity);
+        slot.quantity -= canRemove;
+        toRemove -= canRemove;
+        if (slot.quantity <= 0) {
+          this.slots[i] = null;
+        }
+      }
+    }
+
+    if (toRemove < quantity) {
+      this.bus.emit(GameEvents.INVENTORY_CHANGED);
+    }
+
+    return toRemove === 0;
+  }
+
+  getSlot(index: number): InventorySlot | null {
+    return this.slots[index] ?? null;
+  }
+
+  getSlots(): (InventorySlot | null)[] {
+    return [...this.slots];
+  }
+
+  getItemCount(itemId: string): number {
+    let count = 0;
+    for (const slot of this.slots) {
+      if (slot && slot.item.id === itemId) {
+        count += slot.quantity;
+      }
+    }
+    return count;
+  }
+
+  hasItem(itemId: string, quantity: number = 1): boolean {
+    return this.getItemCount(itemId) >= quantity;
+  }
+
+  isFull(): boolean {
+    return this.slots.every(s => s !== null);
+  }
+
+  getMaxSlots(): number {
+    return this.maxSlots;
+  }
+
+  clear(): void {
+    this.slots.fill(null);
+    this.bus.emit(GameEvents.INVENTORY_CHANGED);
+  }
+}
+
+export const ITEM_DEFINITIONS: Record<string, ItemDefinition> = {
+  credits: { id: "credits", name: "Credits", type: ItemType.Currency, rarity: ItemRarity.Common, maxStack: 9999, value: 1, description: "Universal currency" },
+  health_pack: { id: "health_pack", name: "Health Pack", type: ItemType.Consumable, rarity: ItemRarity.Common, maxStack: 10, value: 25, description: "Restores 50 health", stats: { healAmount: 50 } },
+  armor_shard: { id: "armor_shard", name: "Armor Shard", type: ItemType.Consumable, rarity: ItemRarity.Common, maxStack: 10, value: 30, description: "Restores 25 armor", stats: { armorAmount: 25 } },
+  plasma_cell: { id: "plasma_cell", name: "Plasma Cell", type: ItemType.Ammo, rarity: ItemRarity.Common, maxStack: 200, value: 5, description: "Ammo for energy weapons" },
+  kinetic_rounds: { id: "kinetic_rounds", name: "Kinetic Rounds", type: ItemType.Ammo, rarity: ItemRarity.Common, maxStack: 200, value: 5, description: "Standard ammunition" },
+  rocket_ammo: { id: "rocket_ammo", name: "Rocket Ammo", type: ItemType.Ammo, rarity: ItemRarity.Uncommon, maxStack: 20, value: 50, description: "Explosive ordnance" },
+  grenade_pack: { id: "grenade_pack", name: "Grenade Pack", type: ItemType.Ammo, rarity: ItemRarity.Uncommon, maxStack: 12, value: 40, description: "Fusion grenades" },
+  shield_booster: { id: "shield_booster", name: "Shield Booster", type: ItemType.Consumable, rarity: ItemRarity.Rare, maxStack: 5, value: 100, description: "Temporarily doubles armor", stats: { armorBoost: 2, duration: 30 } },
+  damage_amp: { id: "damage_amp", name: "Damage Amplifier", type: ItemType.Consumable, rarity: ItemRarity.Rare, maxStack: 5, value: 120, description: "Increases damage 50% for 20s", stats: { damageMultiplier: 1.5, duration: 20 } },
+  xp_chip: { id: "xp_chip", name: "XP Chip", type: ItemType.Material, rarity: ItemRarity.Uncommon, maxStack: 50, value: 15, description: "Grants bonus experience", stats: { xpAmount: 25 } },
+};

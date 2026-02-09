@@ -54,8 +54,9 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart }) => {
         </button>
 
         <div className="mt-12 text-gray-500 text-xs">
-          <p>WASD to move | Mouse to look | Left Click to shoot</p>
-          <p className="mt-1">1-6 to switch weapons | R to reload | Space to jump</p>
+          <p>WASD - Move | SHIFT - Sprint | Mouse - Look | LMB - Fire</p>
+          <p className="mt-1">1-6 - Weapons | R - Reload | SPACE - Jump/Jetpack</p>
+          <p className="mt-1">Q - Dodge | F - Parry | V - Melee | B - Heavy Melee</p>
         </div>
 
         <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 mb-8">

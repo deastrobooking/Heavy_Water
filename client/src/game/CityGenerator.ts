@@ -85,6 +85,7 @@ export class CityGenerator {
     this.createHighways();
     this.createNeonLights();
     this.createSpaceports();
+    this.createStreetLights();
   }
 
   private createGround(): void {
@@ -103,8 +104,52 @@ export class CityGenerator {
   }
 
   private createRiver(): void {
+    BABYLON.Effect.ShadersStore["waterVertexShader"] = `
+      precision highp float;
+      attribute vec3 position;
+      attribute vec2 uv;
+      uniform mat4 worldViewProjection;
+      uniform mat4 world;
+      uniform float time;
+      varying vec2 vUV;
+      varying vec3 vPosition;
+      varying float vWave;
+      void main() {
+        vec3 pos = position;
+        float wave1 = sin(pos.x * 0.15 + time * 1.5) * 0.3;
+        float wave2 = sin(pos.x * 0.08 + pos.z * 0.1 + time * 0.8) * 0.2;
+        float wave3 = cos(pos.z * 0.12 + time * 1.2) * 0.15;
+        pos.y += wave1 + wave2 + wave3;
+        vWave = (wave1 + wave2 + wave3) * 0.5 + 0.5;
+        gl_Position = worldViewProjection * vec4(pos, 1.0);
+        vUV = uv;
+        vPosition = (world * vec4(pos, 1.0)).xyz;
+      }
+    `;
+
+    BABYLON.Effect.ShadersStore["waterFragmentShader"] = `
+      precision highp float;
+      varying vec2 vUV;
+      varying vec3 vPosition;
+      varying float vWave;
+      uniform float time;
+      void main() {
+        vec3 deepColor = vec3(0.0, 0.08, 0.2);
+        vec3 shallowColor = vec3(0.0, 0.3, 0.5);
+        vec3 foamColor = vec3(0.2, 0.6, 0.8);
+        float foam = smoothstep(0.6, 0.8, vWave);
+        vec3 waterColor = mix(deepColor, shallowColor, vWave);
+        waterColor = mix(waterColor, foamColor, foam * 0.4);
+        float sparkle = pow(sin(vPosition.x * 2.0 + time * 3.0) * sin(vPosition.z * 2.5 + time * 2.0), 8.0) * 0.3;
+        waterColor += vec3(sparkle * 0.5, sparkle * 0.8, sparkle);
+        float neonReflect = sin(vPosition.x * 0.05 + time * 0.5) * 0.5 + 0.5;
+        waterColor += vec3(neonReflect * 0.05, neonReflect * 0.02, neonReflect * 0.08);
+        gl_FragColor = vec4(waterColor, 0.85);
+      }
+    `;
+
     const riverPath: BABYLON.Vector3[] = [];
-    for (let i = -250; i <= 250; i += 10) {
+    for (let i = -250; i <= 250; i += 5) {
       const z = -200 + Math.sin(i * 0.02) * 20;
       riverPath.push(new BABYLON.Vector3(i, 0.1, z));
     }
@@ -116,16 +161,69 @@ export class CityGenerator {
           riverPath.map((p) => new BABYLON.Vector3(p.x, p.y, p.z - 30)),
           riverPath.map((p) => new BABYLON.Vector3(p.x, p.y, p.z + 30)),
         ],
+        sideOrientation: BABYLON.Mesh.DOUBLESIDE,
       },
       this.scene
     );
 
-    const riverMat = new BABYLON.StandardMaterial("riverMat", this.scene);
-    riverMat.diffuseColor = new BABYLON.Color3(0.0, 0.2, 0.4);
-    riverMat.specularColor = new BABYLON.Color3(0.5, 0.7, 1.0);
-    riverMat.emissiveColor = new BABYLON.Color3(0.0, 0.1, 0.2);
-    riverMat.alpha = 0.8;
-    river.material = riverMat;
+    const waterMat = new BABYLON.ShaderMaterial(
+      "waterShader",
+      this.scene,
+      { vertex: "water", fragment: "water" },
+      {
+        attributes: ["position", "uv"],
+        uniforms: ["worldViewProjection", "world", "time"],
+      }
+    );
+    waterMat.setFloat("time", 0);
+    waterMat.alpha = 0.85;
+    waterMat.backFaceCulling = false;
+    river.material = waterMat;
+
+    this.scene.onBeforeRenderObservable.add(() => {
+      waterMat.setFloat("time", performance.now() / 1000);
+    });
+  }
+
+  private createStreetLights(): void {
+    const lightColors = [
+      new BABYLON.Color3(0, 1, 1),
+      new BABYLON.Color3(1, 0, 1),
+      new BABYLON.Color3(1, 0.7, 0),
+    ];
+
+    for (let x = -200; x <= 200; x += 30) {
+      for (let z = -200; z <= 200; z += 60) {
+        if (Math.abs(z + 200) < 40) continue;
+
+        const poleHeight = 8;
+        const pole = BABYLON.MeshBuilder.CreateCylinder(
+          "streetPole",
+          { height: poleHeight, diameter: 0.3 },
+          this.scene
+        );
+        pole.position = new BABYLON.Vector3(x, poleHeight / 2, z);
+
+        const poleMat = new BABYLON.StandardMaterial("poleMat", this.scene);
+        poleMat.diffuseColor = new BABYLON.Color3(0.15, 0.15, 0.2);
+        poleMat.emissiveColor = new BABYLON.Color3(0.02, 0.02, 0.03);
+        pole.material = poleMat;
+
+        const lamp = BABYLON.MeshBuilder.CreateSphere("streetLamp", { diameter: 0.8 }, this.scene);
+        lamp.position = new BABYLON.Vector3(x, poleHeight + 0.2, z);
+
+        const color = lightColors[Math.floor(Math.random() * lightColors.length)];
+        const lampMat = new BABYLON.StandardMaterial("lampMat", this.scene);
+        lampMat.emissiveColor = color;
+        lampMat.diffuseColor = color;
+        lamp.material = lampMat;
+
+        const light = new BABYLON.PointLight("streetLight", new BABYLON.Vector3(x, poleHeight + 0.5, z), this.scene);
+        light.diffuse = color;
+        light.intensity = 0.4;
+        light.range = 15;
+      }
+    }
   }
 
   private createDowntown(): void {
