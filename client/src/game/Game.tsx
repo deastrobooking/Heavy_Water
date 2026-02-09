@@ -229,6 +229,7 @@ export const Game: React.FC = () => {
 
     let lastTime = performance.now();
     let waveTimer = 0;
+    let uiThrottleTimer = 0;
 
     engine.start(() => {
       const now = performance.now();
@@ -283,8 +284,12 @@ export const Game: React.FC = () => {
       setBeamSabreLevel(beamSabre.getLevel);
       setActiveElement(armorSystem.getActiveElement());
       setArmorDefense(armorSystem.getTotalDefense());
-      setCompanionCount(companionSystem.getCompanionCount());
-      setCompanionInfo(companionSystem.getCompanions());
+      uiThrottleTimer += dt;
+      if (uiThrottleTimer >= 0.5) {
+        uiThrottleTimer = 0;
+        setCompanionCount(companionSystem.getCompanionCount());
+        setCompanionInfo(companionSystem.getCompanions());
+      }
 
       if (player.getStats().health <= 0) {
         setGamePhase("gameover");
