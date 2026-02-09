@@ -50,15 +50,24 @@ export class CityGenerator {
       void main() {
         float intensity = dot(vNormal, -lightDirection);
         float cellShade;
-        if (intensity > 0.8) cellShade = 1.0;
-        else if (intensity > 0.5) cellShade = 0.7;
-        else if (intensity > 0.2) cellShade = 0.5;
-        else cellShade = 0.3;
+        if (intensity > 0.85) cellShade = 1.0;
+        else if (intensity > 0.6) cellShade = 0.75;
+        else if (intensity > 0.35) cellShade = 0.55;
+        else if (intensity > 0.1) cellShade = 0.35;
+        else cellShade = 0.2;
         
         vec3 finalColor = baseColor * cellShade;
         
-        float edgeFactor = 1.0 - abs(dot(vNormal, normalize(vec3(0.0, 0.0, 1.0) - vPosition)));
-        finalColor += glowColor * pow(edgeFactor, 3.0) * 0.5;
+        vec3 viewDir = normalize(-vPosition);
+        float rim = 1.0 - max(dot(vNormal, viewDir), 0.0);
+        rim = smoothstep(0.6, 1.0, rim);
+        finalColor += glowColor * rim * 0.6;
+        
+        float outline = smoothstep(0.15, 0.2, abs(dot(vNormal, viewDir)));
+        finalColor *= outline;
+        
+        float panelLine = step(0.98, fract(vPosition.y * 0.15)) + step(0.98, fract(vPosition.x * 0.1));
+        finalColor += glowColor * panelLine * 0.15;
         
         gl_FragColor = vec4(finalColor, 1.0);
       }
@@ -275,11 +284,48 @@ export class CityGenerator {
         building.material = this.createBuildingMaterial(colorSet.base, colorSet.glow);
         this.buildings.push(building);
 
+        this.addRooftopPlatform(building.position.x, height, building.position.z, width, depth);
+
         if (height > 80) {
           this.addBuildingDetails(building, height, width, depth);
         }
       }
     }
+  }
+
+  private addRooftopPlatform(x: number, height: number, z: number, width: number, depth: number): void {
+    const platW = width + 4;
+    const platD = depth + 4;
+    const rooftop = BABYLON.MeshBuilder.CreateBox(
+      `rooftop_${x}_${z}`,
+      { height: 1, width: platW, depth: platD },
+      this.scene
+    );
+    rooftop.position = new BABYLON.Vector3(x, height + 0.5, z);
+
+    const rooftopMat = new BABYLON.StandardMaterial("rooftopMat", this.scene);
+    rooftopMat.diffuseColor = new BABYLON.Color3(0.15, 0.18, 0.22);
+    rooftopMat.emissiveColor = new BABYLON.Color3(0.02, 0.03, 0.05);
+    rooftop.material = rooftopMat;
+
+    const edgeMat = new BABYLON.StandardMaterial("roofEdgeMat", this.scene);
+    edgeMat.emissiveColor = new BABYLON.Color3(0, 0.5, 0.7);
+    edgeMat.diffuseColor = new BABYLON.Color3(0, 0.2, 0.3);
+
+    const edgeN = BABYLON.MeshBuilder.CreateBox(`roofEdge`, { height: 0.3, width: platW, depth: 0.3 }, this.scene);
+    edgeN.position = new BABYLON.Vector3(x, height + 1.15, z + platD / 2);
+    edgeN.material = edgeMat;
+    const edgeS = BABYLON.MeshBuilder.CreateBox(`roofEdge`, { height: 0.3, width: platW, depth: 0.3 }, this.scene);
+    edgeS.position = new BABYLON.Vector3(x, height + 1.15, z - platD / 2);
+    edgeS.material = edgeMat;
+    const edgeE = BABYLON.MeshBuilder.CreateBox(`roofEdge`, { height: 0.3, width: 0.3, depth: platD }, this.scene);
+    edgeE.position = new BABYLON.Vector3(x + platW / 2, height + 1.15, z);
+    edgeE.material = edgeMat;
+    const edgeW = BABYLON.MeshBuilder.CreateBox(`roofEdge`, { height: 0.3, width: 0.3, depth: platD }, this.scene);
+    edgeW.position = new BABYLON.Vector3(x - platW / 2, height + 1.15, z);
+    edgeW.material = edgeMat;
+
+    this.platforms.push(rooftop);
   }
 
   private addBuildingDetails(parent: BABYLON.Mesh, height: number, width: number, depth: number): void {
@@ -335,6 +381,7 @@ export class CityGenerator {
         );
         factory.material = factoryMat;
         this.buildings.push(factory);
+        this.addRooftopPlatform(x, height, z, 30, 30);
 
         const chimneyCount = 2 + Math.floor(seededRandom(seed + 500) * 3);
         for (let i = 0; i < chimneyCount; i++) {
@@ -378,6 +425,7 @@ export class CityGenerator {
         );
         building.material = material;
         this.buildings.push(building);
+        this.addRooftopPlatform(x, height, z, 12, 12);
       }
     }
   }
@@ -1115,6 +1163,7 @@ export class CityGenerator {
         const colorSet = outerColors[Math.floor(seededRandom(seed + 400) * outerColors.length)];
         building.material = this.createBuildingMaterial(colorSet.base, colorSet.glow);
         this.buildings.push(building);
+        this.addRooftopPlatform(bx, height, bz, width, width);
       }
     }
   }

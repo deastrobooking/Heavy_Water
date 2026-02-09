@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { PlayerStats } from "./PlayerController";
 import { Weapon } from "./WeaponsSystem";
 
@@ -15,7 +15,20 @@ interface GameUIProps {
   maxJetpackFuel?: number;
   playerState?: string;
   comboInfo?: { name: string; index: number } | null;
+  specialWeapons?: { slot: number; name: string; ammo: number; maxAmmo: number; cooldownRemaining: number; level: number }[];
+  beamSabreActive?: boolean;
+  beamSabreLevel?: number;
+  activeElement?: string | null;
+  armorDefense?: number;
 }
+
+const ELEMENT_COLORS: Record<string, { text: string; border: string; bg: string }> = {
+  Fire: { text: "text-orange-400", border: "border-orange-500", bg: "bg-orange-900/50" },
+  Ice: { text: "text-sky-400", border: "border-sky-500", bg: "bg-sky-900/50" },
+  Electric: { text: "text-yellow-300", border: "border-yellow-400", bg: "bg-yellow-900/50" },
+  DarkEnergy: { text: "text-purple-400", border: "border-purple-500", bg: "bg-purple-900/50" },
+  Insectoid: { text: "text-lime-400", border: "border-lime-500", bg: "bg-lime-900/50" },
+};
 
 export const GameUI: React.FC<GameUIProps> = ({
   stats,
@@ -30,6 +43,11 @@ export const GameUI: React.FC<GameUIProps> = ({
   maxJetpackFuel = 200,
   playerState = "idle",
   comboInfo = null,
+  specialWeapons = [],
+  beamSabreActive = false,
+  beamSabreLevel = 1,
+  activeElement = null,
+  armorDefense = 0,
 }) => {
   return (
     <div className="fixed inset-0 pointer-events-none" style={{ fontFamily: "'Press Start 2P', monospace" }}>
@@ -48,7 +66,7 @@ export const GameUI: React.FC<GameUIProps> = ({
         </div>
 
         <div className="mb-2">
-          <div className="text-blue-400 text-xs mb-1">ARMOR</div>
+          <div className="text-blue-400 text-xs mb-1">ARMOR {armorDefense > 0 && <span className="text-blue-300">DEF:{armorDefense}</span>}</div>
           <div className="w-48 h-3 bg-gray-800 border border-blue-500 rounded">
             <div
               className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded transition-all"
@@ -89,6 +107,14 @@ export const GameUI: React.FC<GameUIProps> = ({
           </div>
         </div>
 
+        {activeElement && (
+          <div className="mt-2">
+            <span className={`text-xs px-2 py-1 rounded border ${ELEMENT_COLORS[activeElement]?.text || "text-gray-400"} ${ELEMENT_COLORS[activeElement]?.border || "border-gray-500"} ${ELEMENT_COLORS[activeElement]?.bg || "bg-gray-900/50"}`}>
+              {activeElement.toUpperCase()} ELEMENT
+            </span>
+          </div>
+        )}
+
         {playerState !== "idle" && playerState !== "moving" && (
           <div className="mt-2">
             <span className={`text-xs px-2 py-1 rounded ${
@@ -125,6 +151,14 @@ export const GameUI: React.FC<GameUIProps> = ({
             <span className="text-white ml-2">{comboInfo.name} x{comboInfo.index + 1}</span>
           </div>
         )}
+
+        {beamSabreActive && (
+          <div className="mt-2 text-xs">
+            <span className="text-cyan-300 px-2 py-1 rounded border border-cyan-400 bg-cyan-900/50">
+              BEAM SABRE LV{beamSabreLevel}
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="absolute bottom-4 left-4 bg-black/80 border-2 border-purple-400 p-4 rounded-lg">
@@ -145,15 +179,38 @@ export const GameUI: React.FC<GameUIProps> = ({
         )}
       </div>
 
+      {specialWeapons.length > 0 && (
+        <div className="absolute bottom-4 left-72 bg-black/80 border-2 border-pink-400 p-3 rounded-lg">
+          <div className="text-pink-400 text-xs mb-2">SPECIAL WEAPONS</div>
+          <div className="space-y-1">
+            {specialWeapons.map((sw) => (
+              <div key={sw.slot} className="flex items-center gap-2 text-xs">
+                <span className={`${sw.cooldownRemaining > 0 ? "text-gray-500" : "text-pink-300"}`}>
+                  {sw.slot}:{sw.name}
+                </span>
+                <span className="text-gray-400">
+                  {sw.ammo}/{sw.maxAmmo}
+                </span>
+                {sw.cooldownRemaining > 0 && (
+                  <span className="text-red-400">{sw.cooldownRemaining.toFixed(1)}s</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="absolute bottom-4 right-4 bg-black/80 border-2 border-gray-600 p-3 rounded-lg text-xs">
         <div className="text-gray-400 mb-2">CONTROLS</div>
         <div className="text-gray-300 space-y-1">
           <div>WASD - Move | SHIFT - Sprint</div>
           <div>MOUSE - Look | LMB - Fire</div>
           <div>1-6 - Weapons | R - Reload</div>
+          <div>7-0 - Special Weapons</div>
           <div>SPACE - Jump/Jetpack</div>
           <div>Q - Dodge | F - Parry</div>
           <div>V - Melee | B - Heavy Melee</div>
+          <div>T - Toggle Beam Sabre</div>
         </div>
       </div>
 

@@ -275,7 +275,7 @@ export class PlayerController implements IDamageable {
   private updateJetpack(dt: number): void {
     if (this.keys["Space"] && !this.isGrounded && this.jetpackFuel > 0 && !this.isDodging) {
       this.isJetpacking = true;
-      this.velocity.y = Math.min(this.velocity.y + this.jetpackForce, 0.3);
+      this.velocity.y = Math.min(this.velocity.y + this.jetpackForce, 0.35);
       this.jetpackFuel -= this.jetpackFuelCost * dt;
       if (this.jetpackFuel <= 0) {
         this.jetpackFuel = 0;
@@ -302,6 +302,9 @@ export class PlayerController implements IDamageable {
     }
   }
 
+  private airMomentumX: number = 0;
+  private airMomentumZ: number = 0;
+
   private updateMovement(dt: number): void {
     const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
     const right = this.camera.getDirection(BABYLON.Vector3.Right());
@@ -319,8 +322,21 @@ export class PlayerController implements IDamageable {
     if (this.keys["KeyA"]) moveDirection.addInPlace(right.scale(-speed));
     if (this.keys["KeyD"]) moveDirection.addInPlace(right.scale(speed));
 
-    this.velocity.x = moveDirection.x;
-    this.velocity.z = moveDirection.z;
+    if (this.isGrounded) {
+      this.velocity.x = moveDirection.x;
+      this.velocity.z = moveDirection.z;
+      this.airMomentumX = this.velocity.x;
+      this.airMomentumZ = this.velocity.z;
+    } else {
+      const airControl = 0.15;
+      if (this.isMoving()) {
+        this.velocity.x = this.airMomentumX + moveDirection.x * airControl;
+        this.velocity.z = this.airMomentumZ + moveDirection.z * airControl;
+      } else {
+        this.velocity.x = this.airMomentumX * 0.995;
+        this.velocity.z = this.airMomentumZ * 0.995;
+      }
+    }
 
     if (this.isMoving()) {
       if (this.isSprinting) {
@@ -356,8 +372,8 @@ export class PlayerController implements IDamageable {
       if (mesh.name === "player") return false;
       const n = mesh.name;
       return n === "ground" || n.startsWith("skyPlat_") || n.startsWith("bridge_seg") ||
-        n.startsWith("step_") || n === "mainHighway" || n === "crossHighway" ||
-        n === "spaceport";
+        n.startsWith("step_") || n.startsWith("rooftop_") || n === "mainHighway" ||
+        n === "crossHighway" || n === "spaceport";
     });
 
     if (hit && hit.hit && hit.pickedPoint) {

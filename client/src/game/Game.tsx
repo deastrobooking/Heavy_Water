@@ -6,7 +6,13 @@ import { WeaponsSystem, Weapon } from "./WeaponsSystem";
 import { EnemySystem } from "./EnemySystem";
 import { ChestSystem, Loot } from "./ChestSystem";
 import { CombatSystem } from "./CombatSystem";
+import { SpecialWeaponsSystem } from "./SpecialWeaponsSystem";
+import { BeamSabreSystem } from "./BeamSabreSystem";
+import { ArmorSystem } from "./ArmorSystem";
+import { CraftingSystem } from "./CraftingSystem";
+import { InventorySystem } from "./InventorySystem";
 import { EventBus, GameEvents } from "./EventBus";
+import { DamageType } from "./DamageSystem";
 import { GameUI } from "./GameUI";
 import { MainMenu } from "./MainMenu";
 
@@ -20,6 +26,11 @@ export const Game: React.FC = () => {
   const enemySystemRef = useRef<EnemySystem | null>(null);
   const chestSystemRef = useRef<ChestSystem | null>(null);
   const combatSystemRef = useRef<CombatSystem | null>(null);
+  const specialWeaponsRef = useRef<SpecialWeaponsSystem | null>(null);
+  const beamSabreRef = useRef<BeamSabreSystem | null>(null);
+  const armorSystemRef = useRef<ArmorSystem | null>(null);
+  const craftingSystemRef = useRef<CraftingSystem | null>(null);
+  const inventoryRef = useRef<InventorySystem | null>(null);
 
   const [gamePhase, setGamePhase] = useState<GamePhase>("menu");
   const [stats, setStats] = useState<PlayerStats>({
@@ -40,10 +51,15 @@ export const Game: React.FC = () => {
   const [waveNumber, setWaveNumber] = useState(1);
   const [chestCount, setChestCount] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
-  const [jetpackFuel, setJetpackFuel] = useState(100);
-  const [maxJetpackFuel, setMaxJetpackFuel] = useState(100);
+  const [jetpackFuel, setJetpackFuel] = useState(200);
+  const [maxJetpackFuel, setMaxJetpackFuel] = useState(200);
   const [playerState, setPlayerState] = useState("idle");
   const [comboInfo, setComboInfo] = useState<{ name: string; index: number } | null>(null);
+  const [specialWeaponInfo, setSpecialWeaponInfo] = useState<any[]>([]);
+  const [beamSabreActive, setBeamSabreActive] = useState(false);
+  const [beamSabreLevel, setBeamSabreLevel] = useState(1);
+  const [activeElement, setActiveElement] = useState<string | null>(null);
+  const [armorDefense, setArmorDefense] = useState(0);
 
   const showMessage = useCallback((msg: string, duration: number = 2000) => {
     setMessage(msg);
@@ -124,6 +140,24 @@ export const Game: React.FC = () => {
       () => combatSystem.onHeavyAttack()
     );
 
+    const specialWeapons = new SpecialWeaponsSystem(engine.getScene(), engine.getCamera());
+    specialWeaponsRef.current = specialWeapons;
+    specialWeapons.setOnSpecialWeaponChange(() => {
+      setSpecialWeaponInfo(specialWeapons.getActiveSpecialWeapons());
+    });
+
+    const beamSabre = new BeamSabreSystem(engine.getScene(), engine.getCamera());
+    beamSabreRef.current = beamSabre;
+
+    const inventory = new InventorySystem();
+    inventoryRef.current = inventory;
+
+    const armorSystem = new ArmorSystem();
+    armorSystemRef.current = armorSystem;
+
+    const craftingSystem = new CraftingSystem(inventory);
+    craftingSystemRef.current = craftingSystem;
+
     const enemySystem = new EnemySystem(engine.getScene());
     enemySystemRef.current = enemySystem;
 
@@ -179,13 +213,22 @@ export const Game: React.FC = () => {
       const hits = weapons.update(enemyMeshes);
 
       for (const hit of hits) {
+        const modifiedDamage = armorSystem.getModifiedOutgoingDamage(hit.damage);
+        enemySystem.damageEnemy(hit.hitEnemy, modifiedDamage);
+      }
+
+      const specialHits = specialWeapons.update(dt, enemyMeshes, playerPos);
+      for (const hit of specialHits) {
         enemySystem.damageEnemy(hit.hitEnemy, hit.damage);
       }
 
+      beamSabre.update(dt, enemyMeshes);
+
       const enemyResult = enemySystem.update(playerPos, deltaTime);
       if (enemyResult.damage > 0) {
-        player.takeDamageSimple(enemyResult.damage);
-        showMessage(`-${Math.floor(enemyResult.damage)} DAMAGE!`, 500);
+        const reducedDamage = armorSystem.calculateDamageReduction(enemyResult.damage, DamageType.Melee);
+        player.takeDamageSimple(reducedDamage);
+        showMessage(`-${Math.floor(reducedDamage)} DAMAGE!`, 500);
       }
 
       chestSystem.update(playerPos);
@@ -196,6 +239,10 @@ export const Game: React.FC = () => {
       setJetpackFuel(player.getJetpackFuel());
       setMaxJetpackFuel(player.getMaxJetpackFuel());
       setPlayerState(player.getPlayerState());
+      setBeamSabreActive(beamSabre.active);
+      setBeamSabreLevel(beamSabre.getLevel);
+      setActiveElement(armorSystem.getActiveElement());
+      setArmorDefense(armorSystem.getTotalDefense());
 
       if (player.getStats().health <= 0) {
         setGamePhase("gameover");
@@ -225,6 +272,12 @@ export const Game: React.FC = () => {
     if (combatSystemRef.current) {
       combatSystemRef.current.dispose();
     }
+    if (specialWeaponsRef.current) {
+      specialWeaponsRef.current.dispose();
+    }
+    if (beamSabreRef.current) {
+      beamSabreRef.current.dispose();
+    }
     if (engineRef.current) {
       engineRef.current.dispose();
       engineRef.current = null;
@@ -243,6 +296,11 @@ export const Game: React.FC = () => {
     });
     setWaveNumber(1);
     setComboInfo(null);
+    setSpecialWeaponInfo([]);
+    setBeamSabreActive(false);
+    setBeamSabreLevel(1);
+    setActiveElement(null);
+    setArmorDefense(0);
     initializeGame();
   }, [initializeGame]);
 
@@ -250,6 +308,12 @@ export const Game: React.FC = () => {
     return () => {
       if (combatSystemRef.current) {
         combatSystemRef.current.dispose();
+      }
+      if (specialWeaponsRef.current) {
+        specialWeaponsRef.current.dispose();
+      }
+      if (beamSabreRef.current) {
+        beamSabreRef.current.dispose();
       }
       if (engineRef.current) {
         engineRef.current.dispose();
@@ -282,6 +346,11 @@ export const Game: React.FC = () => {
           maxJetpackFuel={maxJetpackFuel}
           playerState={playerState}
           comboInfo={comboInfo}
+          specialWeapons={specialWeaponInfo}
+          beamSabreActive={beamSabreActive}
+          beamSabreLevel={beamSabreLevel}
+          activeElement={activeElement}
+          armorDefense={armorDefense}
         />
       )}
 
