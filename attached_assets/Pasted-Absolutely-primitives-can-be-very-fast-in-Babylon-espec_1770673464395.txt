@@ -1,0 +1,554 @@
+Absolutely — primitives can be *very* fast in Babylon, especially if you (1) **reuse materials**, (2) **instance/thin-instance repeated parts**, and (3) keep draw calls low.
+
+Below is a **Transformers-themed “simple robot” generator** (procedural from primitives) plus a **character design system** so you can define / tweak / save robots as JSON and spawn them in-game.
+
+---
+
+## 1) Robot design data model (save/load as JSON)
+
+```ts
+// RobotDesigner.ts
+import * as BABYLON from "@babylonjs/core";
+
+export type RobotArchetype = "scout" | "brute" | "flyer" | "tank";
+
+export interface RobotColors {
+  primary: BABYLON.Color3;
+  secondary: BABYLON.Color3;
+  emissive: BABYLON.Color3;
+}
+
+export interface RobotStyle {
+  archetype: RobotArchetype;
+  scale: number;
+
+  // proportions
+  torsoWidth: number;
+  torsoHeight: number;
+  torsoDepth: number;
+
+  headSize: number;
+
+  armLength: number;
+  armThickness: number;
+
+  legLength: number;
+  legThickness: number;
+
+  shoulderPadSize: number;
+  hipPadSize: number;
+
+  // extras
+  hasWings: boolean;
+  hasCannons: boolean;
+  hasBackpack: boolean;
+  hasVisor: boolean;
+
+  colors: RobotColors;
+}
+
+export interface RobotDescriptor {
+  name: string;
+  style: RobotStyle;
+}
+```
+
+---
+
+## 2) High-performance primitive robot builder (Transformers vibe)
+
+Key ideas:
+
+* **One material per color** (not per robot piece).
+* **Merged static parts** to reduce draw calls.
+* Optional **instancing for repeated parts** (legs/arms) if you want.
+
+```ts
+// RobotFactory.ts
+import * as BABYLON from "@babylonjs/core";
+import { RobotDescriptor, RobotStyle } from "./RobotDesigner";
+
+type MatKey = "primary" | "secondary" | "emissive";
+
+export class RobotFactory {
+  private scene: BABYLON.Scene;
+  private mats = new Map<string, BABYLON.StandardMaterial>();
+
+  constructor(scene: BABYLON.Scene) {
+    this.scene = scene;
+  }
+
+  // Material cache (reused across robots)
+  private getMat(key: MatKey, style: RobotStyle): BABYLON.StandardMaterial {
+    const c =
+      key === "primary" ? style.colors.primary :
+      key === "secondary" ? style.colors.secondary :
+      style.colors.emissive;
+
+    const id = `${key}_${c.r.toFixed(3)}_${c.g.toFixed(3)}_${c.b.toFixed(3)}`;
+    const cached = this.mats.get(id);
+    if (cached) return cached;
+
+    const m = new BABYLON.StandardMaterial(id, this.scene);
+    if (key === "emissive") {
+      m.emissiveColor = c;
+      m.diffuseColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+    } else {
+      m.diffuseColor = c;
+      m.emissiveColor = c.scale(0.15);
+      m.specularColor = new BABYLON.Color3(0.3, 0.3, 0.3);
+    }
+    this.mats.set(id, m);
+    return m;
+  }
+
+  /**
+   * Builds a single robot as a TransformNode root with merged meshes:
+   * - bodyGroup (primary)
+   * - trimGroup (secondary)
+   * - glowGroup (emissive)
+   *
+   * This keeps draw calls low (3 meshes per robot).
+   */
+  createRobot(desc: RobotDescriptor, position: BABYLON.Vector3): BABYLON.TransformNode {
+    const style = desc.style;
+
+    const root = new BABYLON.TransformNode(`robot_${desc.name}`, this.scene);
+    root.position.copyFrom(position);
+    root.scaling.setAll(style.scale);
+
+    // Collect parts by material bucket for merging
+    const primaryParts: BABYLON.Mesh[] = [];
+    const secondaryParts: BABYLON.Mesh[] = [];
+    const emissiveParts: BABYLON.Mesh[] = [];
+
+    // --- Torso (box + chest plate) ---
+    const torso = BABYLON.MeshBuilder.CreateBox("torso", {
+      width: style.torsoWidth,
+      height: style.torsoHeight,
+      depth: style.torsoDepth,
+    }, this.scene);
+    torso.position.y = style.legLength + style.torsoHeight * 0.5;
+    primaryParts.push(torso);
+
+    const chestPlate = BABYLON.MeshBuilder.CreateBox("chestPlate", {
+      width: style.torsoWidth * 0.95,
+      height: style.torsoHeight * 0.55,
+      depth: style.torsoDepth * 0.15,
+    }, this.scene);
+    chestPlate.position = torso.position.add(new BABYLON.Vector3(0, style.torsoHeight * 0.1, style.torsoDepth * 0.55));
+    secondaryParts.push(chestPlate);
+
+    // --- Head (box + visor glow) ---
+    const head = BABYLON.MeshBuilder.CreateBox("head", {
+      width: style.headSize * 0.9,
+      height: style.headSize * 0.9,
+      depth: style.headSize * 0.9,
+    }, this.scene);
+    head.position = torso.position.add(new BABYLON.Vector3(0, style.torsoHeight * 0.65, 0));
+    primaryParts.push(head);
+
+    if (style.hasVisor) {
+      const visor = BABYLON.MeshBuilder.CreateBox("visor", {
+        width: style.headSize * 0.75,
+        height: style.headSize * 0.2,
+        depth: style.headSize * 0.12,
+      }, this.scene);
+      visor.position = head.position.add(new BABYLON.Vector3(0, 0.05, style.headSize * 0.5));
+      emissiveParts.push(visor);
+    }
+
+    // --- Shoulders (pads) ---
+    const shoulderY = torso.position.y + style.torsoHeight * 0.35;
+    const shoulderX = style.torsoWidth * 0.6;
+
+    const makePad = (name: string, x: number) => {
+      const pad = BABYLON.MeshBuilder.CreateBox(name, {
+        width: style.shoulderPadSize,
+        height: style.shoulderPadSize * 0.6,
+        depth: style.shoulderPadSize * 0.8,
+      }, this.scene);
+      pad.position.set(x, shoulderY, 0);
+      secondaryParts.push(pad);
+    };
+    makePad("shoulderPadL", -shoulderX);
+    makePad("shoulderPadR",  shoulderX);
+
+    // --- Arms (upper + forearm) ---
+    const armAnchorY = shoulderY - style.shoulderPadSize * 0.2;
+    const armAnchorZ = 0;
+
+    const buildArm = (side: -1 | 1) => {
+      const upper = BABYLON.MeshBuilder.CreateCylinder("upperArm", {
+        height: style.armLength * 0.55,
+        diameter: style.armThickness,
+        tessellation: 8,
+      }, this.scene);
+      upper.rotation.z = Math.PI / 2;
+      upper.position.set(side * (shoulderX + style.armLength * 0.25), armAnchorY, armAnchorZ);
+      primaryParts.push(upper);
+
+      const fore = BABYLON.MeshBuilder.CreateCylinder("foreArm", {
+        height: style.armLength * 0.5,
+        diameter: style.armThickness * 0.9,
+        tessellation: 8,
+      }, this.scene);
+      fore.rotation.z = Math.PI / 2;
+      fore.position.set(side * (shoulderX + style.armLength * 0.70), armAnchorY - style.armThickness * 0.15, armAnchorZ);
+      primaryParts.push(fore);
+
+      // Simple “hand”
+      const hand = BABYLON.MeshBuilder.CreateBox("hand", {
+        width: style.armThickness * 0.7,
+        height: style.armThickness * 0.5,
+        depth: style.armThickness * 0.9,
+      }, this.scene);
+      hand.position.set(side * (shoulderX + style.armLength * 0.95), armAnchorY - style.armThickness * 0.15, armAnchorZ);
+      secondaryParts.push(hand);
+
+      // Optional cannon
+      if (style.hasCannons) {
+        const cannon = BABYLON.MeshBuilder.CreateCylinder("cannon", {
+          height: style.armLength * 0.35,
+          diameter: style.armThickness * 0.55,
+          tessellation: 10,
+        }, this.scene);
+        cannon.rotation.z = Math.PI / 2;
+        cannon.position = hand.position.add(new BABYLON.Vector3(side * (style.armLength * 0.2), 0, style.armThickness * 0.6));
+        secondaryParts.push(cannon);
+
+        const muzzle = BABYLON.MeshBuilder.CreateBox("muzzleGlow", {
+          width: style.armThickness * 0.25,
+          height: style.armThickness * 0.25,
+          depth: style.armThickness * 0.25,
+        }, this.scene);
+        muzzle.position = cannon.position.add(new BABYLON.Vector3(side * (style.armLength * 0.20), 0, 0));
+        emissiveParts.push(muzzle);
+      }
+    };
+    buildArm(-1);
+    buildArm( 1);
+
+    // --- Hips + Legs ---
+    const hipY = style.legLength;
+    const hip = BABYLON.MeshBuilder.CreateBox("hip", {
+      width: style.torsoWidth * 0.9,
+      height: style.hipPadSize * 0.35,
+      depth: style.torsoDepth * 0.7,
+    }, this.scene);
+    hip.position.set(0, hipY + style.hipPadSize * 0.2, 0);
+    secondaryParts.push(hip);
+
+    const legOffsetX = style.torsoWidth * 0.22;
+    const buildLeg = (side: -1 | 1) => {
+      const thigh = BABYLON.MeshBuilder.CreateBox("thigh", {
+        width: style.legThickness,
+        height: style.legLength * 0.55,
+        depth: style.legThickness * 1.1,
+      }, this.scene);
+      thigh.position.set(side * legOffsetX, style.legLength * 0.65, 0);
+      primaryParts.push(thigh);
+
+      const shin = BABYLON.MeshBuilder.CreateBox("shin", {
+        width: style.legThickness * 0.9,
+        height: style.legLength * 0.55,
+        depth: style.legThickness * 1.0,
+      }, this.scene);
+      shin.position.set(side * legOffsetX, style.legLength * 0.20, 0);
+      primaryParts.push(shin);
+
+      const foot = BABYLON.MeshBuilder.CreateBox("foot", {
+        width: style.legThickness * 1.2,
+        height: style.legThickness * 0.35,
+        depth: style.legThickness * 2.0,
+      }, this.scene);
+      foot.position.set(side * legOffsetX, style.legThickness * 0.18, style.legThickness * 0.6);
+      secondaryParts.push(foot);
+    };
+    buildLeg(-1);
+    buildLeg( 1);
+
+    // --- Backpack / Wings (flyer feel) ---
+    if (style.hasBackpack) {
+      const pack = BABYLON.MeshBuilder.CreateBox("backpack", {
+        width: style.torsoWidth * 0.65,
+        height: style.torsoHeight * 0.55,
+        depth: style.torsoDepth * 0.35,
+      }, this.scene);
+      pack.position = torso.position.add(new BABYLON.Vector3(0, 0.0, -style.torsoDepth * 0.65));
+      secondaryParts.push(pack);
+
+      const coreGlow = BABYLON.MeshBuilder.CreateSphere("coreGlow", {
+        diameter: style.torsoWidth * 0.18,
+        segments: 8,
+      }, this.scene);
+      coreGlow.position = pack.position.add(new BABYLON.Vector3(0, 0.0, -style.torsoDepth * 0.2));
+      emissiveParts.push(coreGlow);
+    }
+
+    if (style.hasWings) {
+      const wingY = torso.position.y + style.torsoHeight * 0.25;
+      const wingZ = -style.torsoDepth * 0.55;
+
+      const makeWing = (side: -1 | 1) => {
+        const wing = BABYLON.MeshBuilder.CreateBox("wing", {
+          width: style.torsoWidth * 0.15,
+          height: style.torsoHeight * 0.5,
+          depth: style.torsoDepth * 1.2,
+        }, this.scene);
+        wing.position.set(side * (style.torsoWidth * 0.75), wingY, wingZ);
+        wing.rotation.y = side * 0.35;
+        secondaryParts.push(wing);
+      };
+      makeWing(-1);
+      makeWing( 1);
+    }
+
+    // Merge into 3 meshes to reduce draw calls
+    const mergedPrimary = BABYLON.Mesh.MergeMeshes(primaryParts, true, true, undefined, false, true);
+    const mergedSecondary = BABYLON.Mesh.MergeMeshes(secondaryParts, true, true, undefined, false, true);
+    const mergedEmissive = BABYLON.Mesh.MergeMeshes(emissiveParts, true, true, undefined, false, true);
+
+    if (mergedPrimary) {
+      mergedPrimary.name = `${desc.name}_primary`;
+      mergedPrimary.material = this.getMat("primary", style);
+      mergedPrimary.parent = root;
+    }
+    if (mergedSecondary) {
+      mergedSecondary.name = `${desc.name}_secondary`;
+      mergedSecondary.material = this.getMat("secondary", style);
+      mergedSecondary.parent = root;
+    }
+    if (mergedEmissive) {
+      mergedEmissive.name = `${desc.name}_emissive`;
+      mergedEmissive.material = this.getMat("emissive", style);
+      mergedEmissive.parent = root;
+    }
+
+    return root;
+  }
+}
+```
+
+**Result:** each robot costs ~**3 draw calls** (primary/trim/glow) and is 100% primitives.
+
+---
+
+## 3) “Transformers themed” presets (scout / brute / flyer / tank)
+
+```ts
+// RobotPresets.ts
+import * as BABYLON from "@babylonjs/core";
+import { RobotDescriptor } from "./RobotDesigner";
+
+export const ROBOT_PRESETS: RobotDescriptor[] = [
+  {
+    name: "ScoutPrime",
+    style: {
+      archetype: "scout",
+      scale: 1,
+      torsoWidth: 1.1, torsoHeight: 1.5, torsoDepth: 0.7,
+      headSize: 0.55,
+      armLength: 1.2, armThickness: 0.22,
+      legLength: 1.3, legThickness: 0.28,
+      shoulderPadSize: 0.55,
+      hipPadSize: 0.65,
+      hasWings: false, hasCannons: false, hasBackpack: false, hasVisor: true,
+      colors: {
+        primary: new BABYLON.Color3(0.12, 0.25, 0.85),
+        secondary: new BABYLON.Color3(0.75, 0.75, 0.8),
+        emissive: new BABYLON.Color3(0.2, 0.9, 1.0),
+      },
+    },
+  },
+  {
+    name: "BruteForge",
+    style: {
+      archetype: "brute",
+      scale: 1.1,
+      torsoWidth: 1.6, torsoHeight: 1.7, torsoDepth: 1.0,
+      headSize: 0.6,
+      armLength: 1.4, armThickness: 0.32,
+      legLength: 1.25, legThickness: 0.42,
+      shoulderPadSize: 0.75,
+      hipPadSize: 0.75,
+      hasWings: false, hasCannons: true, hasBackpack: false, hasVisor: true,
+      colors: {
+        primary: new BABYLON.Color3(0.6, 0.12, 0.1),
+        secondary: new BABYLON.Color3(0.15, 0.15, 0.15),
+        emissive: new BABYLON.Color3(1.0, 0.35, 0.05),
+      },
+    },
+  },
+  {
+    name: "JetWarden",
+    style: {
+      archetype: "flyer",
+      scale: 1,
+      torsoWidth: 1.2, torsoHeight: 1.55, torsoDepth: 0.65,
+      headSize: 0.55,
+      armLength: 1.15, armThickness: 0.22,
+      legLength: 1.25, legThickness: 0.28,
+      shoulderPadSize: 0.55,
+      hipPadSize: 0.65,
+      hasWings: true, hasCannons: true, hasBackpack: true, hasVisor: true,
+      colors: {
+        primary: new BABYLON.Color3(0.12, 0.12, 0.15),
+        secondary: new BABYLON.Color3(0.85, 0.85, 0.9),
+        emissive: new BABYLON.Color3(0.5, 0.0, 1.0),
+      },
+    },
+  },
+  {
+    name: "TankTitan",
+    style: {
+      archetype: "tank",
+      scale: 1.2,
+      torsoWidth: 1.8, torsoHeight: 1.8, torsoDepth: 1.1,
+      headSize: 0.62,
+      armLength: 1.35, armThickness: 0.35,
+      legLength: 1.15, legThickness: 0.48,
+      shoulderPadSize: 0.85,
+      hipPadSize: 0.85,
+      hasWings: false, hasCannons: true, hasBackpack: true, hasVisor: false,
+      colors: {
+        primary: new BABYLON.Color3(0.12, 0.45, 0.2),
+        secondary: new BABYLON.Color3(0.1, 0.1, 0.1),
+        emissive: new BABYLON.Color3(0.1, 1.0, 0.4),
+      },
+    },
+  },
+];
+```
+
+---
+
+## 4) Character “design system” for your game
+
+This is the piece that lets players (or you) design robots.
+
+### A) Store robot designs as JSON
+
+You already have `RobotDescriptor`. Save it:
+
+```ts
+export function serializeRobot(desc: any): string {
+  // Color3 isn't JSON-safe by default; store as {r,g,b}
+  const clone = structuredClone(desc);
+  const c = clone.style.colors;
+  clone.style.colors = {
+    primary: { r: c.primary.r, g: c.primary.g, b: c.primary.b },
+    secondary: { r: c.secondary.r, g: c.secondary.g, b: c.secondary.b },
+    emissive: { r: c.emissive.r, g: c.emissive.g, b: c.emissive.b },
+  };
+  return JSON.stringify(clone, null, 2);
+}
+
+export function deserializeRobot(json: string): any {
+  const obj = JSON.parse(json);
+  const c = obj.style.colors;
+  obj.style.colors = {
+    primary: new BABYLON.Color3(c.primary.r, c.primary.g, c.primary.b),
+    secondary: new BABYLON.Color3(c.secondary.r, c.secondary.g, c.secondary.b),
+    emissive: new BABYLON.Color3(c.emissive.r, c.emissive.g, c.emissive.b),
+  };
+  return obj;
+}
+```
+
+### B) In-game “designer” concept (simple + fast)
+
+You can build a UI with:
+
+* sliders for torsoWidth/Height, armLength, legThickness, etc.
+* toggles for wings/cannons/backpack/visor
+* color pickers (or fixed palettes)
+* “Save”, “Load”, “Randomize”, “Spawn”
+
+If you’re using Babylon GUI:
+
+```ts
+// Pseudocode idea:
+const ui = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("ui");
+addSlider("Torso Width", 0.8, 2.0, v => style.torsoWidth = v);
+addToggle("Wings", v => style.hasWings = v);
+addButton("Rebuild", () => rebuildPreview());
+```
+
+**Rebuild flow:**
+
+1. dispose preview root
+2. call `factory.createRobot(currentDesc, previewPos)`
+3. reattach camera target
+
+### C) “Hard rules” to keep designs valid (important)
+
+Add a validator so sliders don’t make broken characters:
+
+* `legLength >= torsoHeight * 0.6`
+* `armLength <= torsoWidth * 1.6 + 0.6`
+* clamp thickness ranges
+
+---
+
+## 5) Plug into your EnemySystem (spawn enemies as robots)
+
+Replace your `createEnemyMesh()` with a call into `RobotFactory`, and use presets per enemy type.
+
+Example:
+
+```ts
+// inside EnemySystem
+import { RobotFactory } from "./RobotFactory";
+import { ROBOT_PRESETS } from "./RobotPresets";
+
+private robotFactory = new RobotFactory(this.scene);
+
+private createEnemyMesh(type: EnemyType, position: BABYLON.Vector3): BABYLON.Mesh {
+  // Pick a preset based on type
+  const preset =
+    type === "drone" ? ROBOT_PRESETS[2] :
+    type === "heavy" ? ROBOT_PRESETS[3] :
+    type === "insectoid" ? ROBOT_PRESETS[1] :
+    ROBOT_PRESETS[0];
+
+  const root = this.robotFactory.createRobot(preset, position);
+
+  // EnemyUnit expects a BABYLON.Mesh right now.
+  // Easiest: create a small invisible "hitbox" mesh as the enemy mesh,
+  // and parent the robot visuals under it.
+  const hitbox = BABYLON.MeshBuilder.CreateCapsule(`enemyHit_${type}`, { height: 2, radius: 0.6 }, this.scene);
+  hitbox.isVisible = false;
+  hitbox.position.copyFrom(position);
+  root.parent = hitbox;
+
+  return hitbox;
+}
+```
+
+This keeps:
+
+* AI and damage hitting a single mesh (`hitbox`)
+* visuals as separate merged meshes parented under it
+
+(That’s the cleanest pattern for gameplay.)
+
+---
+
+## Performance tips (so you can scale to hordes)
+
+If you want 100–500 enemies:
+
+* Keep **3 meshes per robot** (like above)
+* Use **one shared material per palette** (cached)
+* Consider **freezing** transforms for dead/static enemies:
+
+  * `mesh.freezeWorldMatrix()` after spawn if it doesn’t deform
+* Turn off collisions on submeshes; use hitbox only
+* If you need even more:
+
+  * go to **thin instances** (but then per-enemy animation is trickier)
+
+---
+
+If you tell me whether your game is **top-down**, **third-person**, or **FPS**, I can tune the robot silhouettes (bigger shoulders, different leg stance, etc.) and build a **random robot generator** that outputs “Autobot / Decepticon style” variations on demand.

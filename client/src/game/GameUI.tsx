@@ -20,6 +20,7 @@ interface GameUIProps {
   beamSabreLevel?: number;
   activeElement?: string | null;
   armorDefense?: number;
+  companions?: { name: string; type: string; health: number; maxHealth: number }[];
 }
 
 const ELEMENT_COLORS: Record<string, { text: string; border: string; bg: string }> = {
@@ -48,6 +49,7 @@ export const GameUI: React.FC<GameUIProps> = ({
   beamSabreLevel = 1,
   activeElement = null,
   armorDefense = 0,
+  companions = [],
 }) => {
   return (
     <div className="fixed inset-0 pointer-events-none" style={{ fontFamily: "'Press Start 2P', monospace" }}>
@@ -197,6 +199,26 @@ export const GameUI: React.FC<GameUIProps> = ({
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {companions && companions.length > 0 && (
+        <div className="absolute left-4 bottom-32 bg-black/80 border-2 border-emerald-600 p-3 rounded-lg text-xs min-w-[140px]">
+          <div className="text-emerald-400 font-bold mb-2">COMPANIONS</div>
+          {companions.map((c, i) => (
+            <div key={i} className="mb-1">
+              <div className="flex justify-between text-gray-300">
+                <span>{c.name}</span>
+                <span className="text-emerald-300">{c.type === "ally" ? "ALLY" : "PET"}</span>
+              </div>
+              <div className="w-full h-1.5 bg-gray-700 rounded mt-0.5">
+                <div
+                  className="h-full bg-emerald-500 rounded"
+                  style={{ width: `${(c.health / c.maxHealth) * 100}%` }}
+                />
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

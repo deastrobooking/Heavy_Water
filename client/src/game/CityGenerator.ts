@@ -712,6 +712,10 @@ export class CityGenerator {
       { cx: -300, cz: -350, radius: 80, label: "S" },
     ];
 
+    const hillMat = new BABYLON.StandardMaterial("hillMat", this.scene);
+    hillMat.diffuseColor = new BABYLON.Color3(0.12, 0.35, 0.08);
+    hillMat.emissiveColor = new BABYLON.Color3(0.02, 0.06, 0.02);
+
     let seed = 1000;
     for (const zone of natureZones) {
       const grassPatch = BABYLON.MeshBuilder.CreateGround(
@@ -721,6 +725,26 @@ export class CityGenerator {
       );
       grassPatch.position = new BABYLON.Vector3(zone.cx, 0.05, zone.cz);
       grassPatch.material = grassMat;
+
+      const hillCount = 5 + Math.floor(seededRandom(seed + 5000) * 5);
+      for (let h = 0; h < hillCount; h++) {
+        seed++;
+        const hAngle = seededRandom(seed + 6000) * Math.PI * 2;
+        const hDist = seededRandom(seed + 6100) * zone.radius * 0.7;
+        const hx = zone.cx + Math.cos(hAngle) * hDist;
+        const hz = zone.cz + Math.sin(hAngle) * hDist;
+        const hillHeight = 4 + seededRandom(seed + 6200) * 12;
+        const hillWidth = 12 + seededRandom(seed + 6300) * 20;
+
+        const hill = BABYLON.MeshBuilder.CreateSphere(
+          `hill_${zone.label}_${h}`,
+          { diameter: hillWidth, segments: 8 },
+          this.scene
+        );
+        hill.position = new BABYLON.Vector3(hx, hillHeight * 0.25, hz);
+        hill.scaling = new BABYLON.Vector3(1, hillHeight / hillWidth, 1);
+        hill.material = hillMat;
+      }
 
       const treeCount = 15 + Math.floor(seededRandom(seed++) * 15);
       for (let t = 0; t < treeCount; t++) {

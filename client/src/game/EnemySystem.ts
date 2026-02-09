@@ -2,6 +2,8 @@ import * as BABYLON from "@babylonjs/core";
 import { StateMachine } from "./StateMachine";
 import { EventBus, GameEvents } from "./EventBus";
 import { DamageInfo, DamageResult, DamageResistance, IDamageable, DamageType, applyDamage } from "./DamageSystem";
+import { RobotFactory } from "./RobotFactory";
+import { ROBOT_PRESETS } from "./RobotPresets";
 
 export type EnemyType = "drone" | "soldier" | "heavy" | "insectoid" | "hybrid";
 export type EnemyAIState = "idle" | "patrol" | "chase" | "attack" | "stunned" | "dead";
@@ -370,88 +372,54 @@ export class EnemySystem {
   private waveNumber: number = 1;
   private bus: EventBus;
 
+  private robotFactory: RobotFactory;
+
   constructor(scene: BABYLON.Scene) {
     this.scene = scene;
     this.bus = EventBus.getInstance();
+    this.robotFactory = new RobotFactory(scene);
   }
 
   private createEnemyMesh(type: EnemyType, position: BABYLON.Vector3): BABYLON.Mesh {
-    let mesh: BABYLON.Mesh;
-    let color: BABYLON.Color3;
-    let glowColor: BABYLON.Color3;
+    const presetMap: Record<EnemyType, string> = {
+      drone: "JetWarden",
+      soldier: "ScoutPrime",
+      heavy: "TankTitan",
+      insectoid: "InsectoidStalker",
+      hybrid: "HybridOmega",
+    };
 
-    switch (type) {
-      case "drone":
-        mesh = BABYLON.MeshBuilder.CreateSphere("drone", { diameter: 1 }, this.scene);
-        color = new BABYLON.Color3(0.3, 0.3, 0.4);
-        glowColor = new BABYLON.Color3(1, 0, 0);
-        position.y = 5;
-        break;
-      case "soldier":
-        mesh = BABYLON.MeshBuilder.CreateCapsule("soldier", { height: 2, radius: 0.4 }, this.scene);
-        color = new BABYLON.Color3(0.2, 0.25, 0.3);
-        glowColor = new BABYLON.Color3(1, 0.5, 0);
-        break;
-      case "heavy":
-        mesh = BABYLON.MeshBuilder.CreateBox("heavy", { width: 1.5, height: 2.5, depth: 1.5 }, this.scene);
-        color = new BABYLON.Color3(0.4, 0.2, 0.2);
-        glowColor = new BABYLON.Color3(1, 0, 0.5);
-        break;
-      case "insectoid":
-        mesh = this.createInsectoidMesh();
-        color = new BABYLON.Color3(0.3, 0.4, 0.2);
-        glowColor = new BABYLON.Color3(0.5, 1, 0);
-        break;
-      case "hybrid":
-        mesh = this.createHybridMesh();
-        color = new BABYLON.Color3(0.4, 0.3, 0.4);
-        glowColor = new BABYLON.Color3(0.8, 0, 1);
-        break;
-      default:
-        mesh = BABYLON.MeshBuilder.CreateSphere("enemy", { diameter: 1 }, this.scene);
-        color = new BABYLON.Color3(0.5, 0.5, 0.5);
-        glowColor = new BABYLON.Color3(1, 1, 1);
+    const presetName = presetMap[type] || "ScoutPrime";
+    const preset = ROBOT_PRESETS[presetName];
+
+    if (preset) {
+      const root = this.robotFactory.createRobot(preset, position);
+
+      const hitboxH = type === "hybrid" ? 3.5 : type === "heavy" ? 3 : 2;
+      const hitboxR = type === "hybrid" ? 0.8 : type === "heavy" ? 0.7 : 0.5;
+      const hitbox = BABYLON.MeshBuilder.CreateCapsule(`enemyHit_${type}_${Date.now()}`, {
+        height: hitboxH,
+        radius: hitboxR,
+      }, this.scene);
+      hitbox.isVisible = false;
+      hitbox.position.copyFrom(position);
+      root.parent = hitbox;
+      root.position = BABYLON.Vector3.Zero();
+
+      if (type === "drone") {
+        hitbox.position.y = 5;
+      }
+
+      return hitbox;
     }
 
+    const mesh = BABYLON.MeshBuilder.CreateCapsule(`enemy_${type}`, { height: 2, radius: 0.4 }, this.scene);
     mesh.position = position;
-
-    const material = new BABYLON.StandardMaterial(`enemyMat_${type}_${Date.now()}`, this.scene);
-    material.diffuseColor = color;
-    material.emissiveColor = glowColor.scale(0.3);
-    material.specularColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+    const material = new BABYLON.StandardMaterial(`enemyMat_${type}`, this.scene);
+    material.diffuseColor = new BABYLON.Color3(0.5, 0.2, 0.2);
+    material.emissiveColor = new BABYLON.Color3(0.3, 0.1, 0.1);
     mesh.material = material;
-
     return mesh;
-  }
-
-  private createInsectoidMesh(): BABYLON.Mesh {
-    const body = BABYLON.MeshBuilder.CreateSphere("insectBody", { diameter: 1.2 }, this.scene);
-    const head = BABYLON.MeshBuilder.CreateSphere("insectHead", { diameter: 0.6 }, this.scene);
-    head.position = new BABYLON.Vector3(0, 0.3, 0.5);
-    head.parent = body;
-
-    for (let i = 0; i < 6; i++) {
-      const leg = BABYLON.MeshBuilder.CreateCylinder("leg", { height: 1, diameter: 0.1 }, this.scene);
-      const angle = ((i % 3) - 1) * 0.5;
-      const side = i < 3 ? 1 : -1;
-      leg.position = new BABYLON.Vector3(side * 0.5, -0.3, angle);
-      leg.rotation = new BABYLON.Vector3(0, 0, side * 0.5);
-      leg.parent = body;
-    }
-    return body;
-  }
-
-  private createHybridMesh(): BABYLON.Mesh {
-    const body = BABYLON.MeshBuilder.CreateCapsule("hybridBody", { height: 2.2, radius: 0.5 }, this.scene);
-    const head = BABYLON.MeshBuilder.CreateSphere("hybridHead", { diameter: 0.7 }, this.scene);
-    head.position = new BABYLON.Vector3(0, 1.2, 0);
-    head.parent = body;
-
-    const backPlate = BABYLON.MeshBuilder.CreateBox("backPlate", { width: 0.8, height: 1.5, depth: 0.3 }, this.scene);
-    backPlate.position = new BABYLON.Vector3(0, 0.3, -0.4);
-    backPlate.parent = body;
-
-    return body;
   }
 
   spawnEnemy(playerPosition: BABYLON.Vector3): void {

@@ -22,10 +22,10 @@ export class BabylonEngine {
   private createCamera(): BABYLON.FreeCamera {
     const camera = new BABYLON.FreeCamera(
       "playerCamera",
-      new BABYLON.Vector3(0, 5, -20),
+      new BABYLON.Vector3(350, 15, 150),
       this.scene
     );
-    camera.setTarget(BABYLON.Vector3.Zero());
+    camera.setTarget(new BABYLON.Vector3(300, 10, 100));
     camera.attachControl(this.canvas, true);
     camera.speed = 0.5;
     camera.angularSensibility = 2000;
@@ -75,19 +75,21 @@ export class BabylonEngine {
     );
     
     defaultPipeline.bloomEnabled = true;
-    defaultPipeline.bloomThreshold = 0.3;
-    defaultPipeline.bloomWeight = 0.5;
-    defaultPipeline.bloomKernel = 64;
-    defaultPipeline.bloomScale = 0.5;
+    defaultPipeline.bloomThreshold = 0.5;
+    defaultPipeline.bloomWeight = 0.25;
+    defaultPipeline.bloomKernel = 32;
+    defaultPipeline.bloomScale = 0.3;
 
     defaultPipeline.chromaticAberrationEnabled = true;
-    defaultPipeline.chromaticAberration.aberrationAmount = 30;
+    defaultPipeline.chromaticAberration.aberrationAmount = 8;
 
     defaultPipeline.fxaaEnabled = true;
+    defaultPipeline.sharpenEnabled = true;
+    defaultPipeline.sharpen.edgeAmount = 0.15;
 
     this.scene.clearColor = new BABYLON.Color4(0.02, 0.02, 0.08, 1);
     this.scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
-    this.scene.fogDensity = 0.003;
+    this.scene.fogDensity = 0.0015;
     this.scene.fogColor = new BABYLON.Color3(0.05, 0.05, 0.15);
   }
 

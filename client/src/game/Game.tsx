@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import * as BABYLON from "@babylonjs/core";
+import "@babylonjs/loaders";
 import { BabylonEngine } from "./BabylonEngine";
 import { CityGenerator } from "./CityGenerator";
 import { PlayerController, PlayerStats } from "./PlayerController";
@@ -11,6 +13,7 @@ import { BeamSabreSystem } from "./BeamSabreSystem";
 import { ArmorSystem } from "./ArmorSystem";
 import { CraftingSystem } from "./CraftingSystem";
 import { InventorySystem } from "./InventorySystem";
+import { CompanionSystem } from "./CompanionSystem";
 import { EventBus, GameEvents } from "./EventBus";
 import { DamageType } from "./DamageSystem";
 import { GameUI } from "./GameUI";
@@ -31,6 +34,7 @@ export const Game: React.FC = () => {
   const armorSystemRef = useRef<ArmorSystem | null>(null);
   const craftingSystemRef = useRef<CraftingSystem | null>(null);
   const inventoryRef = useRef<InventorySystem | null>(null);
+  const companionRef = useRef<CompanionSystem | null>(null);
 
   const [gamePhase, setGamePhase] = useState<GamePhase>("menu");
   const [stats, setStats] = useState<PlayerStats>({
@@ -60,6 +64,8 @@ export const Game: React.FC = () => {
   const [beamSabreLevel, setBeamSabreLevel] = useState(1);
   const [activeElement, setActiveElement] = useState<string | null>(null);
   const [armorDefense, setArmorDefense] = useState(0);
+  const [companionCount, setCompanionCount] = useState(0);
+  const [companionInfo, setCompanionInfo] = useState<{ name: string; type: string; health: number; maxHealth: number }[]>([]);
 
   const showMessage = useCallback((msg: string, duration: number = 2000) => {
     setMessage(msg);
@@ -107,13 +113,15 @@ export const Game: React.FC = () => {
     const engine = new BabylonEngine(canvasRef.current);
     engineRef.current = engine;
 
-    const cityGenerator = new CityGenerator(engine.getScene());
+    const scene = engine.getScene();
+
+    const cityGenerator = new CityGenerator(scene);
     cityGenerator.generateCity();
 
-    const player = new PlayerController(engine.getScene(), engine.getCamera());
+    const player = new PlayerController(scene, engine.getCamera());
     playerRef.current = player;
 
-    const weapons = new WeaponsSystem(engine.getScene(), engine.getCamera());
+    const weapons = new WeaponsSystem(scene, engine.getCamera());
     weaponsRef.current = weapons;
 
     weapons.setOnAmmoChange((a, m) => {
@@ -132,7 +140,7 @@ export const Game: React.FC = () => {
       setMaxAmmo(initialWeapon.maxAmmo);
     }
 
-    const combatSystem = new CombatSystem(engine.getScene(), engine.getCamera());
+    const combatSystem = new CombatSystem(scene, engine.getCamera());
     combatSystemRef.current = combatSystem;
 
     player.setMeleeCallbacks(
@@ -140,13 +148,13 @@ export const Game: React.FC = () => {
       () => combatSystem.onHeavyAttack()
     );
 
-    const specialWeapons = new SpecialWeaponsSystem(engine.getScene(), engine.getCamera());
+    const specialWeapons = new SpecialWeaponsSystem(scene, engine.getCamera());
     specialWeaponsRef.current = specialWeapons;
     specialWeapons.setOnSpecialWeaponChange(() => {
       setSpecialWeaponInfo(specialWeapons.getActiveSpecialWeapons());
     });
 
-    const beamSabre = new BeamSabreSystem(engine.getScene(), engine.getCamera());
+    const beamSabre = new BeamSabreSystem(scene, engine.getCamera());
     beamSabreRef.current = beamSabre;
 
     const inventory = new InventorySystem();
@@ -158,10 +166,34 @@ export const Game: React.FC = () => {
     const craftingSystem = new CraftingSystem(inventory);
     craftingSystemRef.current = craftingSystem;
 
-    const enemySystem = new EnemySystem(engine.getScene());
+    const companionSystem = new CompanionSystem(scene);
+    companionRef.current = companionSystem;
+
+    companionSystem.addCompanion("GuardianUnit", player.getPosition());
+    companionSystem.addCompanion("SparkPup", player.getPosition());
+
+    BABYLON.SceneLoader.ImportMeshAsync("", "/models/", "swarm_drone.glb", scene).then((result) => {
+      if (result.meshes.length > 0) {
+        const droneRoot = result.meshes[0];
+        droneRoot.name = "swarmDroneModel";
+        droneRoot.scaling.setAll(2.5);
+        droneRoot.position = new BABYLON.Vector3(355, 8, 155);
+
+        scene.registerBeforeRender(() => {
+          if (droneRoot && !droneRoot.isDisposed()) {
+            droneRoot.position.y = 8 + Math.sin(Date.now() * 0.002) * 1.5;
+            droneRoot.rotation.y += 0.01;
+          }
+        });
+      }
+    }).catch((err) => {
+      console.log("Drone GLB not loaded:", err);
+    });
+
+    const enemySystem = new EnemySystem(scene);
     enemySystemRef.current = enemySystem;
 
-    const chestSystem = new ChestSystem(engine.getScene());
+    const chestSystem = new ChestSystem(scene);
     chestSystemRef.current = chestSystem;
     chestSystem.setOnLootCollected(handleLootCollected);
     chestSystem.spawnChests(30);
@@ -224,6 +256,14 @@ export const Game: React.FC = () => {
 
       beamSabre.update(dt, enemyMeshes);
 
+      const companionResult = companionSystem.update(dt, playerPos, enemyMeshes);
+      if (companionResult.healed > 0) {
+        player.heal(companionResult.healed);
+      }
+      for (const hit of companionResult.attackHits) {
+        enemySystem.damageEnemy(hit.mesh as BABYLON.Mesh, hit.damage);
+      }
+
       const enemyResult = enemySystem.update(playerPos, deltaTime);
       if (enemyResult.damage > 0) {
         const reducedDamage = armorSystem.calculateDamageReduction(enemyResult.damage, DamageType.Melee);
@@ -243,6 +283,8 @@ export const Game: React.FC = () => {
       setBeamSabreLevel(beamSabre.getLevel);
       setActiveElement(armorSystem.getActiveElement());
       setArmorDefense(armorSystem.getTotalDefense());
+      setCompanionCount(companionSystem.getCompanionCount());
+      setCompanionInfo(companionSystem.getCompanions());
 
       if (player.getStats().health <= 0) {
         setGamePhase("gameover");
@@ -269,30 +311,18 @@ export const Game: React.FC = () => {
   }, [initializeGame]);
 
   const handleRestart = useCallback(() => {
-    if (combatSystemRef.current) {
-      combatSystemRef.current.dispose();
-    }
-    if (specialWeaponsRef.current) {
-      specialWeaponsRef.current.dispose();
-    }
-    if (beamSabreRef.current) {
-      beamSabreRef.current.dispose();
-    }
+    if (combatSystemRef.current) combatSystemRef.current.dispose();
+    if (specialWeaponsRef.current) specialWeaponsRef.current.dispose();
+    if (beamSabreRef.current) beamSabreRef.current.dispose();
+    if (companionRef.current) companionRef.current.dispose();
     if (engineRef.current) {
       engineRef.current.dispose();
       engineRef.current = null;
     }
     EventBus.getInstance().clear();
     setStats({
-      health: 100,
-      maxHealth: 100,
-      armor: 50,
-      maxArmor: 100,
-      stamina: 100,
-      maxStamina: 100,
-      credits: 0,
-      experience: 0,
-      level: 1,
+      health: 100, maxHealth: 100, armor: 50, maxArmor: 100,
+      stamina: 100, maxStamina: 100, credits: 0, experience: 0, level: 1,
     });
     setWaveNumber(1);
     setComboInfo(null);
@@ -301,23 +331,18 @@ export const Game: React.FC = () => {
     setBeamSabreLevel(1);
     setActiveElement(null);
     setArmorDefense(0);
+    setCompanionCount(0);
+    setCompanionInfo([]);
     initializeGame();
   }, [initializeGame]);
 
   useEffect(() => {
     return () => {
-      if (combatSystemRef.current) {
-        combatSystemRef.current.dispose();
-      }
-      if (specialWeaponsRef.current) {
-        specialWeaponsRef.current.dispose();
-      }
-      if (beamSabreRef.current) {
-        beamSabreRef.current.dispose();
-      }
-      if (engineRef.current) {
-        engineRef.current.dispose();
-      }
+      if (combatSystemRef.current) combatSystemRef.current.dispose();
+      if (specialWeaponsRef.current) specialWeaponsRef.current.dispose();
+      if (beamSabreRef.current) beamSabreRef.current.dispose();
+      if (companionRef.current) companionRef.current.dispose();
+      if (engineRef.current) engineRef.current.dispose();
       EventBus.getInstance().clear();
     };
   }, []);
@@ -351,6 +376,7 @@ export const Game: React.FC = () => {
           beamSabreLevel={beamSabreLevel}
           activeElement={activeElement}
           armorDefense={armorDefense}
+          companions={companionInfo}
         />
       )}
 
