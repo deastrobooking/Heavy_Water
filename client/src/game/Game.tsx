@@ -17,12 +17,14 @@ import { CompanionSystem } from "./CompanionSystem";
 import { ArmorCapsuleSystem, ArmorUpgrade } from "./ArmorCapsuleSystem";
 import { ShopSystem, ShopDefinition } from "./ShopSystem";
 import { BuildingSystem } from "./BuildingSystem";
+import { MultiplayerSystem } from "./MultiplayerSystem";
 import { EventBus, GameEvents } from "./EventBus";
 import { DamageType } from "./DamageSystem";
 import { GameUI } from "./GameUI";
 import { MainMenu } from "./MainMenu";
+import AuthUI from "./AuthUI";
 
-type GamePhase = "menu" | "playing" | "paused" | "gameover";
+type GamePhase = "auth" | "menu" | "playing" | "paused" | "gameover";
 
 export const Game: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -41,8 +43,18 @@ export const Game: React.FC = () => {
   const capsuleRef = useRef<ArmorCapsuleSystem | null>(null);
   const shopRef = useRef<ShopSystem | null>(null);
   const buildingRef = useRef<BuildingSystem | null>(null);
+  const multiplayerRef = useRef<MultiplayerSystem | null>(null);
 
-  const [gamePhase, setGamePhase] = useState<GamePhase>("menu");
+  const [gamePhase, setGamePhase] = useState<GamePhase>("auth");
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [multiplayerConnected, setMultiplayerConnected] = useState(false);
+  const [inRoom, setInRoom] = useState(false);
+  const [roomCode, setRoomCode] = useState<string | null>(null);
+  const [isHost, setIsHost] = useState(false);
+  const [remotePlayerCount, setRemotePlayerCount] = useState(0);
+  const [chatMessages, setChatMessages] = useState<{ username: string; message: string; time: number }[]>([]);
+  const [lobbyRooms, setLobbyRooms] = useState<any[]>([]);
+  const [showLobby, setShowLobby] = useState(false);
   const [stats, setStats] = useState<PlayerStats>({
     health: 100,
     maxHealth: 100,
@@ -90,6 +102,28 @@ export const Game: React.FC = () => {
   const showMessage = useCallback((msg: string, duration: number = 2000) => {
     setMessage(msg);
     setTimeout(() => setMessage(null), duration);
+  }, []);
+
+  const handleAuthenticated = useCallback((user: any) => {
+    setCurrentUser(user);
+    setGamePhase("menu");
+  }, []);
+
+  const handlePlayOffline = useCallback(() => {
+    setCurrentUser(null);
+    setGamePhase("menu");
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => res.ok ? res.json() : null)
+      .then((user) => {
+        if (user) {
+          setCurrentUser(user);
+          setGamePhase("menu");
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const handleLootCollected = useCallback((loot: Loot) => {
@@ -230,6 +264,48 @@ export const Game: React.FC = () => {
     const buildingSystem = new BuildingSystem(scene, engine.getCamera(), inventory);
     buildingRef.current = buildingSystem;
 
+    const multiplayer = new MultiplayerSystem(scene);
+    multiplayerRef.current = multiplayer;
+
+    if (currentUser) {
+      multiplayer.connect(currentUser.username, currentUser.id);
+      multiplayer.on("connected", () => setMultiplayerConnected(true));
+      multiplayer.on("disconnected", () => {
+        setMultiplayerConnected(false);
+        setInRoom(false);
+        setRoomCode(null);
+      });
+      multiplayer.on("room_joined", (data: any) => {
+        setInRoom(true);
+        setRoomCode(data.roomCode);
+        setIsHost(data.isHost);
+        setShowLobby(false);
+        showMessage(`Joined room ${data.roomCode}`, 2000);
+      });
+      multiplayer.on("room_left", () => {
+        setInRoom(false);
+        setRoomCode(null);
+        setIsHost(false);
+      });
+      multiplayer.on("room_list", (data: any) => setLobbyRooms(data.rooms));
+      multiplayer.on("player_joined", (data: any) => showMessage(`${data.player.username} joined!`, 2000));
+      multiplayer.on("player_left", (data: any) => showMessage(`${data.username} left`, 1500));
+      multiplayer.on("chat_message", (data: any) => setChatMessages(multiplayer.getChatMessages().slice(-20)));
+      multiplayer.on("error", (data: any) => showMessage(data.message, 2000));
+      multiplayer.on("request_position", () => {
+        const pos = player.getPosition();
+        const rot = player.getRotation();
+        multiplayer.sendPositionUpdate(
+          { x: pos.x, y: pos.y, z: pos.z },
+          { x: rot.x, y: rot.y, z: rot.z },
+          player.getPlayerState(),
+          player.getStats().health,
+          1,
+          player.getIsFlying()
+        );
+      });
+    }
+
     BABYLON.SceneLoader.ImportMeshAsync("", "/models/", "swarm_drone.glb", scene).then((result) => {
       if (result.meshes.length > 0) {
         const droneRoot = result.meshes[0];
@@ -343,6 +419,8 @@ export const Game: React.FC = () => {
       capsuleSystem.update(dt, playerPos);
       shopSystem.update();
       buildingSystem.update(dt);
+      multiplayer.update(dt);
+      setRemotePlayerCount(multiplayer.getRemotePlayerCount());
 
       setStats(player.getStats());
       setEnemyCount(enemySystem.getEnemyCount());
@@ -385,7 +463,7 @@ export const Game: React.FC = () => {
     };
 
     setGamePhase("playing");
-  }, [handleLootCollected, showMessage]);
+  }, [handleLootCollected, showMessage, currentUser]);
 
   const handleStart = useCallback(() => {
     initializeGame();
@@ -399,6 +477,7 @@ export const Game: React.FC = () => {
     if (capsuleRef.current) capsuleRef.current.dispose();
     if (shopRef.current) shopRef.current.dispose();
     if (buildingRef.current) buildingRef.current.dispose();
+    if (multiplayerRef.current) multiplayerRef.current.dispose();
     if (engineRef.current) {
       engineRef.current.dispose();
       engineRef.current = null;
@@ -425,6 +504,9 @@ export const Game: React.FC = () => {
     setShopOpen(false);
     setActiveShop(null);
     setBuildMode(false);
+    setMultiplayerConnected(false);
+    setInRoom(false);
+    setRoomCode(null);
     initializeGame();
   }, [initializeGame]);
 
@@ -446,6 +528,43 @@ export const Game: React.FC = () => {
     shop.buyItem(shopId, parseInt(indexStr, 10));
   }, []);
 
+  const handleCreateRoom = useCallback(() => {
+    multiplayerRef.current?.createRoom();
+  }, []);
+
+  const handleJoinRoom = useCallback((code: string) => {
+    multiplayerRef.current?.joinRoom(code);
+  }, []);
+
+  const handleLeaveRoom = useCallback(() => {
+    multiplayerRef.current?.leaveRoom();
+  }, []);
+
+  const handleRefreshRooms = useCallback(() => {
+    multiplayerRef.current?.listRooms();
+  }, []);
+
+  const handleSendChat = useCallback((msg: string) => {
+    multiplayerRef.current?.sendChat(msg);
+  }, []);
+
+  const handleToggleLobby = useCallback(() => {
+    setShowLobby((prev) => {
+      if (!prev) multiplayerRef.current?.listRooms();
+      return !prev;
+    });
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setCurrentUser(null);
+    if (multiplayerRef.current) multiplayerRef.current.dispose();
+    setMultiplayerConnected(false);
+    setInRoom(false);
+    setRoomCode(null);
+    setGamePhase("auth");
+  }, []);
+
   useEffect(() => {
     return () => {
       if (combatSystemRef.current) combatSystemRef.current.dispose();
@@ -455,6 +574,7 @@ export const Game: React.FC = () => {
       if (capsuleRef.current) capsuleRef.current.dispose();
       if (shopRef.current) shopRef.current.dispose();
       if (buildingRef.current) buildingRef.current.dispose();
+      if (multiplayerRef.current) multiplayerRef.current.dispose();
       if (engineRef.current) engineRef.current.dispose();
       EventBus.getInstance().clear();
     };
@@ -462,11 +582,15 @@ export const Game: React.FC = () => {
 
   return (
     <div className="w-full h-full bg-black">
+      {gamePhase === "auth" && (
+        <AuthUI onAuthenticated={handleAuthenticated} onPlayOffline={handlePlayOffline} />
+      )}
+
       {gamePhase === "menu" && <MainMenu onStart={handleStart} />}
 
       <canvas
         ref={canvasRef}
-        className={`w-full h-full ${gamePhase === "menu" ? "hidden" : ""}`}
+        className={`w-full h-full ${gamePhase !== "playing" && gamePhase !== "gameover" ? "hidden" : ""}`}
         style={{ touchAction: "none" }}
       />
 
@@ -501,6 +625,22 @@ export const Game: React.FC = () => {
           activeShop={activeShop}
           onShopBuy={handleShopBuy}
           buildMode={buildMode}
+          username={currentUser?.username || null}
+          multiplayerConnected={multiplayerConnected}
+          inRoom={inRoom}
+          roomCode={roomCode}
+          isHost={isHost}
+          remotePlayerCount={remotePlayerCount}
+          chatMessages={chatMessages}
+          lobbyRooms={lobbyRooms}
+          showLobby={showLobby}
+          onCreateRoom={handleCreateRoom}
+          onJoinRoom={handleJoinRoom}
+          onLeaveRoom={handleLeaveRoom}
+          onRefreshRooms={handleRefreshRooms}
+          onSendChat={handleSendChat}
+          onToggleLobby={handleToggleLobby}
+          onLogout={handleLogout}
         />
       )}
 

@@ -36,9 +36,20 @@ client/
       RobotFactory.ts         - Procedural robot mesh generation
       RobotPresets.ts         - Robot archetype presets including CommanderOmega
       RobotDesigner.ts        - Robot descriptor interface
-      GameUI.tsx              - HUD with all system displays, shop UI, capsule UI
+      MultiplayerSystem.ts    - WebSocket multiplayer client with room/lobby/chat/sync
+      AuthUI.tsx              - Login/register authentication screen
+      GameUI.tsx              - HUD with all system displays, shop UI, capsule UI, multiplayer lobby
       MainMenu.tsx            - Game start menu
       Game.tsx                - Main game orchestration integrating all systems
+server/
+  index.ts                    - Express server entry point
+  auth.ts                     - Passport.js authentication with session management
+  multiplayer.ts              - WebSocket multiplayer server with rooms and state sync
+  db.ts                       - PostgreSQL database connection pool (Drizzle ORM)
+  storage.ts                  - Database storage layer (CRUD operations)
+  routes.ts                   - API route registration
+shared/
+  schema.ts                   - Drizzle ORM schema (users, player_progress, game_sessions)
 ```
 
 ## Architecture
@@ -98,6 +109,28 @@ client/
   - Cell-shaded shader materials with rim lighting, outlines, panel lines
   - Animated water shader river, neon lights, street lights
 
+### Database & Auth
+- **PostgreSQL**: Drizzle ORM with pg driver, schema in shared/schema.ts
+  - Tables: users, player_progress, game_sessions, user_sessions
+  - Push schema: `npm run db:push`
+- **Authentication**: Passport.js local strategy with scrypt password hashing
+  - Express-session with connect-pg-simple for persistent sessions
+  - Routes: POST /api/auth/register, /api/auth/login, /api/auth/logout, GET /api/auth/me
+  - Progress save/load: POST /api/progress/save, GET /api/progress/load
+  - Leaderboard: GET /api/leaderboard
+
+### Multiplayer
+- **WebSocket Server**: Real-time multiplayer on /ws path
+  - Room system: create, join, leave, list rooms (max 4 players)
+  - Position sync at 20Hz with interpolated rendering
+  - Chat messaging within rooms
+  - Enemy damage sync across players
+  - Graceful disconnect handling with stale player cleanup
+- **MultiplayerSystem** (client): WebSocket client with event-driven architecture
+  - Remote player rendering with name labels and state-based coloring
+  - Smooth position interpolation for remote players
+  - Lobby UI with room creation, joining, and browsing
+
 ### Rendering
 - **BabylonEngine**: Ink outline post-processing via Sobel edge detection on depth+normal buffers
   - Configurable outline thickness, color, enabled state
@@ -131,7 +164,9 @@ client/
 - Rendering: WebGL with ink outline post-processing, bloom, chromatic aberration, FXAA
 - Graphics Style: Cell-shaded anime aesthetic with ink outlines, neon accents, rim lighting, panel lines
 - Frontend: React + TypeScript + Vite
-- Backend: Express.js
+- Backend: Express.js with Passport.js authentication
+- Database: PostgreSQL with Drizzle ORM (schema push via `npm run db:push`)
+- Multiplayer: WebSocket server (ws library) on /ws path
 - Custom shaders: Cell-shading with outlines, animated water, Sobel edge detection
 - Architecture: Event-driven with FSM-based entity states
 
@@ -141,6 +176,16 @@ client/
 - Note: All mesh positioning must use height/2 to rest on ground
 
 ## Recent Changes
+- March 2026: Database, Auth & Multiplayer
+  - Added PostgreSQL database with Drizzle ORM (users, player_progress, game_sessions tables)
+  - Added user authentication (register/login/logout) with Passport.js and scrypt hashing
+  - Added session persistence with connect-pg-simple
+  - Added WebSocket multiplayer server with room/lobby system (max 4 players per room)
+  - Added real-time player position sync, chat, and enemy damage sync
+  - Added AuthUI login/register screen with offline play option
+  - Added MultiplayerSystem client with remote player rendering and interpolation
+  - Added multiplayer lobby UI with room creation, joining, browsing, and chat
+  - Added leaderboard and progress save/load API endpoints
 - March 2026: Massive feature expansion
   - Added cell-shading ink outline post-processing (Sobel edge detection on depth+normals)
   - Added DBZ Kakarot-style triple-jump flight system (3 jumps = sky launch, then free flight)

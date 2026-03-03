@@ -34,6 +34,22 @@ interface GameUIProps {
   activeShop?: ShopDefinition | null;
   onShopBuy?: (itemId: string) => void;
   buildMode?: boolean;
+  username?: string | null;
+  multiplayerConnected?: boolean;
+  inRoom?: boolean;
+  roomCode?: string | null;
+  isHost?: boolean;
+  remotePlayerCount?: number;
+  chatMessages?: { username: string; message: string; time: number }[];
+  lobbyRooms?: any[];
+  showLobby?: boolean;
+  onCreateRoom?: () => void;
+  onJoinRoom?: (code: string) => void;
+  onLeaveRoom?: () => void;
+  onRefreshRooms?: () => void;
+  onSendChat?: (message: string) => void;
+  onToggleLobby?: () => void;
+  onLogout?: () => void;
 }
 
 const ELEMENT_COLORS: Record<string, { text: string; border: string; bg: string }> = {
@@ -74,7 +90,25 @@ export const GameUI: React.FC<GameUIProps> = ({
   activeShop = null,
   onShopBuy,
   buildMode = false,
+  username = null,
+  multiplayerConnected = false,
+  inRoom = false,
+  roomCode = null,
+  isHost = false,
+  remotePlayerCount = 0,
+  chatMessages = [],
+  lobbyRooms = [],
+  showLobby = false,
+  onCreateRoom,
+  onJoinRoom,
+  onLeaveRoom,
+  onRefreshRooms,
+  onSendChat,
+  onToggleLobby,
+  onLogout,
 }) => {
+  const [joinCode, setJoinCode] = React.useState("");
+  const [chatInput, setChatInput] = React.useState("");
   return (
     <div className="fixed inset-0 pointer-events-none" style={{ fontFamily: "'Press Start 2P', monospace" }}>
       <div className="absolute top-4 left-4 bg-black/80 border-2 border-cyan-400 p-4 rounded-lg">
@@ -406,6 +440,155 @@ export const GameUI: React.FC<GameUIProps> = ({
             </div>
             <div className="text-gray-500 text-xs mt-4 text-center">Press E or ESC to close</div>
           </div>
+        </div>
+      )}
+
+      <div className="absolute top-4 left-1/2 transform -translate-x-1/2 flex items-center gap-3">
+        {username && (
+          <div className="bg-black/80 border border-cyan-600 px-3 py-1.5 rounded text-xs">
+            <span className="text-gray-400">PILOT: </span>
+            <span className="text-cyan-400">{username}</span>
+          </div>
+        )}
+        {multiplayerConnected && (
+          <div className="bg-black/80 border border-green-600 px-3 py-1.5 rounded text-xs flex items-center gap-2">
+            <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+            <span className="text-green-400">ONLINE</span>
+          </div>
+        )}
+        {inRoom && roomCode && (
+          <div className="bg-black/80 border border-fuchsia-600 px-3 py-1.5 rounded text-xs">
+            <span className="text-gray-400">ROOM: </span>
+            <span className="text-fuchsia-400">{roomCode}</span>
+            <span className="text-gray-500 ml-2">{remotePlayerCount + 1}P</span>
+            {isHost && <span className="text-yellow-400 ml-2">HOST</span>}
+          </div>
+        )}
+        {multiplayerConnected && (
+          <button
+            className="bg-black/80 border border-cyan-600 px-3 py-1.5 rounded text-xs text-cyan-400 pointer-events-auto cursor-pointer hover:bg-cyan-900/30"
+            onClick={onToggleLobby}
+          >
+            {showLobby ? "CLOSE" : "LOBBY"}
+          </button>
+        )}
+        {username && (
+          <button
+            className="bg-black/80 border border-red-700 px-3 py-1.5 rounded text-xs text-red-400 pointer-events-auto cursor-pointer hover:bg-red-900/30"
+            onClick={onLogout}
+          >
+            LOGOUT
+          </button>
+        )}
+      </div>
+
+      {showLobby && (
+        <div className="fixed top-16 left-1/2 transform -translate-x-1/2 w-96 bg-black/95 border-2 border-cyan-500 rounded-xl p-5 z-50 pointer-events-auto">
+          <div className="text-cyan-400 text-sm font-bold mb-4 text-center">MULTIPLAYER LOBBY</div>
+
+          {!inRoom ? (
+            <>
+              <div className="flex gap-2 mb-4">
+                <button
+                  className="flex-1 bg-cyan-900/40 border border-cyan-500 text-cyan-400 py-2 rounded text-xs hover:bg-cyan-800/60 cursor-pointer"
+                  onClick={onCreateRoom}
+                >
+                  CREATE ROOM
+                </button>
+                <button
+                  className="flex-1 bg-gray-800 border border-gray-600 text-gray-400 py-2 rounded text-xs hover:bg-gray-700 cursor-pointer"
+                  onClick={onRefreshRooms}
+                >
+                  REFRESH
+                </button>
+              </div>
+
+              <div className="flex gap-2 mb-4">
+                <input
+                  type="text"
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                  placeholder="ROOM CODE"
+                  maxLength={6}
+                  className="flex-1 bg-gray-900 border border-gray-600 text-cyan-400 px-3 py-2 rounded text-xs outline-none"
+                />
+                <button
+                  className="bg-cyan-900/40 border border-cyan-500 text-cyan-400 px-4 py-2 rounded text-xs hover:bg-cyan-800/60 cursor-pointer"
+                  onClick={() => { if (joinCode.length >= 4) { onJoinRoom?.(joinCode); setJoinCode(""); } }}
+                >
+                  JOIN
+                </button>
+              </div>
+
+              <div className="text-gray-500 text-xs mb-2">AVAILABLE ROOMS</div>
+              <div className="max-h-40 overflow-y-auto space-y-1">
+                {lobbyRooms.length === 0 ? (
+                  <div className="text-gray-600 text-xs text-center py-4">No rooms available</div>
+                ) : (
+                  lobbyRooms.map((room) => (
+                    <div
+                      key={room.code}
+                      className="flex justify-between items-center bg-gray-900 border border-gray-700 rounded p-2 cursor-pointer hover:border-cyan-600"
+                      onClick={() => onJoinRoom?.(room.code)}
+                    >
+                      <div>
+                        <span className="text-cyan-400 text-xs">{room.code}</span>
+                        <span className="text-gray-500 text-xs ml-2">W{room.wave}</span>
+                      </div>
+                      <span className="text-gray-400 text-xs">{room.players}/{room.maxPlayers}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-center mb-3">
+                <div className="text-fuchsia-400 text-lg">{roomCode}</div>
+                <div className="text-gray-500 text-xs">{remotePlayerCount + 1} player(s) connected</div>
+              </div>
+              <button
+                className="w-full bg-red-900/40 border border-red-500 text-red-400 py-2 rounded text-xs hover:bg-red-800/60 cursor-pointer mb-3"
+                onClick={onLeaveRoom}
+              >
+                LEAVE ROOM
+              </button>
+
+              <div className="border-t border-gray-700 pt-3">
+                <div className="text-gray-500 text-xs mb-2">CHAT</div>
+                <div className="max-h-28 overflow-y-auto space-y-1 mb-2">
+                  {chatMessages.slice(-10).map((msg, i) => (
+                    <div key={i} className="text-xs">
+                      <span className="text-cyan-400">{msg.username}: </span>
+                      <span className="text-gray-300">{msg.message}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && chatInput.trim()) {
+                        onSendChat?.(chatInput.trim());
+                        setChatInput("");
+                      }
+                    }}
+                    placeholder="Type message..."
+                    maxLength={200}
+                    className="flex-1 bg-gray-900 border border-gray-600 text-gray-300 px-2 py-1 rounded text-xs outline-none"
+                  />
+                  <button
+                    className="bg-cyan-900/40 border border-cyan-500 text-cyan-400 px-3 py-1 rounded text-xs cursor-pointer"
+                    onClick={() => { if (chatInput.trim()) { onSendChat?.(chatInput.trim()); setChatInput(""); } }}
+                  >
+                    SEND
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

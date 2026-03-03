@@ -737,6 +737,10 @@ export class PlayerController implements IDamageable {
     return this.mesh.position.clone();
   }
 
+  getRotation(): BABYLON.Vector3 {
+    return this.mesh.rotation.clone();
+  }
+
   getMesh(): BABYLON.Mesh {
     return this.mesh;
   }
