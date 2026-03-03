@@ -2,8 +2,9 @@ import * as BABYLON from "@babylonjs/core";
 import { StateMachine } from "./StateMachine";
 import { EventBus, GameEvents } from "./EventBus";
 import { DamageInfo, DamageResult, DamageResistance, IDamageable, DamageType } from "./DamageSystem";
+import { AnimationSystem, AnimationState } from "./AnimationSystem";
 
-export type PlayerState = "idle" | "moving" | "sprinting" | "dodging" | "attacking" | "stunned" | "dead" | "jetpack";
+export type PlayerState = "idle" | "moving" | "sprinting" | "dodging" | "attacking" | "stunned" | "dead" | "jetpack" | "flying" | "hovering";
 
 export interface PlayerStats {
   health: number;
@@ -73,10 +74,33 @@ export class PlayerController implements IDamageable {
   private onMeleeAttack: (() => void) | null = null;
   private onHeavyMeleeAttack: (() => void) | null = null;
 
+  private jumpCount: number = 0;
+  private maxJumpCount: number = 3;
+  private doubleJumpForce: number = 0.65;
+  private tripleJumpLaunchForce: number = 1.2;
+
+  private isFlying: boolean = false;
+  private flightSpeed: number = 0.5;
+  private flightSprintSpeed: number = 0.85;
+  private flightAscendSpeed: number = 0.35;
+  private flightDescendSpeed: number = 0.35;
+
+  private armorEnergy: number = 200;
+  private maxArmorEnergy: number = 200;
+  private flightEnergyCost: number = 15;
+  private armorEnergyRegen: number = 25;
+
+  private hasFlightArmor: boolean = false;
+
+  private animationSystem: AnimationSystem;
+  private prevGrounded: boolean = true;
+
   constructor(scene: BABYLON.Scene, camera: BABYLON.FreeCamera) {
     this.scene = scene;
     this.camera = camera;
     this.mesh = this.createPlayerMesh();
+    this.animationSystem = new AnimationSystem();
+    this.animationSystem.createCharacterMesh(scene, this.mesh);
     this.bus = EventBus.getInstance();
 
     this.stats = {
@@ -100,15 +124,15 @@ export class PlayerController implements IDamageable {
   private setupStateMachine(): void {
     this.stateMachine.addState({
       name: "idle",
-      transitions: ["moving", "sprinting", "dodging", "attacking", "stunned", "dead", "jetpack"],
+      transitions: ["moving", "sprinting", "dodging", "attacking", "stunned", "dead", "jetpack", "flying", "hovering"],
     });
     this.stateMachine.addState({
       name: "moving",
-      transitions: ["idle", "sprinting", "dodging", "attacking", "stunned", "dead", "jetpack"],
+      transitions: ["idle", "sprinting", "dodging", "attacking", "stunned", "dead", "jetpack", "flying", "hovering"],
     });
     this.stateMachine.addState({
       name: "sprinting",
-      transitions: ["idle", "moving", "dodging", "attacking", "stunned", "dead", "jetpack"],
+      transitions: ["idle", "moving", "dodging", "attacking", "stunned", "dead", "jetpack", "flying", "hovering"],
     });
     this.stateMachine.addState({
       name: "dodging",
@@ -116,7 +140,7 @@ export class PlayerController implements IDamageable {
     });
     this.stateMachine.addState({
       name: "attacking",
-      transitions: ["idle", "moving", "dodging", "stunned", "dead"],
+      transitions: ["idle", "moving", "dodging", "stunned", "dead", "flying"],
     });
     this.stateMachine.addState({
       name: "stunned",
@@ -127,7 +151,15 @@ export class PlayerController implements IDamageable {
     });
     this.stateMachine.addState({
       name: "jetpack",
-      transitions: ["idle", "moving", "stunned", "dead"],
+      transitions: ["idle", "moving", "stunned", "dead", "flying"],
+    });
+    this.stateMachine.addState({
+      name: "flying",
+      transitions: ["idle", "moving", "hovering", "stunned", "dead"],
+    });
+    this.stateMachine.addState({
+      name: "hovering",
+      transitions: ["idle", "moving", "flying", "stunned", "dead"],
     });
   }
 
@@ -147,8 +179,11 @@ export class PlayerController implements IDamageable {
     window.addEventListener("keydown", (e) => {
       this.keys[e.code] = true;
 
-      if (e.code === "Space" && this.isGrounded) {
-        this.jump();
+      if (e.code === "Space") {
+        if (this.isFlying) {
+          return;
+        }
+        this.handleJump();
       }
 
       if (e.code === "KeyQ" && !this.isDodging && this.dodgeCooldownTimer <= 0) {
@@ -160,17 +195,80 @@ export class PlayerController implements IDamageable {
       }
 
       if (e.code === "KeyV") {
+        this.triggerAttackAnimation(false);
         this.onMeleeAttack?.();
       }
 
       if (e.code === "KeyB") {
+        this.triggerAttackAnimation(true);
         this.onHeavyMeleeAttack?.();
+      }
+
+      if (e.code === "KeyX" && this.hasFlightArmor) {
+        this.toggleFlightMode();
       }
     });
 
     window.addEventListener("keyup", (e) => {
       this.keys[e.code] = false;
     });
+  }
+
+  private handleJump(): void {
+    if (this.isDodging) return;
+
+    if (this.isGrounded) {
+      this.jumpCount = 1;
+      this.velocity.y = this.jumpForce;
+      this.isGrounded = false;
+      console.log("[PlayerController] Jump 1 - Normal jump");
+      return;
+    }
+
+    if (!this.isGrounded && this.jumpCount < this.maxJumpCount) {
+      this.jumpCount++;
+
+      if (this.jumpCount === 2) {
+        this.velocity.y = this.doubleJumpForce;
+        console.log("[PlayerController] Jump 2 - Double jump");
+      } else if (this.jumpCount === 3 && this.hasFlightArmor) {
+        this.velocity.y = this.tripleJumpLaunchForce;
+        console.log("[PlayerController] Jump 3 - LAUNCH into sky!");
+        setTimeout(() => {
+          if (!this.isGrounded && this.hasFlightArmor && this.armorEnergy > 0) {
+            this.enterFlightMode();
+          }
+        }, 400);
+      } else if (this.jumpCount === 3 && !this.hasFlightArmor) {
+        this.velocity.y = this.doubleJumpForce * 0.8;
+        console.log("[PlayerController] Jump 3 - No flight armor, weaker third jump");
+      }
+    }
+  }
+
+  private enterFlightMode(): void {
+    if (this.isFlying) return;
+    this.isFlying = true;
+    this.velocity.y = 0;
+    this.stateMachine.changeState("flying");
+    this.bus.emit(GameEvents.PLAYER_FLIGHT_ENTER);
+    console.log("[PlayerController] Entered flight mode");
+  }
+
+  private exitFlightMode(): void {
+    if (!this.isFlying) return;
+    this.isFlying = false;
+    this.stateMachine.changeState("idle");
+    this.bus.emit(GameEvents.PLAYER_FLIGHT_EXIT);
+    console.log("[PlayerController] Exited flight mode");
+  }
+
+  private toggleFlightMode(): void {
+    if (this.isFlying) {
+      this.exitFlightMode();
+    } else if (!this.isGrounded && this.armorEnergy > 0) {
+      this.enterFlightMode();
+    }
   }
 
   private jump(): void {
@@ -227,6 +325,14 @@ export class PlayerController implements IDamageable {
     this.stateMachine.update(deltaTime);
     this.updateTimers(deltaTime);
     this.updateStamina(deltaTime);
+
+    if (this.isFlying) {
+      this.updateFlight(deltaTime);
+      this.updateCamera();
+      this.updateAnimations(deltaTime);
+      return;
+    }
+
     this.updateJetpack(deltaTime);
 
     if (this.isDodging) {
@@ -237,6 +343,7 @@ export class PlayerController implements IDamageable {
 
     this.updatePhysics(deltaTime);
     this.updateCamera();
+    this.updateAnimations(deltaTime);
   }
 
   private updateTimers(dt: number): void {
@@ -273,7 +380,7 @@ export class PlayerController implements IDamageable {
   }
 
   private updateJetpack(dt: number): void {
-    if (this.keys["Space"] && !this.isGrounded && this.jetpackFuel > 0 && !this.isDodging) {
+    if (this.keys["Space"] && !this.isGrounded && this.jetpackFuel > 0 && !this.isDodging && !this.isFlying) {
       this.isJetpacking = true;
       this.velocity.y = Math.min(this.velocity.y + this.jetpackForce, 0.35);
       this.jetpackFuel -= this.jetpackFuelCost * dt;
@@ -287,6 +394,61 @@ export class PlayerController implements IDamageable {
 
     if (this.isGrounded && this.jetpackFuel < this.maxJetpackFuel) {
       this.jetpackFuel = Math.min(this.maxJetpackFuel, this.jetpackFuel + this.jetpackFuelRegen * dt);
+    }
+  }
+
+  private updateFlight(dt: number): void {
+    this.armorEnergy -= this.flightEnergyCost * dt;
+    if (this.armorEnergy <= 0) {
+      this.armorEnergy = 0;
+      this.exitFlightMode();
+      return;
+    }
+
+    const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
+    const right = this.camera.getDirection(BABYLON.Vector3.Right());
+    const speed = this.isSprinting ? this.flightSprintSpeed : this.flightSpeed;
+
+    let moveDir = BABYLON.Vector3.Zero();
+
+    if (this.keys["KeyW"]) moveDir.addInPlace(forward.scale(speed));
+    if (this.keys["KeyS"]) moveDir.addInPlace(forward.scale(-speed));
+    if (this.keys["KeyA"]) moveDir.addInPlace(right.scale(-speed));
+    if (this.keys["KeyD"]) moveDir.addInPlace(right.scale(speed));
+
+    if (this.keys["Space"]) {
+      moveDir.y += this.flightAscendSpeed;
+    }
+    if (this.keys["ControlLeft"] || this.keys["ControlRight"] || this.keys["ShiftRight"]) {
+      moveDir.y -= this.flightDescendSpeed;
+    }
+
+    const damping = 0.85;
+    this.velocity.x = this.velocity.x * damping + moveDir.x * (1 - damping);
+    this.velocity.y = this.velocity.y * damping + moveDir.y * (1 - damping);
+    this.velocity.z = this.velocity.z * damping + moveDir.z * (1 - damping);
+
+    this.mesh.position.addInPlace(this.velocity);
+
+    if (this.mesh.position.y < this.groundY + 1) {
+      this.mesh.position.y = this.groundY + 1;
+      this.velocity.y = 0;
+      this.isGrounded = true;
+      this.jumpCount = 0;
+      this.exitFlightMode();
+      return;
+    }
+
+    const isMovingInFlight = this.keys["KeyW"] || this.keys["KeyS"] || this.keys["KeyA"] || this.keys["KeyD"] || this.keys["Space"] || this.keys["ControlLeft"] || this.keys["ControlRight"] || this.keys["ShiftRight"];
+
+    if (isMovingInFlight) {
+      this.stateMachine.changeState("flying");
+    } else {
+      this.stateMachine.changeState("hovering");
+    }
+
+    if (!this.isGrounded && this.armorEnergy > 0) {
+      this.armorEnergy = Math.max(0, this.armorEnergy);
     }
   }
 
@@ -369,7 +531,7 @@ export class PlayerController implements IDamageable {
       rayLength
     );
     const hit = this.scene.pickWithRay(ray, (mesh) => {
-      if (mesh.name === "player") return false;
+      if (mesh.name === "player" || mesh.name.startsWith("char")) return false;
       const n = mesh.name;
       return n === "ground" || n.startsWith("skyPlat_") || n.startsWith("bridge_seg") ||
         n.startsWith("step_") || n.startsWith("rooftop_") || n === "mainHighway" ||
@@ -387,8 +549,13 @@ export class PlayerController implements IDamageable {
       this.mesh.position.y = surfaceY + 1;
       this.velocity.y = 0;
       this.isGrounded = true;
+      this.jumpCount = 0;
     } else {
       this.isGrounded = false;
+    }
+
+    if (this.isGrounded && this.armorEnergy < this.maxArmorEnergy) {
+      this.armorEnergy = Math.min(this.maxArmorEnergy, this.armorEnergy + this.armorEnergyRegen * dt);
     }
   }
 
@@ -454,6 +621,9 @@ export class PlayerController implements IDamageable {
 
   private die(): void {
     this.isAlive = false;
+    if (this.isFlying) {
+      this.isFlying = false;
+    }
     this.stateMachine.forceState("dead");
     this.bus.emit(GameEvents.PLAYER_DIED);
   }
@@ -486,6 +656,77 @@ export class PlayerController implements IDamageable {
       this.stats.stamina = this.stats.maxStamina;
       this.bus.emit(GameEvents.PLAYER_LEVEL_UP, { level: this.stats.level });
     }
+  }
+
+  grantFlightArmor(): void {
+    this.hasFlightArmor = true;
+    console.log("[PlayerController] Flight armor acquired! Triple-jump flight enabled. Press X to toggle flight.");
+    this.bus.emit(GameEvents.PLAYER_FLIGHT_ARMOR_ACQUIRED);
+  }
+
+  getHasFlightArmor(): boolean {
+    return this.hasFlightArmor;
+  }
+
+  getIsFlying(): boolean {
+    return this.isFlying;
+  }
+
+  getArmorEnergy(): number {
+    return this.armorEnergy;
+  }
+
+  getMaxArmorEnergy(): number {
+    return this.maxArmorEnergy;
+  }
+
+  getJumpCount(): number {
+    return this.jumpCount;
+  }
+
+  private updateAnimations(dt: number): void {
+    this.animationSystem.notifyGroundedChange(this.isGrounded);
+    this.prevGrounded = this.isGrounded;
+
+    const animState = this.mapPlayerStateToAnimation();
+    this.animationSystem.setAnimationState(animState);
+    this.animationSystem.update(dt);
+  }
+
+  private mapPlayerStateToAnimation(): AnimationState {
+    if (!this.isAlive) return "dead";
+
+    if (this.isDodging) return "dodgeRoll";
+
+    const playerState = this.stateMachine.getState();
+
+    if (playerState === "flying") return "flyingHover";
+    if (playerState === "hovering") return "flyingHover";
+
+    if (!this.isGrounded) {
+      if (this.jumpCount >= 3) return "tripleJumpLaunch";
+      if (this.jumpCount === 2) return "doubleJump";
+      return "jumping";
+    }
+
+    if (playerState === "sprinting") return "sprinting";
+    if (playerState === "moving") return "running";
+    if (playerState === "attacking") return "lightPunch";
+    if (playerState === "jetpack") return "flyingHover";
+
+    return "idle";
+  }
+
+  triggerAttackAnimation(heavy: boolean): void {
+    this.animationSystem.setAnimationState(heavy ? "heavySlam" : "lightPunch");
+  }
+
+  getAnimationSystem(): AnimationSystem {
+    return this.animationSystem;
+  }
+
+  getAnimationState(): AnimationState {
+    return this.animationSystem.getCurrentState();
   }
 
   getStats(): PlayerStats {

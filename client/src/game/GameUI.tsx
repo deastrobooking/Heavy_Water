@@ -1,6 +1,8 @@
 import React from "react";
 import { PlayerStats } from "./PlayerController";
 import { Weapon } from "./WeaponsSystem";
+import { ArmorUpgrade } from "./ArmorCapsuleSystem";
+import { ShopDefinition, ShopItem } from "./ShopSystem";
 
 interface GameUIProps {
   stats: PlayerStats;
@@ -21,6 +23,17 @@ interface GameUIProps {
   activeElement?: string | null;
   armorDefense?: number;
   companions?: { name: string; type: string; health: number; maxHealth: number }[];
+  isFlying?: boolean;
+  armorEnergy?: number;
+  maxArmorEnergy?: number;
+  hasFlightArmor?: boolean;
+  capsuleOpen?: boolean;
+  capsuleUpgrades?: ArmorUpgrade[];
+  onCapsuleUpgrade?: (upgradeId: string) => void;
+  shopOpen?: boolean;
+  activeShop?: ShopDefinition | null;
+  onShopBuy?: (itemId: string) => void;
+  buildMode?: boolean;
 }
 
 const ELEMENT_COLORS: Record<string, { text: string; border: string; bg: string }> = {
@@ -50,6 +63,17 @@ export const GameUI: React.FC<GameUIProps> = ({
   activeElement = null,
   armorDefense = 0,
   companions = [],
+  isFlying = false,
+  armorEnergy = 0,
+  maxArmorEnergy = 200,
+  hasFlightArmor = false,
+  capsuleOpen = false,
+  capsuleUpgrades = [],
+  onCapsuleUpgrade,
+  shopOpen = false,
+  activeShop = null,
+  onShopBuy,
+  buildMode = false,
 }) => {
   return (
     <div className="fixed inset-0 pointer-events-none" style={{ fontFamily: "'Press Start 2P', monospace" }}>
@@ -98,6 +122,18 @@ export const GameUI: React.FC<GameUIProps> = ({
           </div>
         </div>
 
+        {hasFlightArmor && (
+          <div className="mb-2">
+            <div className="text-fuchsia-400 text-xs mb-1">ARMOR ENERGY</div>
+            <div className="w-48 h-3 bg-gray-800 border border-fuchsia-500 rounded">
+              <div
+                className="h-full bg-gradient-to-r from-fuchsia-600 to-fuchsia-400 rounded transition-all"
+                style={{ width: `${(armorEnergy / maxArmorEnergy) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         <div className="flex gap-4 text-xs">
           <div>
             <span className="text-yellow-400">CREDITS:</span>
@@ -117,17 +153,35 @@ export const GameUI: React.FC<GameUIProps> = ({
           </div>
         )}
 
-        {playerState !== "idle" && playerState !== "moving" && (
+        {(playerState !== "idle" && playerState !== "moving") && (
           <div className="mt-2">
             <span className={`text-xs px-2 py-1 rounded ${
               playerState === "sprinting" ? "bg-green-900 text-green-400 border border-green-500" :
               playerState === "dodging" ? "bg-cyan-900 text-cyan-400 border border-cyan-500" :
               playerState === "attacking" ? "bg-red-900 text-red-400 border border-red-500" :
               playerState === "jetpack" ? "bg-yellow-900 text-yellow-400 border border-yellow-500" :
+              playerState === "flying" ? "bg-fuchsia-900 text-fuchsia-400 border border-fuchsia-500" :
+              playerState === "hovering" ? "bg-fuchsia-900 text-fuchsia-300 border border-fuchsia-400" :
               playerState === "stunned" ? "bg-orange-900 text-orange-400 border border-orange-500" :
               "bg-gray-900 text-gray-400 border border-gray-500"
             }`}>
               {playerState.toUpperCase()}
+            </span>
+          </div>
+        )}
+
+        {isFlying && (
+          <div className="mt-1">
+            <span className="text-xs px-2 py-1 rounded bg-fuchsia-900/80 text-fuchsia-300 border border-fuchsia-400 animate-pulse">
+              FLIGHT ACTIVE
+            </span>
+          </div>
+        )}
+
+        {buildMode && (
+          <div className="mt-1">
+            <span className="text-xs px-2 py-1 rounded bg-amber-900/80 text-amber-300 border border-amber-400 animate-pulse">
+              BUILD MODE [G]
             </span>
           </div>
         )}
@@ -229,10 +283,11 @@ export const GameUI: React.FC<GameUIProps> = ({
           <div>MOUSE - Look | LMB - Fire</div>
           <div>1-6 - Weapons | R - Reload</div>
           <div>7-0 - Special Weapons</div>
-          <div>SPACE - Jump/Jetpack</div>
+          <div>SPACE - Jump (x3 = Fly)</div>
+          <div>X - Toggle Flight | G - Build</div>
           <div>Q - Dodge | F - Parry</div>
           <div>V - Melee | B - Heavy Melee</div>
-          <div>T - Toggle Beam Sabre</div>
+          <div>T - Beam Sabre | E - Interact</div>
         </div>
       </div>
 
@@ -268,6 +323,91 @@ export const GameUI: React.FC<GameUIProps> = ({
           ))}
         </div>
       </div>
+
+      {capsuleOpen && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-auto">
+          <div className="bg-black/95 border-2 border-cyan-400 rounded-xl p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto">
+            <div className="text-cyan-400 text-lg font-bold mb-4 text-center">ARMOR CAPSULE LAB</div>
+            <div className="text-gray-400 text-xs mb-4 text-center">Select an upgrade to apply</div>
+            <div className="space-y-3">
+              {capsuleUpgrades.map((upgrade) => (
+                <div
+                  key={upgrade.id}
+                  className={`border rounded-lg p-3 cursor-pointer transition-all hover:bg-gray-800 ${
+                    upgrade.applied
+                      ? "border-green-600 bg-green-900/30"
+                      : stats.credits >= upgrade.cost
+                      ? "border-cyan-500 hover:border-cyan-300"
+                      : "border-gray-700 opacity-60"
+                  }`}
+                  onClick={() => !upgrade.applied && onCapsuleUpgrade?.(upgrade.id)}
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="text-white text-sm font-bold">{upgrade.name}</div>
+                      <div className="text-gray-400 text-xs mt-1">{upgrade.description}</div>
+                      <div className="text-xs mt-1">
+                        <span className="text-yellow-400">Tier {upgrade.tier}</span>
+                        {upgrade.effects?.flightCapability && (
+                          <span className="ml-2 text-fuchsia-400">GRANTS FLIGHT</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      {upgrade.applied ? (
+                        <span className="text-green-400 text-xs">APPLIED</span>
+                      ) : (
+                        <span className={`text-xs ${stats.credits >= upgrade.cost ? "text-yellow-400" : "text-red-400"}`}>
+                          {upgrade.cost === 0 ? "FREE" : `${upgrade.cost} CR`}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="text-gray-500 text-xs mt-4 text-center">Press ESC to close</div>
+          </div>
+        </div>
+      )}
+
+      {shopOpen && activeShop && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-auto">
+          <div className="bg-black/95 border-2 border-emerald-400 rounded-xl p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto">
+            <div className="text-emerald-400 text-lg font-bold mb-2 text-center">{activeShop.name}</div>
+            <div className="text-gray-400 text-xs mb-4 text-center">Credits: {stats.credits}</div>
+            <div className="space-y-2">
+              {activeShop.items.map((si: ShopItem, idx: number) => (
+                <div
+                  key={si.item.id + idx}
+                  className={`border rounded-lg p-2 cursor-pointer transition-all hover:bg-gray-800 ${
+                    si.stock <= 0
+                      ? "border-gray-700 opacity-40"
+                      : stats.credits >= si.buyPrice
+                      ? "border-emerald-600 hover:border-emerald-400"
+                      : "border-gray-700 opacity-60"
+                  }`}
+                  onClick={() => si.stock > 0 && onShopBuy?.(activeShop.id + ":" + idx)}
+                >
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <span className="text-white text-xs">{si.item.name}</span>
+                      {si.stock <= 0 && <span className="text-red-400 text-xs ml-2">SOLD OUT</span>}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-gray-500 text-xs">x{si.stock}</span>
+                      <span className={`text-xs ${stats.credits >= si.buyPrice ? "text-yellow-400" : "text-red-400"}`}>
+                        {si.buyPrice} CR
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="text-gray-500 text-xs mt-4 text-center">Press E or ESC to close</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

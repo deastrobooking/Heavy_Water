@@ -5,8 +5,8 @@ import { DamageInfo, DamageResult, DamageResistance, IDamageable, DamageType, ap
 import { RobotFactory } from "./RobotFactory";
 import { ROBOT_PRESETS } from "./RobotPresets";
 
-export type EnemyType = "drone" | "soldier" | "heavy" | "insectoid" | "hybrid";
-export type EnemyAIState = "idle" | "patrol" | "chase" | "attack" | "stunned" | "dead";
+export type EnemyType = "drone" | "soldier" | "heavy" | "insectoid" | "hybrid" | "commander";
+export type EnemyAIState = "idle" | "patrol" | "chase" | "attack" | "stunned" | "dead" | "flying" | "hovering" | "dodging";
 
 export interface EnemyConfig {
   maxHealth: number;
@@ -50,6 +50,11 @@ const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     knockbackForce: 1000, experienceValue: 200, detectionRange: 30, chaseRange: 50,
     attackRange: 10, patrolSpeed: 0.04, chaseSpeed: 0.08, credits: 100,
   },
+  commander: {
+    maxHealth: 1500, attackDamage: 50, defense: 25, movementSpeed: 5, attackCooldown: 2.0,
+    knockbackForce: 1200, experienceValue: 500, detectionRange: 45, chaseRange: 60,
+    attackRange: 12, patrolSpeed: 0.06, chaseSpeed: 0.12, credits: 250,
+  },
 };
 
 export class EnemyUnit implements IDamageable {
@@ -70,6 +75,13 @@ export class EnemyUnit implements IDamageable {
   private patrolOrigin: BABYLON.Vector3;
   private bus: EventBus;
 
+  private flightHeight: number = 0;
+  private targetFlightHeight: number = 0;
+  private dodgeTimer: number = 0;
+  private dodgeCooldown: number = 0;
+  private dodgeDirection: BABYLON.Vector3 = BABYLON.Vector3.Zero();
+  private auraMesh: BABYLON.Mesh | null = null;
+
   constructor(mesh: BABYLON.Mesh, type: EnemyType, waveMultiplier: number = 1) {
     this.mesh = mesh;
     this.type = type;
@@ -86,6 +98,12 @@ export class EnemyUnit implements IDamageable {
     this.setupFSM();
     this.fsm.forceState("patrol");
 
+    if (type === "commander") {
+      this.flightHeight = mesh.position.y;
+      this.targetFlightHeight = mesh.position.y;
+      this.createCommanderAura();
+    }
+
     mesh.metadata = {
       ...mesh.metadata,
       isEnemy: true,
@@ -95,12 +113,39 @@ export class EnemyUnit implements IDamageable {
   }
 
   private setupFSM(): void {
-    this.fsm.addState({ name: "idle", transitions: ["patrol", "chase", "stunned", "dead"] });
-    this.fsm.addState({ name: "patrol", transitions: ["idle", "chase", "stunned", "dead"] });
-    this.fsm.addState({ name: "chase", transitions: ["patrol", "attack", "stunned", "dead"] });
-    this.fsm.addState({ name: "attack", transitions: ["chase", "stunned", "dead"] });
-    this.fsm.addState({ name: "stunned", transitions: ["chase", "idle", "dead"] });
+    this.fsm.addState({ name: "idle", transitions: ["patrol", "chase", "flying", "stunned", "dead"] });
+    this.fsm.addState({ name: "patrol", transitions: ["idle", "chase", "flying", "stunned", "dead"] });
+    this.fsm.addState({ name: "chase", transitions: ["patrol", "attack", "flying", "dodging", "stunned", "dead"] });
+    this.fsm.addState({ name: "attack", transitions: ["chase", "flying", "dodging", "stunned", "dead"] });
+    this.fsm.addState({ name: "stunned", transitions: ["chase", "idle", "flying", "dead"] });
+    this.fsm.addState({ name: "flying", transitions: ["hovering", "chase", "attack", "dodging", "stunned", "dead"] });
+    this.fsm.addState({ name: "hovering", transitions: ["flying", "chase", "attack", "dodging", "stunned", "dead"] });
+    this.fsm.addState({ name: "dodging", transitions: ["chase", "flying", "attack", "stunned", "dead"] });
     this.fsm.addState({ name: "dead" });
+  }
+
+  private createCommanderAura(): void {
+    const scene = this.mesh.getScene();
+    this.auraMesh = BABYLON.MeshBuilder.CreateSphere("cmdAura", { diameter: 4.5, segments: 12 }, scene);
+    this.auraMesh.parent = this.mesh;
+    this.auraMesh.position = BABYLON.Vector3.Zero();
+    const auraMat = new BABYLON.StandardMaterial("cmdAuraMat", scene);
+    auraMat.emissiveColor = new BABYLON.Color3(1.0, 0.4, 0.0);
+    auraMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+    auraMat.alpha = 0.12;
+    auraMat.backFaceCulling = false;
+    this.auraMesh.material = auraMat;
+  }
+
+  private updateAura(): void {
+    if (this.auraMesh && !this.auraMesh.isDisposed()) {
+      const pulse = 1.0 + Math.sin(Date.now() * 0.004) * 0.15;
+      this.auraMesh.scaling.setAll(pulse);
+      const mat = this.auraMesh.material as BABYLON.StandardMaterial;
+      if (mat) {
+        mat.alpha = 0.08 + Math.sin(Date.now() * 0.003) * 0.04;
+      }
+    }
   }
 
   update(dt: number, playerPosition: BABYLON.Vector3): number {
@@ -109,12 +154,20 @@ export class EnemyUnit implements IDamageable {
     this.fsm.update(dt);
     const state = this.fsm.getState();
 
+    if (this.type === "commander") {
+      this.updateAura();
+      this.dodgeCooldown = Math.max(0, this.dodgeCooldown - dt);
+    }
+
     switch (state) {
       case "idle": return this.updateIdle(dt, playerPosition);
       case "patrol": return this.updatePatrol(dt, playerPosition);
       case "chase": return this.updateChase(dt, playerPosition);
       case "attack": return this.updateAttack(dt, playerPosition);
       case "stunned": return this.updateStunned(dt);
+      case "flying": return this.updateFlying(dt, playerPosition);
+      case "hovering": return this.updateHovering(dt, playerPosition);
+      case "dodging": return this.updateDodging(dt, playerPosition);
       default: return 0;
     }
   }
@@ -149,12 +202,23 @@ export class EnemyUnit implements IDamageable {
     if (this.type === "drone") {
       this.mesh.position.y = 5 + Math.sin(Date.now() * 0.003) * 0.5;
     }
+    if (this.type === "commander") {
+      this.mesh.position.y += Math.sin(Date.now() * 0.002) * 0.02;
+    }
     return 0;
   }
 
   private updateChase(dt: number, playerPos: BABYLON.Vector3): number {
     const dir = playerPos.subtract(this.mesh.position);
     const dist = dir.length();
+
+    if (this.type === "commander") {
+      if (playerPos.y > this.mesh.position.y + 5) {
+        this.targetFlightHeight = playerPos.y + 3;
+        this.fsm.changeState("flying");
+        return 0;
+      }
+    }
 
     if (dist <= this.config.attackRange) {
       this.fsm.changeState("attack");
@@ -176,6 +240,9 @@ export class EnemyUnit implements IDamageable {
 
     if (this.type === "drone") {
       this.mesh.position.y = 5 + Math.sin(Date.now() * 0.003) * 0.5;
+    } else if (this.type === "commander") {
+      const targetY = Math.max(this.patrolOrigin.y, 1.5);
+      this.mesh.position.y += (targetY - this.mesh.position.y) * 0.05;
     } else {
       this.mesh.position.y = 1.5;
     }
@@ -197,7 +264,11 @@ export class EnemyUnit implements IDamageable {
     if (this.attackTimer <= 0) {
       damage = this.config.attackDamage;
       this.attackTimer = this.config.attackCooldown;
-      this.createAttackEffect();
+      if (this.type === "commander") {
+        this.createCommanderAttackEffect();
+      } else {
+        this.createAttackEffect();
+      }
     }
 
     return damage;
@@ -206,15 +277,100 @@ export class EnemyUnit implements IDamageable {
   private updateStunned(dt: number): number {
     this.stunTimer -= dt;
     if (this.stunTimer <= 0) {
+      if (this.type === "commander") {
+        this.fsm.changeState("flying");
+        this.targetFlightHeight = this.mesh.position.y + 8 + Math.random() * 5;
+      } else {
+        this.fsm.changeState("chase");
+      }
+    }
+    return 0;
+  }
+
+  private updateFlying(dt: number, playerPos: BABYLON.Vector3): number {
+    const heightDiff = this.targetFlightHeight - this.mesh.position.y;
+    this.mesh.position.y += heightDiff * 0.08;
+
+    const dir = playerPos.subtract(this.mesh.position);
+    const horizDist = new BABYLON.Vector3(dir.x, 0, dir.z).length();
+
+    if (Math.abs(heightDiff) < 1) {
+      this.fsm.changeState("hovering");
+      return 0;
+    }
+
+    if (horizDist > 5) {
+      const moveDir = dir.clone();
+      moveDir.y = 0;
+      moveDir.normalize();
+      this.mesh.position.addInPlace(moveDir.scale(this.config.chaseSpeed * 1.5));
+      this.faceDirection(moveDir);
+    }
+
+    return 0;
+  }
+
+  private updateHovering(dt: number, playerPos: BABYLON.Vector3): number {
+    this.mesh.position.y += Math.sin(Date.now() * 0.003) * 0.03;
+
+    const dir = playerPos.subtract(this.mesh.position);
+    const dist = dir.length();
+
+    if (dist <= this.config.attackRange * 1.5) {
+      this.fsm.changeState("attack");
+      this.attackTimer = 0.3;
+      return 0;
+    }
+
+    const moveDir = dir.clone();
+    moveDir.normalize();
+    this.mesh.position.addInPlace(moveDir.scale(this.config.chaseSpeed * 1.2));
+    this.faceDirection(dir);
+
+    if (dist > this.config.chaseRange) {
+      this.targetFlightHeight = 1.5;
+      this.fsm.changeState("flying");
+    }
+
+    return 0;
+  }
+
+  private updateDodging(dt: number, _playerPos: BABYLON.Vector3): number {
+    this.dodgeTimer -= dt;
+
+    this.mesh.position.addInPlace(this.dodgeDirection.scale(0.4));
+
+    if (this.dodgeTimer <= 0) {
       this.fsm.changeState("chase");
     }
     return 0;
   }
 
+  private tryDodge(playerPos: BABYLON.Vector3): boolean {
+    if (this.type !== "commander" || this.dodgeCooldown > 0) return false;
+    if (Math.random() > 0.4) return false;
+
+    const toPlayer = playerPos.subtract(this.mesh.position);
+    toPlayer.y = 0;
+    toPlayer.normalize();
+    const side = Math.random() > 0.5 ? 1 : -1;
+    this.dodgeDirection = new BABYLON.Vector3(-toPlayer.z * side, 0, toPlayer.x * side);
+    this.dodgeTimer = 0.3;
+    this.dodgeCooldown = 2.0;
+    this.fsm.changeState("dodging");
+    this.createDodgeEffect();
+    return true;
+  }
+
   private checkForPlayer(playerPos: BABYLON.Vector3): void {
     const dist = BABYLON.Vector3.Distance(this.mesh.position, playerPos);
     if (dist <= this.config.detectionRange) {
-      this.fsm.changeState("chase");
+      if (this.type === "commander" && playerPos.y > 10) {
+        this.targetFlightHeight = playerPos.y + 3;
+        this.fsm.changeState("flying");
+      } else {
+        this.fsm.changeState("chase");
+      }
     }
   }
 
@@ -240,6 +396,12 @@ export class EnemyUnit implements IDamageable {
       return { damageAmount: 0, wasKilled: false, wasBlocked: false, wasParried: false };
     }
 
+    if (this.type === "commander" && info.hitPoint) {
+      if (this.tryDodge(info.hitPoint)) {
+        return { damageAmount: 0, wasKilled: false, wasBlocked: false, wasParried: false };
+      }
+    }
+
     let finalDamage = Math.max(1, info.amount - this.config.defense);
 
     const resistance = this.resistances.find(r => r.damageType === info.damageType);
@@ -262,9 +424,19 @@ export class EnemyUnit implements IDamageable {
       return { damageAmount: finalDamage, wasKilled: true, wasBlocked: false, wasParried: false };
     }
 
-    if (this.fsm.getState() !== "stunned") {
-      this.fsm.changeState("stunned");
-      this.stunTimer = 1.5;
+    if (this.type === "commander") {
+      if (this.health < this.maxHealth * 0.5 && this.fsm.getState() !== "flying") {
+        this.targetFlightHeight = this.mesh.position.y + 10 + Math.random() * 8;
+        this.fsm.changeState("flying");
+      } else if (this.fsm.getState() !== "stunned") {
+        this.fsm.changeState("stunned");
+        this.stunTimer = 0.8;
+      }
+    } else {
+      if (this.fsm.getState() !== "stunned") {
+        this.fsm.changeState("stunned");
+        this.stunTimer = 1.5;
+      }
     }
 
     return { damageAmount: finalDamage, wasKilled: false, wasBlocked: false, wasParried: false };
@@ -283,14 +455,31 @@ export class EnemyUnit implements IDamageable {
   private die(): void {
     this.isAlive = false;
     this.fsm.forceState("dead");
-    this.bus.emit(GameEvents.ENEMY_KILLED, {
+
+    const lootData: any = {
       type: this.type,
       credits: this.config.credits,
       experience: this.config.experienceValue,
       position: this.mesh.position.clone(),
-    });
-    this.createDeathEffect();
+    };
+
+    if (this.type === "commander") {
+      lootData.rareLoot = true;
+      lootData.upgradeModules = 1 + Math.floor(Math.random() * 3);
+      lootData.credits = this.config.credits * 2;
+    }
+
+    this.bus.emit(GameEvents.ENEMY_KILLED, lootData);
+
+    if (this.type === "commander") {
+      this.createCommanderDeathEffect();
+    } else {
+      this.createDeathEffect();
+    }
     setTimeout(() => {
+      if (this.auraMesh && !this.auraMesh.isDisposed()) {
+        this.auraMesh.dispose();
+      }
       if (this.mesh && !this.mesh.isDisposed()) {
         this.mesh.dispose();
       }
@@ -332,6 +521,68 @@ export class EnemyUnit implements IDamageable {
     animate();
   }
 
+  private createCommanderAttackEffect(): void {
+    const scene = this.mesh.getScene();
+    const pos = this.mesh.position.clone();
+
+    const beam = BABYLON.MeshBuilder.CreateCylinder("cmdBeam", {
+      height: this.config.attackRange,
+      diameter: 0.6,
+      tessellation: 8,
+    }, scene);
+    beam.position = pos.clone();
+    beam.position.y += 1;
+    const forward = this.mesh.forward || new BABYLON.Vector3(0, 0, 1);
+    beam.lookAt(pos.add(forward.scale(this.config.attackRange)));
+    beam.rotation.x += Math.PI / 2;
+    const beamMat = new BABYLON.StandardMaterial("cmdBeamMat", scene);
+    beamMat.emissiveColor = new BABYLON.Color3(1.0, 0.5, 0.0);
+    beamMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+    beamMat.alpha = 0.7;
+    beam.material = beamMat;
+
+    const flash = BABYLON.MeshBuilder.CreateSphere("cmdFlash", { diameter: 1.5, segments: 8 }, scene);
+    flash.position = pos.clone();
+    const flashMat = new BABYLON.StandardMaterial("cmdFlashMat", scene);
+    flashMat.emissiveColor = new BABYLON.Color3(1.0, 0.6, 0.0);
+    flashMat.alpha = 0.9;
+    flash.material = flashMat;
+
+    let frame = 0;
+    const animate = () => {
+      frame++;
+      beamMat.alpha = Math.max(0, 0.7 - frame * 0.07);
+      flashMat.alpha = Math.max(0, 0.9 - frame * 0.09);
+      flash.scaling.setAll(1 + frame * 0.3);
+      if (frame < 10) requestAnimationFrame(animate);
+      else {
+        beam.dispose();
+        flash.dispose();
+      }
+    };
+    animate();
+  }
+
+  private createDodgeEffect(): void {
+    const scene = this.mesh.getScene();
+    const pos = this.mesh.position.clone();
+    const afterimage = BABYLON.MeshBuilder.CreateBox("dodgeGhost", { size: 1.5 }, scene);
+    afterimage.position = pos;
+    const mat = new BABYLON.StandardMaterial("dodgeMat", scene);
+    mat.emissiveColor = new BABYLON.Color3(1.0, 0.5, 0.0);
+    mat.alpha = 0.5;
+    afterimage.material = mat;
+
+    let frame = 0;
+    const animate = () => {
+      frame++;
+      mat.alpha = Math.max(0, 0.5 - frame * 0.05);
+      if (frame < 10) requestAnimationFrame(animate);
+      else afterimage.dispose();
+    };
+    animate();
+  }
+
   private createDeathEffect(): void {
     const scene = this.mesh.getScene();
     const pos = this.mesh.position.clone();
@@ -361,6 +612,54 @@ export class EnemyUnit implements IDamageable {
       animate();
     }
   }
+
+  private createCommanderDeathEffect(): void {
+    const scene = this.mesh.getScene();
+    const pos = this.mesh.position.clone();
+
+    const explosion = BABYLON.MeshBuilder.CreateSphere("cmdExplosion", { diameter: 2, segments: 12 }, scene);
+    explosion.position = pos.clone();
+    const explMat = new BABYLON.StandardMaterial("cmdExplMat", scene);
+    explMat.emissiveColor = new BABYLON.Color3(1.0, 0.6, 0.0);
+    explMat.alpha = 1.0;
+    explosion.material = explMat;
+
+    for (let i = 0; i < 20; i++) {
+      const particle = BABYLON.MeshBuilder.CreateBox("cmdDeathP", { size: 0.3 + Math.random() * 0.2 }, scene);
+      particle.position = pos.clone();
+      const mat = new BABYLON.StandardMaterial("cmdDeathMat", scene);
+      mat.emissiveColor = new BABYLON.Color3(1.0, 0.3 + Math.random() * 0.4, 0);
+      particle.material = mat;
+
+      const velocity = new BABYLON.Vector3(
+        (Math.random() - 0.5) * 0.5,
+        Math.random() * 0.5,
+        (Math.random() - 0.5) * 0.5
+      );
+
+      let frame = 0;
+      const animate = () => {
+        frame++;
+        particle.position.addInPlace(velocity);
+        velocity.y -= 0.012;
+        particle.rotation.addInPlace(new BABYLON.Vector3(0.15, 0.15, 0.15));
+        mat.alpha = Math.max(0, 1 - frame * 0.033);
+        if (frame < 30) requestAnimationFrame(animate);
+        else particle.dispose();
+      };
+      animate();
+    }
+
+    let expFrame = 0;
+    const animateExplosion = () => {
+      expFrame++;
+      explosion.scaling.setAll(1 + expFrame * 0.5);
+      explMat.alpha = Math.max(0, 1 - expFrame * 0.05);
+      if (expFrame < 20) requestAnimationFrame(animateExplosion);
+      else explosion.dispose();
+    };
+    animateExplosion();
+  }
 }
 
 export class EnemySystem {
@@ -387,6 +686,7 @@ export class EnemySystem {
       heavy: "TankTitan",
       insectoid: "InsectoidStalker",
       hybrid: "HybridOmega",
+      commander: "CommanderOmega",
     };
 
     const presetName = presetMap[type] || "ScoutPrime";
@@ -395,8 +695,8 @@ export class EnemySystem {
     if (preset) {
       const root = this.robotFactory.createRobot(preset, position);
 
-      const hitboxH = type === "hybrid" ? 3.5 : type === "heavy" ? 3 : 2;
-      const hitboxR = type === "hybrid" ? 0.8 : type === "heavy" ? 0.7 : 0.5;
+      const hitboxH = type === "commander" ? 4.0 : type === "hybrid" ? 3.5 : type === "heavy" ? 3 : 2;
+      const hitboxR = type === "commander" ? 0.9 : type === "hybrid" ? 0.8 : type === "heavy" ? 0.7 : 0.5;
       const hitbox = BABYLON.MeshBuilder.CreateCapsule(`enemyHit_${type}_${Date.now()}`, {
         height: hitboxH,
         radius: hitboxR,
@@ -440,8 +740,27 @@ export class EnemySystem {
     this.bus.emit(GameEvents.ENEMY_SPAWNED, { type, position });
   }
 
+  spawnCommander(playerPosition: BABYLON.Vector3): void {
+    if (this.enemies.length >= this.maxEnemies) return;
+
+    const angle = Math.random() * Math.PI * 2;
+    const distance = 40 + Math.random() * 40;
+    const x = playerPosition.x + Math.cos(angle) * distance;
+    const z = playerPosition.z + Math.sin(angle) * distance;
+    const rooftopHeight = 20 + Math.random() * 30;
+    const position = new BABYLON.Vector3(x, rooftopHeight, z);
+
+    const mesh = this.createEnemyMesh("commander", position);
+    const waveMultiplier = 1 + (this.waveNumber - 1) * 0.25;
+
+    const enemy = new EnemyUnit(mesh, "commander", waveMultiplier);
+    this.enemies.push(enemy);
+    this.bus.emit(GameEvents.ENEMY_SPAWNED, { type: "commander", position });
+  }
+
   private selectEnemyType(): EnemyType {
     const roll = Math.random();
+    if (this.waveNumber >= 7 && roll < 0.08) return "commander";
     if (this.waveNumber >= 5 && roll < 0.05) return "hybrid";
     if (this.waveNumber >= 3 && roll < 0.15) return "heavy";
     if (roll < 0.3) return "insectoid";

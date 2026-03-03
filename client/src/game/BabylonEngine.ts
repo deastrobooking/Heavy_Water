@@ -1,11 +1,23 @@
 import * as BABYLON from "@babylonjs/core";
 import "@babylonjs/loaders";
 
+export interface OutlineConfig {
+  thickness: number;
+  color: BABYLON.Color3;
+  enabled: boolean;
+}
+
 export class BabylonEngine {
   private canvas: HTMLCanvasElement;
   private engine: BABYLON.Engine;
   private scene: BABYLON.Scene;
   private camera: BABYLON.FreeCamera;
+  private outlinePostProcess: BABYLON.PostProcess | null = null;
+  private outlineConfig: OutlineConfig = {
+    thickness: 1.0,
+    color: new BABYLON.Color3(0, 0, 0),
+    enabled: true,
+  };
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -17,6 +29,8 @@ export class BabylonEngine {
     this.camera = this.createCamera();
     this.setupLighting();
     this.setupPostProcessing();
+    this.setupCellShadingOutline();
+    this.boostMaterialBrightness();
   }
 
   private createCamera(): BABYLON.FreeCamera {
@@ -93,6 +107,145 @@ export class BabylonEngine {
     this.scene.fogColor = new BABYLON.Color3(0.05, 0.05, 0.15);
   }
 
+  private setupCellShadingOutline(): void {
+    this.scene.enableDepthRenderer(this.camera, false);
+
+    const geometryBufferRenderer = this.scene.enableGeometryBufferRenderer();
+    if (geometryBufferRenderer) {
+      geometryBufferRenderer.enableNormal = true;
+    }
+
+    const edgeDetectionFragmentSource = `
+      precision highp float;
+
+      varying vec2 vUV;
+      uniform sampler2D textureSampler;
+      uniform sampler2D depthSampler;
+      uniform sampler2D normalSampler;
+      uniform float screenWidth;
+      uniform float screenHeight;
+      uniform float outlineThickness;
+      uniform vec3 outlineColor;
+      uniform float outlineEnabled;
+
+      float getDepth(vec2 uv) {
+        return texture2D(depthSampler, uv).r;
+      }
+
+      vec3 getNormal(vec2 uv) {
+        return texture2D(normalSampler, uv).rgb * 2.0 - 1.0;
+      }
+
+      void main(void) {
+        vec4 baseColor = texture2D(textureSampler, vUV);
+
+        if (outlineEnabled < 0.5) {
+          gl_FragColor = baseColor;
+          return;
+        }
+
+        float dx = outlineThickness / screenWidth;
+        float dy = outlineThickness / screenHeight;
+
+        float depthCenter = getDepth(vUV);
+        float depthLeft   = getDepth(vUV + vec2(-dx, 0.0));
+        float depthRight  = getDepth(vUV + vec2( dx, 0.0));
+        float depthUp     = getDepth(vUV + vec2(0.0,  dy));
+        float depthDown   = getDepth(vUV + vec2(0.0, -dy));
+        float depthTL     = getDepth(vUV + vec2(-dx,  dy));
+        float depthTR     = getDepth(vUV + vec2( dx,  dy));
+        float depthBL     = getDepth(vUV + vec2(-dx, -dy));
+        float depthBR     = getDepth(vUV + vec2( dx, -dy));
+
+        float sobelHDepth = -1.0*depthTL + 1.0*depthTR - 2.0*depthLeft + 2.0*depthRight - 1.0*depthBL + 1.0*depthBR;
+        float sobelVDepth = -1.0*depthTL - 2.0*depthUp - 1.0*depthTR + 1.0*depthBL + 2.0*depthDown + 1.0*depthBR;
+        float depthEdge = sqrt(sobelHDepth * sobelHDepth + sobelVDepth * sobelVDepth);
+
+        vec3 normalCenter = getNormal(vUV);
+        vec3 normalLeft   = getNormal(vUV + vec2(-dx, 0.0));
+        vec3 normalRight  = getNormal(vUV + vec2( dx, 0.0));
+        vec3 normalUp     = getNormal(vUV + vec2(0.0,  dy));
+        vec3 normalDown   = getNormal(vUV + vec2(0.0, -dy));
+
+        float normalDiff = 0.0;
+        normalDiff += length(normalCenter - normalLeft);
+        normalDiff += length(normalCenter - normalRight);
+        normalDiff += length(normalCenter - normalUp);
+        normalDiff += length(normalCenter - normalDown);
+        normalDiff *= 0.25;
+
+        float depthThreshold = 0.002;
+        float normalThreshold = 0.3;
+
+        float edge = 0.0;
+        if (depthEdge > depthThreshold) edge = 1.0;
+        if (normalDiff > normalThreshold) edge = max(edge, 1.0);
+
+        edge = clamp(edge, 0.0, 1.0);
+
+        vec3 finalColor = mix(baseColor.rgb, outlineColor, edge);
+
+        finalColor *= 1.15;
+
+        gl_FragColor = vec4(finalColor, baseColor.a);
+      }
+    `;
+
+    BABYLON.Effect.ShadersStore["cellOutlineFragmentShader"] = edgeDetectionFragmentSource;
+
+    const depthRenderer = this.scene.enableDepthRenderer(this.camera, false);
+    const depthTexture = depthRenderer.getDepthMap();
+
+    let normalTexture: BABYLON.Nullable<BABYLON.BaseTexture> = null;
+    if (geometryBufferRenderer) {
+      normalTexture = geometryBufferRenderer.getGBuffer().textures[1];
+    }
+
+    this.outlinePostProcess = new BABYLON.PostProcess(
+      "cellOutline",
+      "cellOutline",
+      ["screenWidth", "screenHeight", "outlineThickness", "outlineColor", "outlineEnabled"],
+      ["depthSampler", "normalSampler"],
+      1.0,
+      this.camera,
+      BABYLON.Texture.BILINEAR_SAMPLINGMODE,
+      this.engine,
+      false
+    );
+
+    this.outlinePostProcess.onApply = (effect: BABYLON.Effect) => {
+      effect.setFloat("screenWidth", this.engine.getRenderWidth());
+      effect.setFloat("screenHeight", this.engine.getRenderHeight());
+      effect.setFloat("outlineThickness", this.outlineConfig.thickness);
+      effect.setFloat3("outlineColor", this.outlineConfig.color.r, this.outlineConfig.color.g, this.outlineConfig.color.b);
+      effect.setFloat("outlineEnabled", this.outlineConfig.enabled ? 1.0 : 0.0);
+      effect.setTexture("depthSampler", depthTexture);
+      if (normalTexture) {
+        effect.setTexture("normalSampler", normalTexture);
+      }
+    };
+  }
+
+  private boostMaterialBrightness(): void {
+    this.scene.onNewMeshAddedObservable.add((mesh) => {
+      if (mesh.material && mesh.material instanceof BABYLON.StandardMaterial) {
+        const mat = mesh.material as BABYLON.StandardMaterial;
+        mat.emissiveColor = mat.emissiveColor.add(new BABYLON.Color3(0.08, 0.08, 0.08));
+        mat.specularPower = Math.max(mat.specularPower * 0.7, 8);
+      }
+    });
+  }
+
+  setOutlineConfig(config: Partial<OutlineConfig>): void {
+    if (config.thickness !== undefined) this.outlineConfig.thickness = config.thickness;
+    if (config.color !== undefined) this.outlineConfig.color = config.color;
+    if (config.enabled !== undefined) this.outlineConfig.enabled = config.enabled;
+  }
+
+  getOutlineConfig(): OutlineConfig {
+    return { ...this.outlineConfig };
+  }
+
   getScene(): BABYLON.Scene {
     return this.scene;
   }
@@ -117,6 +270,9 @@ export class BabylonEngine {
   }
 
   dispose(): void {
+    if (this.outlinePostProcess) {
+      this.outlinePostProcess.dispose();
+    }
     this.scene.dispose();
     this.engine.dispose();
   }

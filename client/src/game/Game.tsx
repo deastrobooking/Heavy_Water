@@ -14,6 +14,9 @@ import { ArmorSystem } from "./ArmorSystem";
 import { CraftingSystem } from "./CraftingSystem";
 import { InventorySystem } from "./InventorySystem";
 import { CompanionSystem } from "./CompanionSystem";
+import { ArmorCapsuleSystem, ArmorUpgrade } from "./ArmorCapsuleSystem";
+import { ShopSystem, ShopDefinition } from "./ShopSystem";
+import { BuildingSystem } from "./BuildingSystem";
 import { EventBus, GameEvents } from "./EventBus";
 import { DamageType } from "./DamageSystem";
 import { GameUI } from "./GameUI";
@@ -35,6 +38,9 @@ export const Game: React.FC = () => {
   const craftingSystemRef = useRef<CraftingSystem | null>(null);
   const inventoryRef = useRef<InventorySystem | null>(null);
   const companionRef = useRef<CompanionSystem | null>(null);
+  const capsuleRef = useRef<ArmorCapsuleSystem | null>(null);
+  const shopRef = useRef<ShopSystem | null>(null);
+  const buildingRef = useRef<BuildingSystem | null>(null);
 
   const [gamePhase, setGamePhase] = useState<GamePhase>("menu");
   const [stats, setStats] = useState<PlayerStats>({
@@ -66,6 +72,20 @@ export const Game: React.FC = () => {
   const [armorDefense, setArmorDefense] = useState(0);
   const [companionCount, setCompanionCount] = useState(0);
   const [companionInfo, setCompanionInfo] = useState<{ name: string; type: string; health: number; maxHealth: number }[]>([]);
+
+  const [isFlying, setIsFlying] = useState(false);
+  const [armorEnergy, setArmorEnergy] = useState(0);
+  const [maxArmorEnergy, setMaxArmorEnergy] = useState(200);
+  const [hasFlightArmor, setHasFlightArmor] = useState(false);
+  const [jumpCount, setJumpCount] = useState(0);
+
+  const [capsuleOpen, setCapsuleOpen] = useState(false);
+  const [capsuleUpgrades, setCapsuleUpgrades] = useState<ArmorUpgrade[]>([]);
+
+  const [shopOpen, setShopOpen] = useState(false);
+  const [activeShop, setActiveShop] = useState<ShopDefinition | null>(null);
+
+  const [buildMode, setBuildMode] = useState(false);
 
   const showMessage = useCallback((msg: string, duration: number = 2000) => {
     setMessage(msg);
@@ -172,6 +192,44 @@ export const Game: React.FC = () => {
     companionSystem.addCompanion("GuardianUnit", player.getPosition());
     companionSystem.addCompanion("SparkPup", player.getPosition());
 
+    const capsuleSystem = new ArmorCapsuleSystem(scene, armorSystem);
+    capsuleRef.current = capsuleSystem;
+
+    capsuleSystem.setUIToggleCallback((open, upgrades) => {
+      setCapsuleOpen(open);
+      setCapsuleUpgrades(upgrades);
+    });
+
+    capsuleSystem.setUpgradeAppliedCallback((upgrade) => {
+      if (upgrade.effects?.flightCapability) {
+        player.grantFlightArmor();
+        setHasFlightArmor(true);
+        showMessage("FLIGHT ARMOR ACQUIRED! Triple-jump to fly!", 4000);
+      } else {
+        showMessage(`UPGRADE: ${upgrade.name}`, 3000);
+      }
+    });
+
+    const shopSystem = new ShopSystem(scene, engine.getCamera(), inventory);
+    shopRef.current = shopSystem;
+
+    shopSystem.setOnShopOpen((shop) => {
+      setShopOpen(true);
+      setActiveShop(shop);
+    });
+
+    shopSystem.setOnShopClose(() => {
+      setShopOpen(false);
+      setActiveShop(null);
+    });
+
+    shopSystem.setOnTransactionComplete((msg) => {
+      showMessage(msg, 1500);
+    });
+
+    const buildingSystem = new BuildingSystem(scene, engine.getCamera(), inventory);
+    buildingRef.current = buildingSystem;
+
     BABYLON.SceneLoader.ImportMeshAsync("", "/models/", "swarm_drone.glb", scene).then((result) => {
       if (result.meshes.length > 0) {
         const droneRoot = result.meshes[0];
@@ -227,6 +285,14 @@ export const Game: React.FC = () => {
       showMessage(`LEVEL UP! LVL ${data.level}`, 3000);
     });
 
+    bus.on(GameEvents.PLAYER_FLIGHT_ENTER, () => {
+      showMessage("FLIGHT MODE ACTIVATED", 1500);
+    });
+
+    bus.on(GameEvents.PLAYER_FLIGHT_EXIT, () => {
+      showMessage("FLIGHT MODE DEACTIVATED", 1000);
+    });
+
     let lastTime = performance.now();
     let waveTimer = 0;
     let uiThrottleTimer = 0;
@@ -274,6 +340,10 @@ export const Game: React.FC = () => {
 
       chestSystem.update(playerPos);
 
+      capsuleSystem.update(dt, playerPos);
+      shopSystem.update();
+      buildingSystem.update(dt);
+
       setStats(player.getStats());
       setEnemyCount(enemySystem.getEnemyCount());
       setChestCount(chestSystem.getChestCount());
@@ -284,6 +354,12 @@ export const Game: React.FC = () => {
       setBeamSabreLevel(beamSabre.getLevel);
       setActiveElement(armorSystem.getActiveElement());
       setArmorDefense(armorSystem.getTotalDefense());
+      setIsFlying(player.getIsFlying());
+      setArmorEnergy(player.getArmorEnergy());
+      setMaxArmorEnergy(player.getMaxArmorEnergy());
+      setHasFlightArmor(player.getHasFlightArmor());
+      setBuildMode(buildingSystem.isBuildMode());
+
       uiThrottleTimer += dt;
       if (uiThrottleTimer >= 0.5) {
         uiThrottleTimer = 0;
@@ -320,6 +396,9 @@ export const Game: React.FC = () => {
     if (specialWeaponsRef.current) specialWeaponsRef.current.dispose();
     if (beamSabreRef.current) beamSabreRef.current.dispose();
     if (companionRef.current) companionRef.current.dispose();
+    if (capsuleRef.current) capsuleRef.current.dispose();
+    if (shopRef.current) shopRef.current.dispose();
+    if (buildingRef.current) buildingRef.current.dispose();
     if (engineRef.current) {
       engineRef.current.dispose();
       engineRef.current = null;
@@ -338,8 +417,34 @@ export const Game: React.FC = () => {
     setArmorDefense(0);
     setCompanionCount(0);
     setCompanionInfo([]);
+    setIsFlying(false);
+    setArmorEnergy(0);
+    setHasFlightArmor(false);
+    setCapsuleOpen(false);
+    setCapsuleUpgrades([]);
+    setShopOpen(false);
+    setActiveShop(null);
+    setBuildMode(false);
     initializeGame();
   }, [initializeGame]);
+
+  const handleCapsuleUpgrade = useCallback((upgradeId: string) => {
+    const capsule = capsuleRef.current;
+    const player = playerRef.current;
+    if (!capsule || !player) return;
+    const result = capsule.applyUpgrade(upgradeId, player.getStats().credits);
+    if (result.success && result.upgrade) {
+      player.addCredits(-result.upgrade.cost);
+    }
+    showMessage(result.message, 2000);
+  }, [showMessage]);
+
+  const handleShopBuy = useCallback((key: string) => {
+    const shop = shopRef.current;
+    if (!shop) return;
+    const [shopId, indexStr] = key.split(":");
+    shop.buyItem(shopId, parseInt(indexStr, 10));
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -347,6 +452,9 @@ export const Game: React.FC = () => {
       if (specialWeaponsRef.current) specialWeaponsRef.current.dispose();
       if (beamSabreRef.current) beamSabreRef.current.dispose();
       if (companionRef.current) companionRef.current.dispose();
+      if (capsuleRef.current) capsuleRef.current.dispose();
+      if (shopRef.current) shopRef.current.dispose();
+      if (buildingRef.current) buildingRef.current.dispose();
       if (engineRef.current) engineRef.current.dispose();
       EventBus.getInstance().clear();
     };
@@ -382,6 +490,17 @@ export const Game: React.FC = () => {
           activeElement={activeElement}
           armorDefense={armorDefense}
           companions={companionInfo}
+          isFlying={isFlying}
+          armorEnergy={armorEnergy}
+          maxArmorEnergy={maxArmorEnergy}
+          hasFlightArmor={hasFlightArmor}
+          capsuleOpen={capsuleOpen}
+          capsuleUpgrades={capsuleUpgrades}
+          onCapsuleUpgrade={handleCapsuleUpgrade}
+          shopOpen={shopOpen}
+          activeShop={activeShop}
+          onShopBuy={handleShopBuy}
+          buildMode={buildMode}
         />
       )}
 

@@ -101,8 +101,10 @@ export class CityGenerator {
     this.createNeonLights();
     this.createSpaceports();
     this.createStreetLights();
-    this.createMountainZone();
-    this.createNatureZone();
+    this.createMountainBiome();
+    this.createJungleBiome();
+    this.createDesertBiome();
+    this.createJunkyardBiome();
     this.createSkyCities();
     this.createSkyBridges();
     this.createOuterDistricts();
@@ -565,289 +567,1015 @@ export class CityGenerator {
     }
   }
 
-  private createMountainZone(): void {
-    const rockMat = new BABYLON.StandardMaterial("rockMat", this.scene);
-    rockMat.diffuseColor = new BABYLON.Color3(0.25, 0.22, 0.2);
+  private createMountainBiome(): void {
+    const rockMat = new BABYLON.StandardMaterial("mtnRockMat", this.scene);
+    rockMat.diffuseColor = new BABYLON.Color3(0.3, 0.27, 0.22);
     rockMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
 
-    const snowMat = new BABYLON.StandardMaterial("snowMat", this.scene);
-    snowMat.diffuseColor = new BABYLON.Color3(0.85, 0.88, 0.95);
-    snowMat.emissiveColor = new BABYLON.Color3(0.1, 0.1, 0.15);
+    const snowMat = new BABYLON.StandardMaterial("mtnSnowMat", this.scene);
+    snowMat.diffuseColor = new BABYLON.Color3(0.9, 0.92, 0.98);
+    snowMat.emissiveColor = new BABYLON.Color3(0.12, 0.12, 0.18);
 
-    const darkRockMat = new BABYLON.StandardMaterial("darkRockMat", this.scene);
-    darkRockMat.diffuseColor = new BABYLON.Color3(0.18, 0.16, 0.15);
+    const darkRockMat = new BABYLON.StandardMaterial("mtnDarkRockMat", this.scene);
+    darkRockMat.diffuseColor = new BABYLON.Color3(0.18, 0.16, 0.14);
 
-    const mountainConfigs = [
-      { cx: 450, cz: 350, peaks: 6, baseRadius: 120, label: "NE" },
-      { cx: -450, cz: 350, peaks: 5, baseRadius: 100, label: "NW" },
-      { cx: 500, cz: -400, peaks: 7, baseRadius: 130, label: "SE" },
-      { cx: -500, cz: -350, peaks: 4, baseRadius: 90, label: "SW" },
+    const pathMat = new BABYLON.StandardMaterial("mtnPathMat", this.scene);
+    pathMat.diffuseColor = new BABYLON.Color3(0.35, 0.3, 0.25);
+    pathMat.emissiveColor = new BABYLON.Color3(0.03, 0.02, 0.01);
+
+    const caveMat = new BABYLON.StandardMaterial("mtnCaveMat", this.scene);
+    caveMat.diffuseColor = new BABYLON.Color3(0.08, 0.07, 0.06);
+    caveMat.emissiveColor = new BABYLON.Color3(0.02, 0.01, 0.0);
+
+    const groundPatch = BABYLON.MeshBuilder.CreateGround(
+      "mtnGround",
+      { width: 500, height: 500 },
+      this.scene
+    );
+    groundPatch.position = new BABYLON.Vector3(0, 0.06, 450);
+    const mtnGroundMat = new BABYLON.StandardMaterial("mtnGroundMat", this.scene);
+    mtnGroundMat.diffuseColor = new BABYLON.Color3(0.22, 0.2, 0.18);
+    mtnGroundMat.emissiveColor = new BABYLON.Color3(0.02, 0.02, 0.01);
+    groundPatch.material = mtnGroundMat;
+
+    let seed = 5000;
+    const peaks = [
+      { cx: -80, cz: 380, label: "NW" },
+      { cx: 60, cz: 420, label: "NC" },
+      { cx: -30, cz: 520, label: "NF" },
+      { cx: 120, cz: 500, label: "NE" },
+      { cx: -150, cz: 480, label: "NWF" },
+      { cx: 0, cz: 600, label: "NFar" },
+      { cx: 180, cz: 400, label: "NEn" },
+      { cx: -100, cz: 550, label: "NWFar" },
+      { cx: 80, cz: 580, label: "NEFar" },
     ];
 
-    let seed = 600;
-    for (const config of mountainConfigs) {
-      for (let p = 0; p < config.peaks; p++) {
-        seed++;
-        const angle = (p / config.peaks) * Math.PI * 2 + seededRandom(seed) * 0.5;
-        const dist = seededRandom(seed + 100) * config.baseRadius * 0.7;
-        const px = config.cx + Math.cos(angle) * dist;
-        const pz = config.cz + Math.sin(angle) * dist;
+    for (const peak of peaks) {
+      seed++;
+      const peakHeight = 60 + seededRandom(seed) * 100;
+      const baseSize = 30 + seededRandom(seed + 100) * 40;
 
-        const peakHeight = 40 + seededRandom(seed + 200) * 80;
-        const baseSize = 20 + seededRandom(seed + 300) * 30;
+      const mountain = BABYLON.MeshBuilder.CreateCylinder(
+        `mtn_${peak.label}`,
+        {
+          height: peakHeight,
+          diameterTop: 2 + seededRandom(seed + 200) * 6,
+          diameterBottom: baseSize,
+          tessellation: 6 + Math.floor(seededRandom(seed + 300) * 4),
+        },
+        this.scene
+      );
+      mountain.position = new BABYLON.Vector3(peak.cx, peakHeight / 2, peak.cz);
+      mountain.rotation.y = seededRandom(seed + 400) * Math.PI;
 
-        const mountain = BABYLON.MeshBuilder.CreateCylinder(
-          `mountain_${config.label}_${p}`,
-          {
-            height: peakHeight,
-            diameterTop: 2 + seededRandom(seed + 400) * 5,
-            diameterBottom: baseSize,
-            tessellation: 6 + Math.floor(seededRandom(seed + 500) * 4),
-          },
+      if (peakHeight > 90) {
+        mountain.material = snowMat;
+        const snowCap = BABYLON.MeshBuilder.CreateCylinder(
+          `mtnSnow_${peak.label}`,
+          { height: peakHeight * 0.3, diameterTop: 1, diameterBottom: baseSize * 0.4, tessellation: 6 },
           this.scene
         );
-        mountain.position = new BABYLON.Vector3(px, peakHeight / 2, pz);
-        mountain.rotation.y = seededRandom(seed + 600) * Math.PI;
+        snowCap.position = new BABYLON.Vector3(peak.cx, peakHeight * 0.85, peak.cz);
+        snowCap.material = snowMat;
+      } else {
+        mountain.material = rockMat;
+      }
 
-        if (peakHeight > 80) {
-          mountain.material = snowMat;
+      const boulderCount = 4 + Math.floor(seededRandom(seed + 500) * 6);
+      for (let b = 0; b < boulderCount; b++) {
+        seed++;
+        const bAngle = seededRandom(seed) * Math.PI * 2;
+        const bDist = baseSize * 0.5 + seededRandom(seed + 100) * baseSize * 0.6;
+        const bSize = 3 + seededRandom(seed + 200) * 8;
+        const boulder = BABYLON.MeshBuilder.CreateSphere(
+          `mtnBoulder_${peak.label}_${b}`, { diameter: bSize, segments: 4 }, this.scene
+        );
+        boulder.position = new BABYLON.Vector3(
+          peak.cx + Math.cos(bAngle) * bDist, bSize / 2, peak.cz + Math.sin(bAngle) * bDist
+        );
+        boulder.scaling = new BABYLON.Vector3(
+          1 + seededRandom(seed + 300) * 0.5, 0.5 + seededRandom(seed + 400) * 0.5, 1 + seededRandom(seed + 500) * 0.5
+        );
+        boulder.material = darkRockMat;
+      }
+    }
 
-          const snowCap = BABYLON.MeshBuilder.CreateCylinder(
-            `snowcap_${config.label}_${p}`,
-            {
-              height: peakHeight * 0.3,
-              diameterTop: 1,
-              diameterBottom: baseSize * 0.4,
-              tessellation: 6,
-            },
-            this.scene
+    for (let r = 0; r < 6; r++) {
+      seed++;
+      const ridgeLen = 40 + seededRandom(seed) * 80;
+      const ridgeH = 15 + seededRandom(seed + 100) * 30;
+      const ridge = BABYLON.MeshBuilder.CreateBox(
+        `mtnRidge_${r}`, { height: ridgeH, width: ridgeLen, depth: 8 + seededRandom(seed + 200) * 10 }, this.scene
+      );
+      ridge.position = new BABYLON.Vector3(
+        (seededRandom(seed + 300) - 0.5) * 300, ridgeH / 2, 350 + seededRandom(seed + 400) * 250
+      );
+      ridge.rotation.y = seededRandom(seed + 500) * Math.PI;
+      ridge.material = rockMat;
+    }
+
+    for (let c = 0; c < 3; c++) {
+      seed++;
+      const cx = (seededRandom(seed) - 0.5) * 200;
+      const cz = 380 + seededRandom(seed + 100) * 200;
+      const caveW = 12 + seededRandom(seed + 200) * 8;
+      const caveH = 8 + seededRandom(seed + 300) * 6;
+
+      const caveEntrance = BABYLON.MeshBuilder.CreateBox(
+        `mtnCave_${c}`, { height: caveH, width: caveW, depth: 10 }, this.scene
+      );
+      caveEntrance.position = new BABYLON.Vector3(cx, caveH / 2, cz);
+      caveEntrance.material = caveMat;
+
+      const caveArch = BABYLON.MeshBuilder.CreateCylinder(
+        `mtnCaveArch_${c}`, { height: caveW, diameter: caveH, tessellation: 8 }, this.scene
+      );
+      caveArch.rotation.z = Math.PI / 2;
+      caveArch.position = new BABYLON.Vector3(cx, caveH, cz - 5);
+      caveArch.material = darkRockMat;
+
+      const glowOrb = BABYLON.MeshBuilder.CreateSphere(`mtnCaveGlow_${c}`, { diameter: 1.5 }, this.scene);
+      glowOrb.position = new BABYLON.Vector3(cx, caveH * 0.6, cz + 2);
+      const glowMat = new BABYLON.StandardMaterial(`mtnCaveGlowMat_${c}`, this.scene);
+      glowMat.emissiveColor = new BABYLON.Color3(0.2, 0.6, 0.8);
+      glowOrb.material = glowMat;
+    }
+
+    for (let p = 0; p < 15; p++) {
+      seed++;
+      const t = p / 15;
+      const px = -100 + t * 200 + (seededRandom(seed) - 0.5) * 30;
+      const pz = 320 + t * 250;
+      const pathSeg = BABYLON.MeshBuilder.CreateBox(
+        `mtnPath_${p}`, { height: 0.3, width: 6, depth: 20 }, this.scene
+      );
+      pathSeg.position = new BABYLON.Vector3(px, 0.2, pz);
+      pathSeg.rotation.y = seededRandom(seed + 100) * 0.5;
+      pathSeg.material = pathMat;
+    }
+
+    this.createMountainTemple(0, 400, seed);
+    seed += 100;
+    this.createMountainVillage(-120, 360, seed);
+  }
+
+  private createMountainTemple(x: number, z: number, seed: number): void {
+    const templeMat = new BABYLON.StandardMaterial("mtnTempleMat", this.scene);
+    templeMat.diffuseColor = new BABYLON.Color3(0.5, 0.48, 0.42);
+    templeMat.emissiveColor = new BABYLON.Color3(0.05, 0.04, 0.03);
+
+    const glowMat = new BABYLON.StandardMaterial("mtnTempleGlow", this.scene);
+    glowMat.emissiveColor = new BABYLON.Color3(0.3, 0.7, 1.0);
+    glowMat.diffuseColor = new BABYLON.Color3(0.1, 0.3, 0.5);
+
+    const base = BABYLON.MeshBuilder.CreateBox("mtnTempleBase", { height: 4, width: 30, depth: 30 }, this.scene);
+    base.position = new BABYLON.Vector3(x, 2, z);
+    base.material = templeMat;
+
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI * 2;
+      const pillar = BABYLON.MeshBuilder.CreateCylinder(
+        `mtnTemplePillar_${i}`, { height: 18, diameter: 2.5 }, this.scene
+      );
+      pillar.position = new BABYLON.Vector3(x + Math.cos(angle) * 12, 13, z + Math.sin(angle) * 12);
+      pillar.material = templeMat;
+    }
+
+    const roof = BABYLON.MeshBuilder.CreateCylinder(
+      "mtnTempleRoof", { height: 8, diameterTop: 1, diameterBottom: 35, tessellation: 4 }, this.scene
+    );
+    roof.position = new BABYLON.Vector3(x, 26, z);
+    roof.material = templeMat;
+
+    const altar = BABYLON.MeshBuilder.CreateSphere("mtnTempleAltar", { diameter: 3 }, this.scene);
+    altar.position = new BABYLON.Vector3(x, 6, z);
+    altar.material = glowMat;
+
+    const altarLight = new BABYLON.PointLight("mtnTempleLight", new BABYLON.Vector3(x, 8, z), this.scene);
+    altarLight.diffuse = new BABYLON.Color3(0.3, 0.7, 1.0);
+    altarLight.intensity = 1.0;
+    altarLight.range = 30;
+  }
+
+  private createMountainVillage(x: number, z: number, seed: number): void {
+    const hutMat = new BABYLON.StandardMaterial("mtnHutMat", this.scene);
+    hutMat.diffuseColor = new BABYLON.Color3(0.35, 0.28, 0.2);
+    hutMat.emissiveColor = new BABYLON.Color3(0.03, 0.02, 0.01);
+
+    const roofMat = new BABYLON.StandardMaterial("mtnHutRoof", this.scene);
+    roofMat.diffuseColor = new BABYLON.Color3(0.25, 0.2, 0.15);
+
+    for (let h = 0; h < 6; h++) {
+      seed++;
+      const hx = x + (seededRandom(seed) - 0.5) * 60;
+      const hz = z + (seededRandom(seed + 100) - 0.5) * 60;
+      const hutH = 5 + seededRandom(seed + 200) * 4;
+      const hutW = 6 + seededRandom(seed + 300) * 4;
+
+      const hut = BABYLON.MeshBuilder.CreateBox(
+        `mtnHut_${h}`, { height: hutH, width: hutW, depth: hutW }, this.scene
+      );
+      hut.position = new BABYLON.Vector3(hx, hutH / 2, hz);
+      hut.material = hutMat;
+
+      const roof = BABYLON.MeshBuilder.CreateCylinder(
+        `mtnHutRoof_${h}`, { height: 4, diameterTop: 0.5, diameterBottom: hutW * 1.5, tessellation: 4 }, this.scene
+      );
+      roof.position = new BABYLON.Vector3(hx, hutH + 2, hz);
+      roof.material = roofMat;
+    }
+
+    const firePit = BABYLON.MeshBuilder.CreateCylinder("mtnFirePit", { height: 1, diameter: 4 }, this.scene);
+    firePit.position = new BABYLON.Vector3(x, 0.5, z);
+    const fireMat = new BABYLON.StandardMaterial("mtnFireMat", this.scene);
+    fireMat.emissiveColor = new BABYLON.Color3(1.0, 0.4, 0.0);
+    fireMat.diffuseColor = new BABYLON.Color3(0.8, 0.3, 0.0);
+    firePit.material = fireMat;
+
+    const fireLight = new BABYLON.PointLight("mtnFireLight", new BABYLON.Vector3(x, 3, z), this.scene);
+    fireLight.diffuse = new BABYLON.Color3(1.0, 0.5, 0.1);
+    fireLight.intensity = 0.8;
+    fireLight.range = 25;
+  }
+
+  private createJungleBiome(): void {
+    const jungleTrunkMat = new BABYLON.StandardMaterial("jngTrunkMat", this.scene);
+    jungleTrunkMat.diffuseColor = new BABYLON.Color3(0.2, 0.15, 0.08);
+    jungleTrunkMat.emissiveColor = new BABYLON.Color3(0.01, 0.02, 0.0);
+
+    const jungleLeafMat = new BABYLON.StandardMaterial("jngLeafMat", this.scene);
+    jungleLeafMat.diffuseColor = new BABYLON.Color3(0.0, 0.4, 0.1);
+    jungleLeafMat.emissiveColor = new BABYLON.Color3(0.0, 0.08, 0.02);
+
+    const bioGlowMat = new BABYLON.StandardMaterial("jngBioGlow", this.scene);
+    bioGlowMat.diffuseColor = new BABYLON.Color3(0.0, 0.6, 0.4);
+    bioGlowMat.emissiveColor = new BABYLON.Color3(0.0, 0.4, 0.25);
+
+    const cyberLeafMat = new BABYLON.StandardMaterial("jngCyberLeaf", this.scene);
+    cyberLeafMat.diffuseColor = new BABYLON.Color3(0.0, 0.3, 0.5);
+    cyberLeafMat.emissiveColor = new BABYLON.Color3(0.0, 0.15, 0.3);
+
+    const vineMat = new BABYLON.StandardMaterial("jngVineMat", this.scene);
+    vineMat.diffuseColor = new BABYLON.Color3(0.1, 0.3, 0.05);
+    vineMat.emissiveColor = new BABYLON.Color3(0.0, 0.05, 0.01);
+
+    const ruinMat = new BABYLON.StandardMaterial("jngRuinMat", this.scene);
+    ruinMat.diffuseColor = new BABYLON.Color3(0.3, 0.32, 0.28);
+    ruinMat.emissiveColor = new BABYLON.Color3(0.02, 0.03, 0.02);
+
+    const leafMats = [jungleLeafMat, bioGlowMat, cyberLeafMat];
+
+    const groundPatch = BABYLON.MeshBuilder.CreateGround(
+      "jngGround", { width: 500, height: 500 }, this.scene
+    );
+    groundPatch.position = new BABYLON.Vector3(450, 0.06, 0);
+    const jngGroundMat = new BABYLON.StandardMaterial("jngGroundMat", this.scene);
+    jngGroundMat.diffuseColor = new BABYLON.Color3(0.05, 0.15, 0.05);
+    jngGroundMat.emissiveColor = new BABYLON.Color3(0.01, 0.03, 0.01);
+    groundPatch.material = jngGroundMat;
+
+    let seed = 6000;
+
+    for (let t = 0; t < 40; t++) {
+      seed++;
+      const tx = 300 + seededRandom(seed) * 300;
+      const tz = (seededRandom(seed + 100) - 0.5) * 400;
+      const trunkH = 10 + seededRandom(seed + 200) * 20;
+      const trunkD = 1.5 + seededRandom(seed + 300) * 3;
+
+      const trunk = BABYLON.MeshBuilder.CreateCylinder(
+        `jngTrunk_${t}`, { height: trunkH, diameter: trunkD }, this.scene
+      );
+      trunk.position = new BABYLON.Vector3(tx, trunkH / 2, tz);
+      trunk.material = jungleTrunkMat;
+
+      const canopyCount = 2 + Math.floor(seededRandom(seed + 400) * 3);
+      const chosenLeaf = leafMats[Math.floor(seededRandom(seed + 500) * leafMats.length)];
+      for (let c = 0; c < canopyCount; c++) {
+        const cSize = 6 + seededRandom(seed + c * 100 + 600) * 10;
+        const canopy = BABYLON.MeshBuilder.CreateSphere(
+          `jngCanopy_${t}_${c}`, { diameter: cSize, segments: 6 }, this.scene
+        );
+        canopy.position = new BABYLON.Vector3(
+          tx + (seededRandom(seed + c * 100 + 700) - 0.5) * 5,
+          trunkH + cSize * 0.2 + c * 2,
+          tz + (seededRandom(seed + c * 100 + 800) - 0.5) * 5
+        );
+        canopy.scaling.y = 0.5 + seededRandom(seed + c * 100 + 900) * 0.3;
+        canopy.material = chosenLeaf;
+      }
+
+      if (seededRandom(seed + 1000) > 0.5) {
+        const vineCount = 2 + Math.floor(seededRandom(seed + 1100) * 3);
+        for (let v = 0; v < vineCount; v++) {
+          const vineH = 5 + seededRandom(seed + v * 50 + 1200) * trunkH * 0.6;
+          const vine = BABYLON.MeshBuilder.CreateCylinder(
+            `jngVine_${t}_${v}`, { height: vineH, diameter: 0.2 }, this.scene
           );
-          snowCap.position = new BABYLON.Vector3(px, peakHeight * 0.85, pz);
-          snowCap.material = snowMat;
-        } else {
-          mountain.material = rockMat;
+          const vAngle = seededRandom(seed + v * 50 + 1300) * Math.PI * 2;
+          vine.position = new BABYLON.Vector3(
+            tx + Math.cos(vAngle) * trunkD * 0.8, trunkH - vineH / 2, tz + Math.sin(vAngle) * trunkD * 0.8
+          );
+          vine.material = vineMat;
         }
+      }
+    }
 
-        const boulderCount = 3 + Math.floor(seededRandom(seed + 700) * 5);
-        for (let b = 0; b < boulderCount; b++) {
-          const bAngle = seededRandom(seed + b * 50 + 800) * Math.PI * 2;
-          const bDist = baseSize * 0.6 + seededRandom(seed + b * 50 + 900) * baseSize * 0.5;
-          const bSize = 3 + seededRandom(seed + b * 50 + 1000) * 8;
+    for (let cp = 0; cp < 8; cp++) {
+      seed++;
+      const px = 320 + seededRandom(seed) * 260;
+      const pz = (seededRandom(seed + 100) - 0.5) * 350;
+      const py = 12 + seededRandom(seed + 200) * 18;
+      const platSize = 8 + seededRandom(seed + 300) * 12;
+      const platform = BABYLON.MeshBuilder.CreateBox(
+        `jngPlatform_${cp}`, { height: 1, width: platSize, depth: platSize }, this.scene
+      );
+      platform.position = new BABYLON.Vector3(px, py, pz);
+      platform.material = jungleLeafMat;
+      this.platforms.push(platform);
+    }
 
-          const boulder = BABYLON.MeshBuilder.CreateSphere(
-            `boulder_${config.label}_${p}_${b}`,
-            { diameter: bSize, segments: 4 },
-            this.scene
-          );
-          boulder.position = new BABYLON.Vector3(
-            px + Math.cos(bAngle) * bDist,
-            bSize / 2,
-            pz + Math.sin(bAngle) * bDist
-          );
-          boulder.scaling = new BABYLON.Vector3(
-            1 + seededRandom(seed + b * 50 + 1100) * 0.5,
-            0.6 + seededRandom(seed + b * 50 + 1200) * 0.4,
-            1 + seededRandom(seed + b * 50 + 1300) * 0.5
-          );
-          boulder.material = darkRockMat;
+    for (let bp = 0; bp < 20; bp++) {
+      seed++;
+      const bx = 300 + seededRandom(seed) * 300;
+      const bz = (seededRandom(seed + 100) - 0.5) * 400;
+      const bSize = 1.5 + seededRandom(seed + 200) * 2;
+      const bioPlant = BABYLON.MeshBuilder.CreateSphere(
+        `jngBio_${bp}`, { diameter: bSize, segments: 6 }, this.scene
+      );
+      bioPlant.position = new BABYLON.Vector3(bx, bSize * 0.4, bz);
+      bioPlant.material = bioGlowMat;
+
+      if (bp % 4 === 0) {
+        const bioLight = new BABYLON.PointLight(`jngBioLight_${bp}`, new BABYLON.Vector3(bx, bSize, bz), this.scene);
+        bioLight.diffuse = new BABYLON.Color3(0, 0.8, 0.5);
+        bioLight.intensity = 0.4;
+        bioLight.range = 15;
+      }
+    }
+
+    for (let r = 0; r < 3; r++) {
+      seed++;
+      const rx = 350 + seededRandom(seed) * 200;
+      const rz = (seededRandom(seed + 100) - 0.5) * 300;
+
+      const ruinBase = BABYLON.MeshBuilder.CreateBox(
+        `jngRuin_${r}`, { height: 3, width: 20, depth: 20 }, this.scene
+      );
+      ruinBase.position = new BABYLON.Vector3(rx, 1.5, rz);
+      ruinBase.material = ruinMat;
+
+      for (let p = 0; p < 4; p++) {
+        const pAngle = (p / 4) * Math.PI * 2 + 0.4;
+        const pillarH = 6 + seededRandom(seed + p * 100 + 200) * 8;
+        const pillar = BABYLON.MeshBuilder.CreateCylinder(
+          `jngRuinPillar_${r}_${p}`, { height: pillarH, diameter: 1.5 }, this.scene
+        );
+        pillar.position = new BABYLON.Vector3(rx + Math.cos(pAngle) * 8, 3 + pillarH / 2, rz + Math.sin(pAngle) * 8);
+        pillar.material = ruinMat;
+
+        if (seededRandom(seed + p * 100 + 300) > 0.4) {
+          pillar.scaling.y = 0.4 + seededRandom(seed + p * 100 + 400) * 0.5;
         }
       }
 
-      const ridgeCount = 2 + Math.floor(seededRandom(seed + 2000) * 3);
-      for (let r = 0; r < ridgeCount; r++) {
-        seed++;
-        const ridgeLen = 30 + seededRandom(seed) * 60;
-        const ridgeH = 15 + seededRandom(seed + 100) * 25;
-        const ridge = BABYLON.MeshBuilder.CreateBox(
-          `ridge_${config.label}_${r}`,
-          { height: ridgeH, width: ridgeLen, depth: 8 + seededRandom(seed + 200) * 8 },
-          this.scene
+      const ruinGlyph = BABYLON.MeshBuilder.CreateBox(
+        `jngRuinGlyph_${r}`, { height: 4, width: 5, depth: 0.5 }, this.scene
+      );
+      ruinGlyph.position = new BABYLON.Vector3(rx, 5, rz);
+      const glyphMat = new BABYLON.StandardMaterial(`jngGlyphMat_${r}`, this.scene);
+      glyphMat.emissiveColor = new BABYLON.Color3(0.0, 0.5, 0.3);
+      ruinGlyph.material = glyphMat;
+    }
+
+    this.createJungleTemple(480, 0, seed);
+    seed += 100;
+    this.createJungleVillage(380, -120, seed);
+  }
+
+  private createJungleTemple(x: number, z: number, seed: number): void {
+    const templeMat = new BABYLON.StandardMaterial("jngTempleMat", this.scene);
+    templeMat.diffuseColor = new BABYLON.Color3(0.25, 0.3, 0.2);
+    templeMat.emissiveColor = new BABYLON.Color3(0.02, 0.04, 0.02);
+
+    const glowMat = new BABYLON.StandardMaterial("jngTempleGlow", this.scene);
+    glowMat.emissiveColor = new BABYLON.Color3(0.0, 1.0, 0.5);
+    glowMat.diffuseColor = new BABYLON.Color3(0.0, 0.4, 0.2);
+
+    for (let tier = 0; tier < 4; tier++) {
+      const size = 30 - tier * 6;
+      const h = 5;
+      const step = BABYLON.MeshBuilder.CreateBox(
+        `jngTempleStep_${tier}`, { height: h, width: size, depth: size }, this.scene
+      );
+      step.position = new BABYLON.Vector3(x, tier * h + h / 2, z);
+      step.material = templeMat;
+    }
+
+    const altar = BABYLON.MeshBuilder.CreateSphere("jngTempleAltar", { diameter: 4 }, this.scene);
+    altar.position = new BABYLON.Vector3(x, 22, z);
+    altar.material = glowMat;
+
+    const altarLight = new BABYLON.PointLight("jngTempleLight", new BABYLON.Vector3(x, 24, z), this.scene);
+    altarLight.diffuse = new BABYLON.Color3(0, 1.0, 0.5);
+    altarLight.intensity = 1.2;
+    altarLight.range = 40;
+  }
+
+  private createJungleVillage(x: number, z: number, seed: number): void {
+    const hutMat = new BABYLON.StandardMaterial("jngHutMat", this.scene);
+    hutMat.diffuseColor = new BABYLON.Color3(0.2, 0.15, 0.08);
+
+    const roofMat = new BABYLON.StandardMaterial("jngHutRoof", this.scene);
+    roofMat.diffuseColor = new BABYLON.Color3(0.05, 0.25, 0.08);
+    roofMat.emissiveColor = new BABYLON.Color3(0.0, 0.03, 0.01);
+
+    for (let h = 0; h < 5; h++) {
+      seed++;
+      const hx = x + (seededRandom(seed) - 0.5) * 50;
+      const hz = z + (seededRandom(seed + 100) - 0.5) * 50;
+
+      const stilts = 4 + seededRandom(seed + 200) * 4;
+      for (let s = 0; s < 4; s++) {
+        const sx = hx + (s % 2 === 0 ? -3 : 3);
+        const sz = hz + (s < 2 ? -3 : 3);
+        const stilt = BABYLON.MeshBuilder.CreateCylinder(
+          `jngStilt_${h}_${s}`, { height: stilts, diameter: 0.5 }, this.scene
         );
-        ridge.position = new BABYLON.Vector3(
-          config.cx + (seededRandom(seed + 300) - 0.5) * config.baseRadius,
-          ridgeH / 2,
-          config.cz + (seededRandom(seed + 400) - 0.5) * config.baseRadius
-        );
-        ridge.rotation.y = seededRandom(seed + 500) * Math.PI;
-        ridge.material = rockMat;
+        stilt.position = new BABYLON.Vector3(sx, stilts / 2, sz);
+        stilt.material = hutMat;
       }
+
+      const hutFloor = BABYLON.MeshBuilder.CreateBox(
+        `jngHutFloor_${h}`, { height: 0.5, width: 8, depth: 8 }, this.scene
+      );
+      hutFloor.position = new BABYLON.Vector3(hx, stilts, hz);
+      hutFloor.material = hutMat;
+
+      const hutWalls = BABYLON.MeshBuilder.CreateBox(
+        `jngHutWall_${h}`, { height: 4, width: 7, depth: 7 }, this.scene
+      );
+      hutWalls.position = new BABYLON.Vector3(hx, stilts + 2.5, hz);
+      hutWalls.material = hutMat;
+
+      const roof = BABYLON.MeshBuilder.CreateCylinder(
+        `jngHutRoof_${h}`, { height: 4, diameterTop: 0.5, diameterBottom: 12, tessellation: 4 }, this.scene
+      );
+      roof.position = new BABYLON.Vector3(hx, stilts + 6.5, hz);
+      roof.material = roofMat;
     }
   }
 
-  private createNatureZone(): void {
-    const trunkMat = new BABYLON.StandardMaterial("trunkMat", this.scene);
-    trunkMat.diffuseColor = new BABYLON.Color3(0.3, 0.2, 0.1);
+  private createDesertBiome(): void {
+    const sandMat = new BABYLON.StandardMaterial("dstSandMat", this.scene);
+    sandMat.diffuseColor = new BABYLON.Color3(0.76, 0.65, 0.42);
+    sandMat.emissiveColor = new BABYLON.Color3(0.08, 0.06, 0.03);
+    sandMat.specularColor = new BABYLON.Color3(0.3, 0.25, 0.15);
 
-    const leafMat = new BABYLON.StandardMaterial("leafMat", this.scene);
-    leafMat.diffuseColor = new BABYLON.Color3(0.05, 0.35, 0.1);
-    leafMat.emissiveColor = new BABYLON.Color3(0.01, 0.05, 0.02);
+    const darkSandMat = new BABYLON.StandardMaterial("dstDarkSand", this.scene);
+    darkSandMat.diffuseColor = new BABYLON.Color3(0.55, 0.45, 0.3);
 
-    const glowLeafMat = new BABYLON.StandardMaterial("glowLeafMat", this.scene);
-    glowLeafMat.diffuseColor = new BABYLON.Color3(0.0, 0.5, 0.3);
-    glowLeafMat.emissiveColor = new BABYLON.Color3(0.0, 0.2, 0.1);
+    const rockMat = new BABYLON.StandardMaterial("dstRockMat", this.scene);
+    rockMat.diffuseColor = new BABYLON.Color3(0.5, 0.4, 0.3);
+    rockMat.emissiveColor = new BABYLON.Color3(0.03, 0.02, 0.01);
 
-    const cyanLeafMat = new BABYLON.StandardMaterial("cyanLeafMat", this.scene);
-    cyanLeafMat.diffuseColor = new BABYLON.Color3(0.0, 0.3, 0.4);
-    cyanLeafMat.emissiveColor = new BABYLON.Color3(0.0, 0.1, 0.15);
+    const oasisWaterMat = new BABYLON.StandardMaterial("dstOasisMat", this.scene);
+    oasisWaterMat.diffuseColor = new BABYLON.Color3(0.0, 0.3, 0.5);
+    oasisWaterMat.emissiveColor = new BABYLON.Color3(0.0, 0.1, 0.2);
+    oasisWaterMat.alpha = 0.75;
 
-    const leafMats = [leafMat, glowLeafMat, cyanLeafMat];
+    const oasisPlantMat = new BABYLON.StandardMaterial("dstPlantMat", this.scene);
+    oasisPlantMat.diffuseColor = new BABYLON.Color3(0.1, 0.4, 0.1);
+    oasisPlantMat.emissiveColor = new BABYLON.Color3(0.01, 0.05, 0.01);
 
-    const grassMat = new BABYLON.StandardMaterial("grassMat", this.scene);
-    grassMat.diffuseColor = new BABYLON.Color3(0.05, 0.2, 0.05);
-    grassMat.emissiveColor = new BABYLON.Color3(0.01, 0.03, 0.01);
+    const buriedMat = new BABYLON.StandardMaterial("dstBuriedMat", this.scene);
+    buriedMat.diffuseColor = new BABYLON.Color3(0.4, 0.35, 0.28);
+    buriedMat.emissiveColor = new BABYLON.Color3(0.02, 0.02, 0.01);
 
-    const bushMat = new BABYLON.StandardMaterial("bushMat", this.scene);
-    bushMat.diffuseColor = new BABYLON.Color3(0.08, 0.3, 0.08);
-    bushMat.emissiveColor = new BABYLON.Color3(0.0, 0.05, 0.02);
+    const groundPatch = BABYLON.MeshBuilder.CreateGround(
+      "dstGround", { width: 500, height: 500 }, this.scene
+    );
+    groundPatch.position = new BABYLON.Vector3(0, 0.06, -450);
+    groundPatch.material = sandMat;
 
-    const pondMat = new BABYLON.StandardMaterial("pondMat", this.scene);
-    pondMat.diffuseColor = new BABYLON.Color3(0.0, 0.15, 0.3);
-    pondMat.emissiveColor = new BABYLON.Color3(0.0, 0.05, 0.1);
-    pondMat.alpha = 0.7;
+    let seed = 7000;
 
-    const natureZones = [
-      { cx: 350, cz: 150, radius: 100, label: "E" },
-      { cx: -350, cz: 150, radius: 90, label: "W" },
-      { cx: 0, cz: 400, radius: 120, label: "N" },
-      { cx: -300, cz: -350, radius: 80, label: "S" },
-    ];
+    for (let d = 0; d < 20; d++) {
+      seed++;
+      const dx = (seededRandom(seed) - 0.5) * 400;
+      const dz = -300 - seededRandom(seed + 100) * 300;
+      const duneW = 30 + seededRandom(seed + 200) * 60;
+      const duneH = 5 + seededRandom(seed + 300) * 20;
 
-    const hillMat = new BABYLON.StandardMaterial("hillMat", this.scene);
-    hillMat.diffuseColor = new BABYLON.Color3(0.12, 0.35, 0.08);
-    hillMat.emissiveColor = new BABYLON.Color3(0.02, 0.06, 0.02);
-
-    let seed = 1000;
-    for (const zone of natureZones) {
-      const grassPatch = BABYLON.MeshBuilder.CreateGround(
-        `grass_${zone.label}`,
-        { width: zone.radius * 2.2, height: zone.radius * 2.2 },
-        this.scene
+      const dune = BABYLON.MeshBuilder.CreateSphere(
+        `dstDune_${d}`, { diameter: duneW, segments: 8 }, this.scene
       );
-      grassPatch.position = new BABYLON.Vector3(zone.cx, 0.05, zone.cz);
-      grassPatch.material = grassMat;
+      dune.position = new BABYLON.Vector3(dx, duneH * 0.3, dz);
+      dune.scaling = new BABYLON.Vector3(1 + seededRandom(seed + 400) * 1.5, duneH / duneW, 1 + seededRandom(seed + 500) * 0.8);
+      dune.rotation.y = seededRandom(seed + 600) * Math.PI;
+      dune.material = sandMat;
+    }
 
-      const hillCount = 5 + Math.floor(seededRandom(seed + 5000) * 5);
-      for (let h = 0; h < hillCount; h++) {
+    for (let rf = 0; rf < 12; rf++) {
+      seed++;
+      const rx = (seededRandom(seed) - 0.5) * 350;
+      const rz = -320 - seededRandom(seed + 100) * 250;
+      const rockH = 8 + seededRandom(seed + 200) * 25;
+      const rockW = 5 + seededRandom(seed + 300) * 12;
+
+      const formation = BABYLON.MeshBuilder.CreateCylinder(
+        `dstRock_${rf}`, {
+          height: rockH, diameterTop: rockW * (0.3 + seededRandom(seed + 400) * 0.5),
+          diameterBottom: rockW, tessellation: 5 + Math.floor(seededRandom(seed + 500) * 4)
+        }, this.scene
+      );
+      formation.position = new BABYLON.Vector3(rx, rockH / 2, rz);
+      formation.rotation.y = seededRandom(seed + 600) * Math.PI;
+      formation.material = rockMat;
+    }
+
+    const oasisPositions = [
+      { x: -80, z: -400 },
+      { x: 120, z: -520 },
+      { x: -180, z: -550 },
+    ];
+    for (let o = 0; o < oasisPositions.length; o++) {
+      seed++;
+      const op = oasisPositions[o];
+      const oasisSize = 12 + seededRandom(seed) * 10;
+      const water = BABYLON.MeshBuilder.CreateDisc(
+        `dstOasis_${o}`, { radius: oasisSize, tessellation: 24 }, this.scene
+      );
+      water.rotation.x = Math.PI / 2;
+      water.position = new BABYLON.Vector3(op.x, 0.15, op.z);
+      water.material = oasisWaterMat;
+
+      for (let pt = 0; pt < 4; pt++) {
         seed++;
-        const hAngle = seededRandom(seed + 6000) * Math.PI * 2;
-        const hDist = seededRandom(seed + 6100) * zone.radius * 0.7;
-        const hx = zone.cx + Math.cos(hAngle) * hDist;
-        const hz = zone.cz + Math.sin(hAngle) * hDist;
-        const hillHeight = 4 + seededRandom(seed + 6200) * 12;
-        const hillWidth = 12 + seededRandom(seed + 6300) * 20;
-
-        const hill = BABYLON.MeshBuilder.CreateSphere(
-          `hill_${zone.label}_${h}`,
-          { diameter: hillWidth, segments: 8 },
-          this.scene
+        const pAngle = seededRandom(seed) * Math.PI * 2;
+        const pDist = oasisSize * 0.8 + seededRandom(seed + 100) * 5;
+        const palmH = 8 + seededRandom(seed + 200) * 6;
+        const palmTrunk = BABYLON.MeshBuilder.CreateCylinder(
+          `dstPalm_${o}_${pt}`, { height: palmH, diameterTop: 0.5, diameterBottom: 1.2 }, this.scene
         );
-        hill.position = new BABYLON.Vector3(hx, hillHeight * 0.25, hz);
-        hill.scaling = new BABYLON.Vector3(1, hillHeight / hillWidth, 1);
-        hill.material = hillMat;
-      }
-
-      const treeCount = 15 + Math.floor(seededRandom(seed++) * 15);
-      for (let t = 0; t < treeCount; t++) {
-        seed++;
-        const angle = seededRandom(seed) * Math.PI * 2;
-        const dist = seededRandom(seed + 100) * zone.radius * 0.9;
-        const tx = zone.cx + Math.cos(angle) * dist;
-        const tz = zone.cz + Math.sin(angle) * dist;
-
-        const trunkHeight = 6 + seededRandom(seed + 200) * 10;
-        const trunk = BABYLON.MeshBuilder.CreateCylinder(
-          `trunk_${zone.label}_${t}`,
-          { height: trunkHeight, diameter: 1 + seededRandom(seed + 300) * 1.5 },
-          this.scene
+        palmTrunk.position = new BABYLON.Vector3(
+          op.x + Math.cos(pAngle) * pDist, palmH / 2, op.z + Math.sin(pAngle) * pDist
         );
-        trunk.position = new BABYLON.Vector3(tx, trunkHeight / 2, tz);
-        trunk.material = trunkMat;
+        const trunkMat = new BABYLON.StandardMaterial(`dstPalmTrunk_${o}_${pt}`, this.scene);
+        trunkMat.diffuseColor = new BABYLON.Color3(0.35, 0.25, 0.12);
+        palmTrunk.material = trunkMat;
 
-        const canopyLayers = 1 + Math.floor(seededRandom(seed + 400) * 3);
-        const chosenLeafMat = leafMats[Math.floor(seededRandom(seed + 500) * leafMats.length)];
-        for (let c = 0; c < canopyLayers; c++) {
-          const canopySize = 4 + seededRandom(seed + c * 100 + 600) * 6;
-          const canopy = BABYLON.MeshBuilder.CreateSphere(
-            `canopy_${zone.label}_${t}_${c}`,
-            { diameter: canopySize, segments: 6 },
-            this.scene
+        for (let f = 0; f < 5; f++) {
+          const frondAngle = (f / 5) * Math.PI * 2;
+          const frond = BABYLON.MeshBuilder.CreateBox(
+            `dstFrond_${o}_${pt}_${f}`, { height: 0.3, width: 4, depth: 1 }, this.scene
           );
-          canopy.position = new BABYLON.Vector3(
-            tx + (seededRandom(seed + c * 100 + 700) - 0.5) * 3,
-            trunkHeight + canopySize * 0.3 + c * 2,
-            tz + (seededRandom(seed + c * 100 + 800) - 0.5) * 3
+          frond.position = new BABYLON.Vector3(
+            op.x + Math.cos(pAngle) * pDist + Math.cos(frondAngle) * 2.5,
+            palmH + 0.5,
+            op.z + Math.sin(pAngle) * pDist + Math.sin(frondAngle) * 2.5
           );
-          canopy.scaling.y = 0.6 + seededRandom(seed + c * 100 + 900) * 0.3;
-          canopy.material = chosenLeafMat;
+          frond.rotation.z = 0.5;
+          frond.rotation.y = frondAngle;
+          frond.material = oasisPlantMat;
         }
       }
+    }
 
-      const bushCount = 10 + Math.floor(seededRandom(seed++) * 10);
-      for (let b = 0; b < bushCount; b++) {
-        seed++;
-        const angle = seededRandom(seed) * Math.PI * 2;
-        const dist = seededRandom(seed + 100) * zone.radius;
-        const bushSize = 2 + seededRandom(seed + 200) * 3;
+    for (let bs = 0; bs < 5; bs++) {
+      seed++;
+      const bx = (seededRandom(seed) - 0.5) * 350;
+      const bz = -350 - seededRandom(seed + 100) * 250;
+      const buriedH = 4 + seededRandom(seed + 200) * 8;
+      const buriedW = 8 + seededRandom(seed + 300) * 15;
 
-        const bush = BABYLON.MeshBuilder.CreateSphere(
-          `bush_${zone.label}_${b}`,
-          { diameter: bushSize, segments: 5 },
-          this.scene
-        );
-        bush.position = new BABYLON.Vector3(
-          zone.cx + Math.cos(angle) * dist,
-          bushSize * 0.3,
-          zone.cz + Math.sin(angle) * dist
-        );
-        bush.scaling.y = 0.5;
-        bush.material = bushMat;
-      }
+      const buried = BABYLON.MeshBuilder.CreateBox(
+        `dstBuried_${bs}`, { height: buriedH, width: buriedW, depth: buriedW }, this.scene
+      );
+      buried.position = new BABYLON.Vector3(bx, buriedH * 0.3, bz);
+      buried.rotation.y = seededRandom(seed + 400) * Math.PI;
+      buried.rotation.x = (seededRandom(seed + 500) - 0.5) * 0.3;
+      buried.material = buriedMat;
 
-      const pondCount = 1 + Math.floor(seededRandom(seed++) * 2);
-      for (let p = 0; p < pondCount; p++) {
-        seed++;
-        const pondSize = 8 + seededRandom(seed) * 15;
-        const pond = BABYLON.MeshBuilder.CreateDisc(
-          `pond_${zone.label}_${p}`,
-          { radius: pondSize, tessellation: 24 },
-          this.scene
+      if (seededRandom(seed + 600) > 0.5) {
+        const doorway = BABYLON.MeshBuilder.CreateBox(
+          `dstDoor_${bs}`, { height: 3, width: 2, depth: 1 }, this.scene
         );
-        pond.rotation.x = Math.PI / 2;
-        pond.position = new BABYLON.Vector3(
-          zone.cx + (seededRandom(seed + 100) - 0.5) * zone.radius * 0.6,
-          0.15,
-          zone.cz + (seededRandom(seed + 200) - 0.5) * zone.radius * 0.6
-        );
-        pond.material = pondMat;
-      }
-
-      const rockCount = 5 + Math.floor(seededRandom(seed++) * 8);
-      for (let r = 0; r < rockCount; r++) {
-        seed++;
-        const rAngle = seededRandom(seed) * Math.PI * 2;
-        const rDist = seededRandom(seed + 100) * zone.radius;
-        const rSize = 1 + seededRandom(seed + 200) * 4;
-
-        const rock = BABYLON.MeshBuilder.CreateSphere(
-          `rock_${zone.label}_${r}`,
-          { diameter: rSize, segments: 4 },
-          this.scene
-        );
-        rock.position = new BABYLON.Vector3(
-          zone.cx + Math.cos(rAngle) * rDist,
-          rSize * 0.3,
-          zone.cz + Math.sin(rAngle) * rDist
-        );
-        rock.scaling = new BABYLON.Vector3(
-          1 + seededRandom(seed + 300) * 0.6,
-          0.4 + seededRandom(seed + 400) * 0.4,
-          1 + seededRandom(seed + 500) * 0.6
-        );
-        const rockMat = new BABYLON.StandardMaterial(`naturerockmat_${r}`, this.scene);
-        rockMat.diffuseColor = new BABYLON.Color3(0.3, 0.28, 0.25);
-        rock.material = rockMat;
+        doorway.position = new BABYLON.Vector3(bx, buriedH * 0.4, bz + buriedW / 2);
+        const doorMat = new BABYLON.StandardMaterial(`dstDoorMat_${bs}`, this.scene);
+        doorMat.diffuseColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+        doorway.material = doorMat;
       }
     }
+
+    this.createDesertTemple(-50, -480, seed);
+    seed += 100;
+    this.createDesertVillage(100, -380, seed);
+    seed += 100;
+    this.createDesertSecret(0, -560, seed);
+  }
+
+  private createDesertTemple(x: number, z: number, seed: number): void {
+    const templeMat = new BABYLON.StandardMaterial("dstTempleMat", this.scene);
+    templeMat.diffuseColor = new BABYLON.Color3(0.65, 0.55, 0.38);
+    templeMat.emissiveColor = new BABYLON.Color3(0.05, 0.04, 0.02);
+
+    const goldMat = new BABYLON.StandardMaterial("dstTempleGold", this.scene);
+    goldMat.diffuseColor = new BABYLON.Color3(0.85, 0.7, 0.2);
+    goldMat.emissiveColor = new BABYLON.Color3(0.3, 0.2, 0.05);
+
+    const base = BABYLON.MeshBuilder.CreateBox("dstTempleBase", { height: 6, width: 40, depth: 40 }, this.scene);
+    base.position = new BABYLON.Vector3(x, 3, z);
+    base.material = templeMat;
+
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2;
+      const pillar = BABYLON.MeshBuilder.CreateCylinder(
+        `dstTemplePillar_${i}`, { height: 20, diameter: 2.5 }, this.scene
+      );
+      pillar.position = new BABYLON.Vector3(x + Math.cos(angle) * 16, 16, z + Math.sin(angle) * 16);
+      pillar.material = templeMat;
+    }
+
+    const pyramid = BABYLON.MeshBuilder.CreateCylinder(
+      "dstTemplePyramid", { height: 15, diameterTop: 2, diameterBottom: 45, tessellation: 4 }, this.scene
+    );
+    pyramid.position = new BABYLON.Vector3(x, 13.5, z);
+    pyramid.material = templeMat;
+
+    const capstone = BABYLON.MeshBuilder.CreateCylinder(
+      "dstTempleCap", { height: 3, diameterTop: 0.5, diameterBottom: 4, tessellation: 4 }, this.scene
+    );
+    capstone.position = new BABYLON.Vector3(x, 22, z);
+    capstone.material = goldMat;
+
+    const capLight = new BABYLON.PointLight("dstTempleLight", new BABYLON.Vector3(x, 24, z), this.scene);
+    capLight.diffuse = new BABYLON.Color3(1.0, 0.8, 0.3);
+    capLight.intensity = 1.5;
+    capLight.range = 40;
+  }
+
+  private createDesertVillage(x: number, z: number, seed: number): void {
+    const wallMat = new BABYLON.StandardMaterial("dstVillageMat", this.scene);
+    wallMat.diffuseColor = new BABYLON.Color3(0.6, 0.52, 0.38);
+
+    const tentMat = new BABYLON.StandardMaterial("dstTentMat", this.scene);
+    tentMat.diffuseColor = new BABYLON.Color3(0.65, 0.5, 0.3);
+    tentMat.emissiveColor = new BABYLON.Color3(0.04, 0.03, 0.01);
+
+    for (let h = 0; h < 7; h++) {
+      seed++;
+      const hx = x + (seededRandom(seed) - 0.5) * 80;
+      const hz = z + (seededRandom(seed + 100) - 0.5) * 80;
+      const hutH = 4 + seededRandom(seed + 200) * 4;
+      const hutW = 5 + seededRandom(seed + 300) * 5;
+
+      const hut = BABYLON.MeshBuilder.CreateBox(
+        `dstHut_${h}`, { height: hutH, width: hutW, depth: hutW }, this.scene
+      );
+      hut.position = new BABYLON.Vector3(hx, hutH / 2, hz);
+      hut.material = wallMat;
+
+      const flatRoof = BABYLON.MeshBuilder.CreateBox(
+        `dstRoof_${h}`, { height: 0.5, width: hutW + 1, depth: hutW + 1 }, this.scene
+      );
+      flatRoof.position = new BABYLON.Vector3(hx, hutH + 0.25, hz);
+      flatRoof.material = wallMat;
+    }
+
+    for (let t = 0; t < 3; t++) {
+      seed++;
+      const tx = x + (seededRandom(seed) - 0.5) * 60;
+      const tz = z + (seededRandom(seed + 100) - 0.5) * 60;
+      const tent = BABYLON.MeshBuilder.CreateCylinder(
+        `dstTent_${t}`, { height: 5, diameterTop: 0.5, diameterBottom: 8, tessellation: 6 }, this.scene
+      );
+      tent.position = new BABYLON.Vector3(tx, 2.5, tz);
+      tent.material = tentMat;
+    }
+  }
+
+  private createDesertSecret(x: number, z: number, seed: number): void {
+    const secretMat = new BABYLON.StandardMaterial("dstSecretMat", this.scene);
+    secretMat.diffuseColor = new BABYLON.Color3(0.3, 0.28, 0.22);
+    secretMat.emissiveColor = new BABYLON.Color3(0.02, 0.02, 0.01);
+
+    const glowMat = new BABYLON.StandardMaterial("dstSecretGlow", this.scene);
+    glowMat.emissiveColor = new BABYLON.Color3(0.8, 0.5, 0.0);
+    glowMat.diffuseColor = new BABYLON.Color3(0.6, 0.4, 0.1);
+
+    const chamber = BABYLON.MeshBuilder.CreateBox("dstSecret", { height: 8, width: 15, depth: 15 }, this.scene);
+    chamber.position = new BABYLON.Vector3(x, -2, z);
+    chamber.material = secretMat;
+
+    const entrance = BABYLON.MeshBuilder.CreateBox("dstSecretEntrance", { height: 3, width: 3, depth: 1 }, this.scene);
+    entrance.position = new BABYLON.Vector3(x, 0.5, z + 7.5);
+    const entranceMat = new BABYLON.StandardMaterial("dstSecretEntMat", this.scene);
+    entranceMat.diffuseColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+    entrance.material = entranceMat;
+
+    const relic = BABYLON.MeshBuilder.CreateSphere("dstSecretRelic", { diameter: 2 }, this.scene);
+    relic.position = new BABYLON.Vector3(x, 0, z);
+    relic.material = glowMat;
+
+    const relicLight = new BABYLON.PointLight("dstSecretLight", new BABYLON.Vector3(x, 2, z), this.scene);
+    relicLight.diffuse = new BABYLON.Color3(1.0, 0.7, 0.2);
+    relicLight.intensity = 0.8;
+    relicLight.range = 20;
+  }
+
+  private createJunkyardBiome(): void {
+    const scrapMat = new BABYLON.StandardMaterial("jnkScrapMat", this.scene);
+    scrapMat.diffuseColor = new BABYLON.Color3(0.3, 0.28, 0.25);
+    scrapMat.emissiveColor = new BABYLON.Color3(0.02, 0.02, 0.01);
+    scrapMat.specularColor = new BABYLON.Color3(0.2, 0.18, 0.15);
+
+    const rustMat = new BABYLON.StandardMaterial("jnkRustMat", this.scene);
+    rustMat.diffuseColor = new BABYLON.Color3(0.45, 0.25, 0.12);
+    rustMat.emissiveColor = new BABYLON.Color3(0.05, 0.02, 0.0);
+
+    const metalMat = new BABYLON.StandardMaterial("jnkMetalMat", this.scene);
+    metalMat.diffuseColor = new BABYLON.Color3(0.35, 0.35, 0.38);
+    metalMat.specularColor = new BABYLON.Color3(0.4, 0.4, 0.4);
+
+    const trashMat = new BABYLON.StandardMaterial("jnkTrashMat", this.scene);
+    trashMat.diffuseColor = new BABYLON.Color3(0.2, 0.22, 0.18);
+
+    const robotMat = new BABYLON.StandardMaterial("jnkRobotMat", this.scene);
+    robotMat.diffuseColor = new BABYLON.Color3(0.25, 0.3, 0.35);
+    robotMat.emissiveColor = new BABYLON.Color3(0.02, 0.04, 0.06);
+
+    const robotGlowMat = new BABYLON.StandardMaterial("jnkRobotGlow", this.scene);
+    robotGlowMat.emissiveColor = new BABYLON.Color3(0.0, 0.8, 0.6);
+    robotGlowMat.diffuseColor = new BABYLON.Color3(0.0, 0.3, 0.2);
+
+    const groundPatch = BABYLON.MeshBuilder.CreateGround(
+      "jnkGround", { width: 500, height: 500 }, this.scene
+    );
+    groundPatch.position = new BABYLON.Vector3(-450, 0.06, 0);
+    const jnkGroundMat = new BABYLON.StandardMaterial("jnkGroundMat", this.scene);
+    jnkGroundMat.diffuseColor = new BABYLON.Color3(0.15, 0.14, 0.12);
+    jnkGroundMat.emissiveColor = new BABYLON.Color3(0.01, 0.01, 0.01);
+    groundPatch.material = jnkGroundMat;
+
+    let seed = 8000;
+
+    for (let sp = 0; sp < 25; sp++) {
+      seed++;
+      const sx = -300 - seededRandom(seed) * 300;
+      const sz = (seededRandom(seed + 100) - 0.5) * 400;
+      const pileH = 5 + seededRandom(seed + 200) * 20;
+      const pileW = 10 + seededRandom(seed + 300) * 25;
+
+      const pile = BABYLON.MeshBuilder.CreateSphere(
+        `jnkPile_${sp}`, { diameter: pileW, segments: 5 }, this.scene
+      );
+      pile.position = new BABYLON.Vector3(sx, pileH * 0.3, sz);
+      pile.scaling = new BABYLON.Vector3(
+        1 + seededRandom(seed + 400) * 0.8, pileH / pileW * 2, 1 + seededRandom(seed + 500) * 0.8
+      );
+      pile.material = seededRandom(seed + 600) > 0.5 ? scrapMat : rustMat;
+
+      const debrisCount = 3 + Math.floor(seededRandom(seed + 700) * 5);
+      for (let db = 0; db < debrisCount; db++) {
+        seed++;
+        const dbAngle = seededRandom(seed) * Math.PI * 2;
+        const dbDist = pileW * 0.4 + seededRandom(seed + 100) * pileW * 0.3;
+        const dbSize = 1 + seededRandom(seed + 200) * 4;
+
+        const debris = BABYLON.MeshBuilder.CreateBox(
+          `jnkDebris_${sp}_${db}`, {
+            height: dbSize * (0.3 + seededRandom(seed + 300) * 0.7),
+            width: dbSize, depth: dbSize * (0.5 + seededRandom(seed + 400) * 0.5)
+          }, this.scene
+        );
+        debris.position = new BABYLON.Vector3(
+          sx + Math.cos(dbAngle) * dbDist, dbSize * 0.3, sz + Math.sin(dbAngle) * dbDist
+        );
+        debris.rotation = new BABYLON.Vector3(
+          seededRandom(seed + 500) * Math.PI * 0.5,
+          seededRandom(seed + 600) * Math.PI,
+          seededRandom(seed + 700) * Math.PI * 0.3
+        );
+        debris.material = metalMat;
+      }
+    }
+
+    for (let rp = 0; rp < 10; rp++) {
+      seed++;
+      const rx = -320 - seededRandom(seed) * 250;
+      const rz = (seededRandom(seed + 100) - 0.5) * 350;
+
+      const body = BABYLON.MeshBuilder.CreateBox(
+        `jnkRoboPart_${rp}`, {
+          height: 3 + seededRandom(seed + 200) * 5,
+          width: 2 + seededRandom(seed + 300) * 4,
+          depth: 2 + seededRandom(seed + 400) * 3
+        }, this.scene
+      );
+      body.position = new BABYLON.Vector3(rx, 1 + seededRandom(seed + 500) * 3, rz);
+      body.rotation = new BABYLON.Vector3(
+        (seededRandom(seed + 600) - 0.5) * Math.PI * 0.5,
+        seededRandom(seed + 700) * Math.PI,
+        (seededRandom(seed + 800) - 0.5) * Math.PI * 0.3
+      );
+      body.material = robotMat;
+
+      if (seededRandom(seed + 900) > 0.5) {
+        const limb = BABYLON.MeshBuilder.CreateCylinder(
+          `jnkRoboLimb_${rp}`, { height: 4, diameter: 0.8 }, this.scene
+        );
+        limb.position = new BABYLON.Vector3(rx + 2, 0.5, rz);
+        limb.rotation.z = Math.PI * 0.3;
+        limb.material = metalMat;
+      }
+    }
+
+    for (let tb = 0; tb < 8; tb++) {
+      seed++;
+      const tx = -330 - seededRandom(seed) * 230;
+      const tz = (seededRandom(seed + 100) - 0.5) * 350;
+      const tbH = 6 + seededRandom(seed + 200) * 10;
+      const tbW = 8 + seededRandom(seed + 300) * 10;
+
+      const trashBld = BABYLON.MeshBuilder.CreateBox(
+        `jnkTrashBld_${tb}`, { height: tbH, width: tbW, depth: tbW }, this.scene
+      );
+      trashBld.position = new BABYLON.Vector3(tx, tbH / 2, tz);
+      trashBld.material = trashMat;
+      this.buildings.push(trashBld);
+
+      const patchCount = 2 + Math.floor(seededRandom(seed + 400) * 3);
+      for (let pc = 0; pc < patchCount; pc++) {
+        const patchSize = 2 + seededRandom(seed + pc * 100 + 500) * 3;
+        const patch = BABYLON.MeshBuilder.CreateBox(
+          `jnkPatch_${tb}_${pc}`, { height: patchSize, width: patchSize, depth: 0.3 }, this.scene
+        );
+        const side = Math.floor(seededRandom(seed + pc * 100 + 600) * 4);
+        const patchX = tx + (side === 0 ? tbW / 2 : side === 1 ? -tbW / 2 : (seededRandom(seed + pc * 100 + 700) - 0.5) * tbW * 0.8);
+        const patchZ = tz + (side === 2 ? tbW / 2 : side === 3 ? -tbW / 2 : (seededRandom(seed + pc * 100 + 800) - 0.5) * tbW * 0.8);
+        patch.position = new BABYLON.Vector3(patchX, tbH * 0.3 + seededRandom(seed + pc * 100 + 900) * tbH * 0.5, patchZ);
+        patch.material = rustMat;
+      }
+    }
+
+    for (let npc = 0; npc < 6; npc++) {
+      seed++;
+      const nx = -350 - seededRandom(seed) * 200;
+      const nz = (seededRandom(seed + 100) - 0.5) * 300;
+
+      const npcBody = BABYLON.MeshBuilder.CreateBox(
+        `jnkNPC_${npc}`, { height: 3, width: 1.5, depth: 1 }, this.scene
+      );
+      npcBody.position = new BABYLON.Vector3(nx, 2, nz);
+      npcBody.material = robotMat;
+
+      const npcHead = BABYLON.MeshBuilder.CreateSphere(
+        `jnkNPCHead_${npc}`, { diameter: 1.2 }, this.scene
+      );
+      npcHead.position = new BABYLON.Vector3(nx, 4, nz);
+      npcHead.material = robotMat;
+
+      const npcEye = BABYLON.MeshBuilder.CreateSphere(
+        `jnkNPCEye_${npc}`, { diameter: 0.3 }, this.scene
+      );
+      npcEye.position = new BABYLON.Vector3(nx, 4.1, nz + 0.5);
+      npcEye.material = robotGlowMat;
+
+      if (npc % 3 === 0) {
+        const npcLight = new BABYLON.PointLight(
+          `jnkNPCLight_${npc}`, new BABYLON.Vector3(nx, 4.5, nz), this.scene
+        );
+        npcLight.diffuse = new BABYLON.Color3(0, 0.8, 0.6);
+        npcLight.intensity = 0.4;
+        npcLight.range = 10;
+      }
+    }
+
+    for (let sa = 0; sa < 5; sa++) {
+      seed++;
+      const sax = -340 - seededRandom(seed) * 220;
+      const saz = (seededRandom(seed + 100) - 0.5) * 320;
+
+      const salvageZone = BABYLON.MeshBuilder.CreateDisc(
+        `jnkSalvage_${sa}`, { radius: 8 + seededRandom(seed + 200) * 6, tessellation: 16 }, this.scene
+      );
+      salvageZone.rotation.x = Math.PI / 2;
+      salvageZone.position = new BABYLON.Vector3(sax, 0.12, saz);
+      const salvageMat = new BABYLON.StandardMaterial(`jnkSalvageMat_${sa}`, this.scene);
+      salvageMat.emissiveColor = new BABYLON.Color3(0.15, 0.1, 0.0);
+      salvageMat.diffuseColor = new BABYLON.Color3(0.3, 0.25, 0.1);
+      salvageMat.alpha = 0.6;
+      salvageZone.material = salvageMat;
+    }
+
+    this.createJunkyardTemple(-480, 50, seed);
+    seed += 100;
+    this.createJunkyardVillage(-400, -100, seed);
+    seed += 100;
+    this.createJunkyardSecret(-520, 150, seed);
+  }
+
+  private createJunkyardTemple(x: number, z: number, seed: number): void {
+    const templeMat = new BABYLON.StandardMaterial("jnkTempleMat", this.scene);
+    templeMat.diffuseColor = new BABYLON.Color3(0.3, 0.32, 0.35);
+    templeMat.emissiveColor = new BABYLON.Color3(0.03, 0.04, 0.05);
+
+    const coreMat = new BABYLON.StandardMaterial("jnkTempleCore", this.scene);
+    coreMat.emissiveColor = new BABYLON.Color3(0.0, 1.0, 0.7);
+    coreMat.diffuseColor = new BABYLON.Color3(0.0, 0.4, 0.3);
+
+    const base = BABYLON.MeshBuilder.CreateCylinder("jnkTempleBase", { height: 5, diameter: 35, tessellation: 8 }, this.scene);
+    base.position = new BABYLON.Vector3(x, 2.5, z);
+    base.material = templeMat;
+
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2;
+      const pillar = BABYLON.MeshBuilder.CreateBox(
+        `jnkTemplePillar_${i}`, { height: 16, width: 3, depth: 3 }, this.scene
+      );
+      pillar.position = new BABYLON.Vector3(x + Math.cos(angle) * 14, 13, z + Math.sin(angle) * 14);
+      pillar.material = templeMat;
+    }
+
+    const dome = BABYLON.MeshBuilder.CreateSphere("jnkTempleDome", { diameter: 20, segments: 8 }, this.scene);
+    dome.position = new BABYLON.Vector3(x, 22, z);
+    dome.scaling.y = 0.5;
+    dome.material = templeMat;
+
+    const core = BABYLON.MeshBuilder.CreateSphere("jnkTempleCore", { diameter: 4 }, this.scene);
+    core.position = new BABYLON.Vector3(x, 8, z);
+    core.material = coreMat;
+
+    const coreLight = new BABYLON.PointLight("jnkTempleLight", new BABYLON.Vector3(x, 10, z), this.scene);
+    coreLight.diffuse = new BABYLON.Color3(0, 1.0, 0.7);
+    coreLight.intensity = 1.5;
+    coreLight.range = 35;
+  }
+
+  private createJunkyardVillage(x: number, z: number, seed: number): void {
+    const shelterMat = new BABYLON.StandardMaterial("jnkShelterMat", this.scene);
+    shelterMat.diffuseColor = new BABYLON.Color3(0.25, 0.22, 0.2);
+
+    const roofMat = new BABYLON.StandardMaterial("jnkShelterRoof", this.scene);
+    roofMat.diffuseColor = new BABYLON.Color3(0.35, 0.3, 0.25);
+
+    for (let h = 0; h < 8; h++) {
+      seed++;
+      const hx = x + (seededRandom(seed) - 0.5) * 80;
+      const hz = z + (seededRandom(seed + 100) - 0.5) * 80;
+      const sH = 4 + seededRandom(seed + 200) * 5;
+      const sW = 5 + seededRandom(seed + 300) * 6;
+
+      const shelter = BABYLON.MeshBuilder.CreateBox(
+        `jnkShelter_${h}`, { height: sH, width: sW, depth: sW }, this.scene
+      );
+      shelter.position = new BABYLON.Vector3(hx, sH / 2, hz);
+      shelter.material = shelterMat;
+
+      const roof = BABYLON.MeshBuilder.CreateBox(
+        `jnkShelterRoof_${h}`, { height: 1, width: sW + 2, depth: sW + 2 }, this.scene
+      );
+      roof.position = new BABYLON.Vector3(hx, sH + 0.5, hz);
+      roof.rotation.y = seededRandom(seed + 400) * 0.3;
+      roof.material = roofMat;
+    }
+
+    const workshopSign = BABYLON.MeshBuilder.CreateBox("jnkWorkshopSign", { height: 2, width: 6, depth: 0.3 }, this.scene);
+    workshopSign.position = new BABYLON.Vector3(x, 8, z);
+    const signMat = new BABYLON.StandardMaterial("jnkSignMat", this.scene);
+    signMat.emissiveColor = new BABYLON.Color3(0.8, 0.4, 0.0);
+    workshopSign.material = signMat;
+  }
+
+  private createJunkyardSecret(x: number, z: number, seed: number): void {
+    const secretMat = new BABYLON.StandardMaterial("jnkSecretMat", this.scene);
+    secretMat.diffuseColor = new BABYLON.Color3(0.2, 0.22, 0.25);
+    secretMat.emissiveColor = new BABYLON.Color3(0.02, 0.03, 0.04);
+
+    const glowMat = new BABYLON.StandardMaterial("jnkSecretGlow", this.scene);
+    glowMat.emissiveColor = new BABYLON.Color3(0.5, 0.0, 1.0);
+    glowMat.diffuseColor = new BABYLON.Color3(0.2, 0.0, 0.4);
+
+    const bunker = BABYLON.MeshBuilder.CreateBox("jnkSecret", { height: 6, width: 12, depth: 12 }, this.scene);
+    bunker.position = new BABYLON.Vector3(x, 3, z);
+    bunker.material = secretMat;
+
+    const hatch = BABYLON.MeshBuilder.CreateCylinder("jnkSecretHatch", { height: 1, diameter: 4 }, this.scene);
+    hatch.position = new BABYLON.Vector3(x, 6.5, z);
+    const hatchMat = new BABYLON.StandardMaterial("jnkHatchMat", this.scene);
+    hatchMat.diffuseColor = new BABYLON.Color3(0.4, 0.38, 0.35);
+    hatch.material = hatchMat;
+
+    const relic = BABYLON.MeshBuilder.CreateSphere("jnkSecretRelic", { diameter: 2.5 }, this.scene);
+    relic.position = new BABYLON.Vector3(x, 4, z);
+    relic.material = glowMat;
+
+    const relicLight = new BABYLON.PointLight("jnkSecretLight", new BABYLON.Vector3(x, 5, z), this.scene);
+    relicLight.diffuse = new BABYLON.Color3(0.5, 0.0, 1.0);
+    relicLight.intensity = 0.8;
+    relicLight.range = 20;
   }
 
   private createSkyCities(): void {

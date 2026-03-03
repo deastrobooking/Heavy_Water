@@ -164,6 +164,33 @@ export const ROBOT_PRESETS: Record<string, RobotDescriptor> = {
       },
     },
   },
+  CommanderOmega: {
+    name: "CommanderOmega",
+    faction: "enemy",
+    style: {
+      archetype: "tank",
+      scale: 1.6,
+      torsoWidth: 1.9, torsoHeight: 2.2, torsoDepth: 1.2,
+      headSize: 0.75, headShape: "cone",
+      armLength: 1.7, armThickness: 0.38, armStyle: "tapered",
+      legLength: 1.6, legThickness: 0.5, legStyle: "digitigrade",
+      shoulderPadSize: 1.0, hipPadSize: 0.9,
+      hasWings: true, wingSpan: 2.5, wingAngle: 0.35,
+      hasCannons: true, cannonSize: 0.8,
+      hasBackpack: true, backpackSize: 1.0,
+      hasVisor: true, visorStyle: "full",
+      hasHorns: true, hornLength: 0.8,
+      hasTail: false, tailLength: 1.5, tailSegments: 3,
+      hasAntennae: false, antennaLength: 0.6,
+      hasShield: true, shieldSize: 2.0,
+      extraPlating: 3, asymmetry: 0,
+      colors: {
+        primary: new BABYLON.Color3(0.7, 0.15, 0.05),
+        secondary: new BABYLON.Color3(0.15, 0.15, 0.2),
+        emissive: new BABYLON.Color3(1.0, 0.4, 0.0),
+      },
+    },
+  },
 };
 
 export const ALLY_PRESETS: Record<string, RobotDescriptor> = {

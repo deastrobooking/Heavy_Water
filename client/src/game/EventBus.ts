@@ -69,6 +69,10 @@ export const GameEvents = {
   INVENTORY_CHANGED: "inventory:changed",
   ITEM_PICKED_UP: "inventory:itemPickedUp",
 
+  PLAYER_FLIGHT_ENTER: "player:flightEnter",
+  PLAYER_FLIGHT_EXIT: "player:flightExit",
+  PLAYER_FLIGHT_ARMOR_ACQUIRED: "player:flightArmorAcquired",
+
   UI_MESSAGE: "ui:message",
   UI_DAMAGE_NUMBER: "ui:damageNumber",
 };
