@@ -34,6 +34,12 @@ export const gameSessions = pgTable("game_sessions", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const userSessions = pgTable("user_sessions", {
+  sid: text("sid").primaryKey(),
+  sess: jsonb("sess").notNull(),
+  expire: timestamp("expire").notNull(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,

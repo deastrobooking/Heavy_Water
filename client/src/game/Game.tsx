@@ -155,17 +155,34 @@ export const Game: React.FC = () => {
         break;
     }
 
-    setStats(player.getStats());
+    if (player) {
+      setStats(player.getStats());
+    }
   }, [showMessage]);
 
   const initializeGame = useCallback(() => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current) {
+      console.error("Canvas ref is null");
+      return;
+    }
 
-    const bus = EventBus.getInstance();
-    bus.clear();
+    console.log("Initializing game...");
+    
+    // Switch phase first to ensure canvas is visible for WebGL context
+    setGamePhase("playing");
 
-    const engine = new BabylonEngine(canvasRef.current);
-    engineRef.current = engine;
+    // Small delay to ensure DOM update
+    setTimeout(() => {
+      try {
+        const bus = EventBus.getInstance();
+        bus.clear();
+
+        if (!canvasRef.current) {
+          throw new Error("Canvas not found after phase transition");
+        }
+
+        const engine = new BabylonEngine(canvasRef.current);
+        engineRef.current = engine;
 
     const scene = engine.getScene();
 
@@ -462,7 +479,13 @@ export const Game: React.FC = () => {
       canvasRef.current?.requestPointerLock();
     };
 
-    setGamePhase("playing");
+    } catch (error) {
+        console.error("Failed to initialize game:", error);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        setMessage(`CRITICAL ERROR: ${errorMsg}`);
+        setGamePhase("menu");
+      }
+    }, 100);
   }, [handleLootCollected, showMessage, currentUser]);
 
   const handleStart = useCallback(() => {
@@ -590,8 +613,12 @@ export const Game: React.FC = () => {
 
       <canvas
         ref={canvasRef}
-        className={`w-full h-full ${gamePhase !== "playing" && gamePhase !== "gameover" ? "hidden" : ""}`}
-        style={{ touchAction: "none" }}
+        className="w-full h-full absolute inset-0"
+        style={{ 
+          touchAction: "none", 
+          zIndex: gamePhase === "playing" || gamePhase === "gameover" ? 1 : -1,
+          visibility: gamePhase === "auth" ? "hidden" : "visible"
+        }}
       />
 
       {gamePhase === "playing" && (

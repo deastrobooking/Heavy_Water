@@ -21,10 +21,24 @@ export class BabylonEngine {
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    this.engine = new BABYLON.Engine(canvas, true, {
-      preserveDrawingBuffer: true,
-      stencil: true,
-    });
+    
+    try {
+      this.engine = new BABYLON.Engine(canvas, true, {
+        preserveDrawingBuffer: true,
+        stencil: true,
+        disableWebGL2Support: false,
+        doNotHandleContextLost: true
+      }, true);
+      
+      if (!this.engine || !this.engine.getRenderCanvas()) {
+        console.warn("Standard Engine failed, trying fallback...");
+        this.engine = new BABYLON.Engine(canvas, false);
+      }
+    } catch (e) {
+      console.error("Babylon.js Engine creation failed:", e);
+      throw new Error("WebGL initialization failed. Please check if hardware acceleration is enabled.");
+    }
+
     this.scene = new BABYLON.Scene(this.engine);
     this.camera = this.createCamera();
     this.setupLighting();
