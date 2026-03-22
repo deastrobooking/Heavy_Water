@@ -26,7 +26,20 @@ async function comparePasswords(supplied: string, stored: string): Promise<boole
 
 declare global {
   namespace Express {
-    interface User extends import("@shared/schema").User {}
+    interface User {
+      id: number;
+      username: string;
+      password: string;
+      displayName: string | null;
+      level: number;
+      credits: number;
+      experience: number;
+      highestWave: number;
+      totalKills: number;
+      hasFlightArmor: boolean;
+      lastLogin: Date | null;
+      createdAt: Date;
+    }
   }
 }
 

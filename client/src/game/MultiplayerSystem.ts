@@ -221,7 +221,7 @@ export class MultiplayerSystem {
     ctx.clearRect(0, 0, 256, 64);
     ctx.font = "bold 28px Courier New";
     ctx.fillStyle = "#00ffff";
-    ctx.textAlign = "center";
+    (ctx as any).textAlign = "center";
     ctx.fillText(playerState.username || "Player", 128, 40);
     nameTex.update();
 

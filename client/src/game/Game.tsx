@@ -29,6 +29,7 @@ type GamePhase = "auth" | "menu" | "playing" | "paused" | "gameover";
 export const Game: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<BabylonEngine | null>(null);
+  const initializingRef = useRef(false);
   const playerRef = useRef<PlayerController | null>(null);
   const weaponsRef = useRef<WeaponsSystem | null>(null);
   const enemySystemRef = useRef<EnemySystem | null>(null);
@@ -161,331 +162,348 @@ export const Game: React.FC = () => {
   }, [showMessage]);
 
   const initializeGame = useCallback(() => {
-    if (!canvasRef.current) {
-      console.error("Canvas ref is null");
+    if (!canvasRef.current || initializingRef.current) {
       return;
     }
+    initializingRef.current = true;
 
-    console.log("Initializing game...");
-    
-    // Switch phase first to ensure canvas is visible for WebGL context
     setGamePhase("playing");
 
-    // Small delay to ensure DOM update
     setTimeout(() => {
       try {
+        if (!canvasRef.current) {
+          throw new Error("Canvas not available");
+        }
+
         const bus = EventBus.getInstance();
         bus.clear();
-
-        if (!canvasRef.current) {
-          throw new Error("Canvas not found after phase transition");
-        }
 
         const engine = new BabylonEngine(canvasRef.current);
         engineRef.current = engine;
 
-    const scene = engine.getScene();
+        const scene = engine.getScene();
 
-    const cityGenerator = new CityGenerator(scene);
-    cityGenerator.generateCity();
+        const cityGenerator = new CityGenerator(scene);
+        cityGenerator.generateCity();
 
-    const player = new PlayerController(scene, engine.getCamera());
-    playerRef.current = player;
+        const player = new PlayerController(scene, engine.getCamera());
+        playerRef.current = player;
 
-    const weapons = new WeaponsSystem(scene, engine.getCamera());
-    weaponsRef.current = weapons;
+        const weapons = new WeaponsSystem(scene, engine.getCamera());
+        weaponsRef.current = weapons;
 
-    weapons.setOnAmmoChange((a, m) => {
-      setAmmo(a);
-      setMaxAmmo(m);
-    });
+        weapons.setOnAmmoChange((a, m) => {
+          setAmmo(a);
+          setMaxAmmo(m);
+        });
 
-    weapons.setOnWeaponChange((w) => {
-      setCurrentWeapon(w);
-    });
+        weapons.setOnWeaponChange((w) => {
+          setCurrentWeapon(w);
+        });
 
-    const initialWeapon = weapons.getCurrentWeapon();
-    if (initialWeapon) {
-      setCurrentWeapon(initialWeapon);
-      setAmmo(initialWeapon.ammo);
-      setMaxAmmo(initialWeapon.maxAmmo);
-    }
+        const initialWeapon = weapons.getCurrentWeapon();
+        if (initialWeapon) {
+          setCurrentWeapon(initialWeapon);
+          setAmmo(initialWeapon.ammo);
+          setMaxAmmo(initialWeapon.maxAmmo);
+        }
 
-    const combatSystem = new CombatSystem(scene, engine.getCamera());
-    combatSystemRef.current = combatSystem;
+        const combatSystem = new CombatSystem(scene, engine.getCamera());
+        combatSystemRef.current = combatSystem;
 
-    player.setMeleeCallbacks(
-      () => combatSystem.onLightAttack(),
-      () => combatSystem.onHeavyAttack()
-    );
-
-    const specialWeapons = new SpecialWeaponsSystem(scene, engine.getCamera());
-    specialWeaponsRef.current = specialWeapons;
-    specialWeapons.setOnSpecialWeaponChange(() => {
-      setSpecialWeaponInfo(specialWeapons.getActiveSpecialWeapons());
-    });
-
-    const beamSabre = new BeamSabreSystem(scene, engine.getCamera());
-    beamSabreRef.current = beamSabre;
-
-    const inventory = new InventorySystem();
-    inventoryRef.current = inventory;
-
-    const armorSystem = new ArmorSystem();
-    armorSystemRef.current = armorSystem;
-
-    const craftingSystem = new CraftingSystem(inventory);
-    craftingSystemRef.current = craftingSystem;
-
-    const companionSystem = new CompanionSystem(scene);
-    companionRef.current = companionSystem;
-
-    companionSystem.addCompanion("GuardianUnit", player.getPosition());
-    companionSystem.addCompanion("SparkPup", player.getPosition());
-
-    const capsuleSystem = new ArmorCapsuleSystem(scene, armorSystem);
-    capsuleRef.current = capsuleSystem;
-
-    capsuleSystem.setUIToggleCallback((open, upgrades) => {
-      setCapsuleOpen(open);
-      setCapsuleUpgrades(upgrades);
-    });
-
-    capsuleSystem.setUpgradeAppliedCallback((upgrade) => {
-      if (upgrade.effects?.flightCapability) {
-        player.grantFlightArmor();
-        setHasFlightArmor(true);
-        showMessage("FLIGHT ARMOR ACQUIRED! Triple-jump to fly!", 4000);
-      } else {
-        showMessage(`UPGRADE: ${upgrade.name}`, 3000);
-      }
-    });
-
-    const shopSystem = new ShopSystem(scene, engine.getCamera(), inventory);
-    shopRef.current = shopSystem;
-
-    shopSystem.setOnShopOpen((shop) => {
-      setShopOpen(true);
-      setActiveShop(shop);
-    });
-
-    shopSystem.setOnShopClose(() => {
-      setShopOpen(false);
-      setActiveShop(null);
-    });
-
-    shopSystem.setOnTransactionComplete((msg) => {
-      showMessage(msg, 1500);
-    });
-
-    const buildingSystem = new BuildingSystem(scene, engine.getCamera(), inventory);
-    buildingRef.current = buildingSystem;
-
-    const multiplayer = new MultiplayerSystem(scene);
-    multiplayerRef.current = multiplayer;
-
-    if (currentUser) {
-      multiplayer.connect(currentUser.username, currentUser.id);
-      multiplayer.on("connected", () => setMultiplayerConnected(true));
-      multiplayer.on("disconnected", () => {
-        setMultiplayerConnected(false);
-        setInRoom(false);
-        setRoomCode(null);
-      });
-      multiplayer.on("room_joined", (data: any) => {
-        setInRoom(true);
-        setRoomCode(data.roomCode);
-        setIsHost(data.isHost);
-        setShowLobby(false);
-        showMessage(`Joined room ${data.roomCode}`, 2000);
-      });
-      multiplayer.on("room_left", () => {
-        setInRoom(false);
-        setRoomCode(null);
-        setIsHost(false);
-      });
-      multiplayer.on("room_list", (data: any) => setLobbyRooms(data.rooms));
-      multiplayer.on("player_joined", (data: any) => showMessage(`${data.player.username} joined!`, 2000));
-      multiplayer.on("player_left", (data: any) => showMessage(`${data.username} left`, 1500));
-      multiplayer.on("chat_message", (data: any) => setChatMessages(multiplayer.getChatMessages().slice(-20)));
-      multiplayer.on("error", (data: any) => showMessage(data.message, 2000));
-      multiplayer.on("request_position", () => {
-        const pos = player.getPosition();
-        const rot = player.getRotation();
-        multiplayer.sendPositionUpdate(
-          { x: pos.x, y: pos.y, z: pos.z },
-          { x: rot.x, y: rot.y, z: rot.z },
-          player.getPlayerState(),
-          player.getStats().health,
-          1,
-          player.getIsFlying()
+        player.setMeleeCallbacks(
+          () => combatSystem.onLightAttack(),
+          () => combatSystem.onHeavyAttack()
         );
-      });
-    }
 
-    BABYLON.SceneLoader.ImportMeshAsync("", "/models/", "swarm_drone.glb", scene).then((result) => {
-      if (result.meshes.length > 0) {
-        const droneRoot = result.meshes[0];
-        droneRoot.name = "swarmDroneModel";
-        droneRoot.scaling.setAll(2.5);
-        droneRoot.position = new BABYLON.Vector3(355, 8, 155);
+        const specialWeapons = new SpecialWeaponsSystem(scene, engine.getCamera());
+        specialWeaponsRef.current = specialWeapons;
+        specialWeapons.setOnSpecialWeaponChange(() => {
+          setSpecialWeaponInfo(specialWeapons.getActiveSpecialWeapons());
+        });
 
-        scene.registerBeforeRender(() => {
-          if (droneRoot && !droneRoot.isDisposed()) {
-            droneRoot.position.y = 8 + Math.sin(Date.now() * 0.002) * 1.5;
-            droneRoot.rotation.y += 0.01;
+        const beamSabre = new BeamSabreSystem(scene, engine.getCamera());
+        beamSabreRef.current = beamSabre;
+
+        const inventory = new InventorySystem();
+        inventoryRef.current = inventory;
+
+        const armorSystem = new ArmorSystem();
+        armorSystemRef.current = armorSystem;
+
+        const craftingSystem = new CraftingSystem(inventory);
+        craftingSystemRef.current = craftingSystem;
+
+        const companionSystem = new CompanionSystem(scene);
+        companionRef.current = companionSystem;
+
+        companionSystem.addCompanion("GuardianUnit", player.getPosition());
+        companionSystem.addCompanion("SparkPup", player.getPosition());
+
+        const capsuleSystem = new ArmorCapsuleSystem(scene, armorSystem);
+        capsuleRef.current = capsuleSystem;
+
+        capsuleSystem.setUIToggleCallback((open, upgrades) => {
+          setCapsuleOpen(open);
+          setCapsuleUpgrades(upgrades);
+        });
+
+        capsuleSystem.setUpgradeAppliedCallback((upgrade) => {
+          if (upgrade.effects?.flightCapability) {
+            player.grantFlightArmor();
+            setHasFlightArmor(true);
+            showMessage("FLIGHT ARMOR ACQUIRED! Triple-jump to fly!", 4000);
+          } else {
+            showMessage(`UPGRADE: ${upgrade.name}`, 3000);
           }
         });
-      }
-    }).catch((err) => {
-      console.log("Drone GLB not loaded:", err);
-    });
 
-    const enemySystem = new EnemySystem(scene);
-    enemySystemRef.current = enemySystem;
+        const shopSystem = new ShopSystem(scene, engine.getCamera(), inventory);
+        shopRef.current = shopSystem;
 
-    const chestSystem = new ChestSystem(scene);
-    chestSystemRef.current = chestSystem;
-    chestSystem.setOnLootCollected(handleLootCollected);
-    chestSystem.spawnChests(30);
+        shopSystem.setOnShopOpen((shop) => {
+          setShopOpen(true);
+          setActiveShop(shop);
+        });
 
-    for (let i = 0; i < 5; i++) {
-      enemySystem.spawnEnemy(player.getPosition());
-    }
+        shopSystem.setOnShopClose(() => {
+          setShopOpen(false);
+          setActiveShop(null);
+        });
 
-    bus.on(GameEvents.COMBO_HIT, (data: any) => {
-      setComboInfo({ name: data.comboName, index: data.comboIndex });
-      setTimeout(() => setComboInfo(null), 1000);
-    });
+        shopSystem.setOnTransactionComplete((msg) => {
+          showMessage(msg, 1500);
+        });
 
-    bus.on(GameEvents.ENEMY_KILLED, (data: any) => {
-      player.addCredits(data.credits);
-      player.addExperience(data.experience);
-      showMessage(`+${data.credits} CREDITS | +${data.experience} XP`, 1000);
-    });
+        const buildingSystem = new BuildingSystem(scene, engine.getCamera(), inventory);
+        buildingRef.current = buildingSystem;
 
-    bus.on(GameEvents.PLAYER_DODGE, () => {
-      showMessage("DODGE!", 500);
-    });
+        const multiplayer = new MultiplayerSystem(scene);
+        multiplayerRef.current = multiplayer;
 
-    bus.on(GameEvents.PLAYER_PARRY, (data: any) => {
-      if (data?.success) {
-        showMessage("PARRY!", 500);
-      }
-    });
+        if (currentUser) {
+          multiplayer.connect(currentUser.username, currentUser.id);
+          multiplayer.on("connected", () => setMultiplayerConnected(true));
+          multiplayer.on("disconnected", () => {
+            setMultiplayerConnected(false);
+            setInRoom(false);
+            setRoomCode(null);
+          });
+          multiplayer.on("room_joined", (data: any) => {
+            setInRoom(true);
+            setRoomCode(data.roomCode);
+            setIsHost(data.isHost);
+            setShowLobby(false);
+            showMessage(`Joined room ${data.roomCode}`, 2000);
+          });
+          multiplayer.on("room_left", () => {
+            setInRoom(false);
+            setRoomCode(null);
+            setIsHost(false);
+          });
+          multiplayer.on("room_list", (data: any) => setLobbyRooms(data.rooms));
+          multiplayer.on("player_joined", (data: any) => showMessage(`${data.player.username} joined!`, 2000));
+          multiplayer.on("player_left", (data: any) => showMessage(`${data.username} left`, 1500));
+          multiplayer.on("chat_message", (data: any) => setChatMessages(multiplayer.getChatMessages().slice(-20)));
+          multiplayer.on("error", (data: any) => showMessage(data.message, 2000));
+          multiplayer.on("request_position", () => {
+            const pos = player.getPosition();
+            const rot = player.getRotation();
+            multiplayer.sendPositionUpdate(
+              { x: pos.x, y: pos.y, z: pos.z },
+              { x: rot.x, y: rot.y, z: rot.z },
+              player.getPlayerState(),
+              player.getStats().health,
+              1,
+              player.getIsFlying()
+            );
+          });
+        }
 
-    bus.on(GameEvents.PLAYER_LEVEL_UP, (data: any) => {
-      showMessage(`LEVEL UP! LVL ${data.level}`, 3000);
-    });
+        BABYLON.SceneLoader.ImportMeshAsync("", "/models/", "swarm_drone.glb", scene).then((result) => {
+          if (result.meshes.length > 0) {
+            const droneRoot = result.meshes[0];
+            droneRoot.name = "swarmDroneModel";
+            droneRoot.scaling.setAll(2.5);
+            droneRoot.position = new BABYLON.Vector3(355, 8, 155);
 
-    bus.on(GameEvents.PLAYER_FLIGHT_ENTER, () => {
-      showMessage("FLIGHT MODE ACTIVATED", 1500);
-    });
+            scene.registerBeforeRender(() => {
+              if (droneRoot && !droneRoot.isDisposed()) {
+                droneRoot.position.y = 8 + Math.sin(Date.now() * 0.002) * 1.5;
+                droneRoot.rotation.y += 0.01;
+              }
+            });
+          }
+        }).catch((err) => {
+          console.log("Drone GLB not loaded:", err);
+        });
 
-    bus.on(GameEvents.PLAYER_FLIGHT_EXIT, () => {
-      showMessage("FLIGHT MODE DEACTIVATED", 1000);
-    });
+        const enemySystem = new EnemySystem(scene);
+        enemySystemRef.current = enemySystem;
 
-    let lastTime = performance.now();
-    let waveTimer = 0;
-    let uiThrottleTimer = 0;
+        const chestSystem = new ChestSystem(scene);
+        chestSystemRef.current = chestSystem;
+        chestSystem.setOnLootCollected(handleLootCollected);
+        chestSystem.spawnChests(30);
 
-    engine.start(() => {
-      const now = performance.now();
-      const deltaTime = now - lastTime;
-      lastTime = now;
-      const dt = deltaTime / 1000;
+        for (let i = 0; i < 5; i++) {
+          enemySystem.spawnEnemy(player.getPosition());
+        }
 
-      player.update(dt);
-      const playerPos = player.getPosition();
+        bus.on(GameEvents.COMBO_HIT, (data: any) => {
+          setComboInfo({ name: data.comboName, index: data.comboIndex });
+          setTimeout(() => setComboInfo(null), 1000);
+        });
 
-      combatSystem.update(dt);
+        bus.on(GameEvents.ENEMY_KILLED, (data: any) => {
+          player.addCredits(data.credits);
+          player.addExperience(data.experience);
+          showMessage(`+${data.credits} CREDITS | +${data.experience} XP`, 1000);
+        });
 
-      const enemyMeshes = enemySystem.getEnemyMeshes();
-      const hits = weapons.update(enemyMeshes);
+        bus.on(GameEvents.PLAYER_DODGE, () => {
+          showMessage("DODGE!", 500);
+        });
 
-      for (const hit of hits) {
-        const modifiedDamage = armorSystem.getModifiedOutgoingDamage(hit.damage);
-        enemySystem.damageEnemy(hit.hitEnemy, modifiedDamage);
-      }
+        bus.on(GameEvents.PLAYER_PARRY, (data: any) => {
+          if (data?.success) {
+            showMessage("PARRY!", 500);
+          }
+        });
 
-      const specialHits = specialWeapons.update(dt, enemyMeshes, playerPos);
-      for (const hit of specialHits) {
-        enemySystem.damageEnemy(hit.hitEnemy, hit.damage);
-      }
+        bus.on(GameEvents.PLAYER_LEVEL_UP, (data: any) => {
+          showMessage(`LEVEL UP! LVL ${data.level}`, 3000);
+        });
 
-      beamSabre.update(dt, enemyMeshes);
+        bus.on(GameEvents.PLAYER_FLIGHT_ENTER, () => {
+          showMessage("FLIGHT MODE ACTIVATED", 1500);
+        });
 
-      const companionResult = companionSystem.update(dt, playerPos, enemyMeshes);
-      if (companionResult.healed > 0) {
-        player.heal(companionResult.healed);
-      }
-      for (const hit of companionResult.attackHits) {
-        enemySystem.damageEnemy(hit.mesh as BABYLON.Mesh, hit.damage);
-      }
+        bus.on(GameEvents.PLAYER_FLIGHT_EXIT, () => {
+          showMessage("FLIGHT MODE DEACTIVATED", 1000);
+        });
 
-      const enemyResult = enemySystem.update(playerPos, deltaTime);
-      if (enemyResult.damage > 0) {
-        const reducedDamage = armorSystem.calculateDamageReduction(enemyResult.damage, DamageType.Melee);
-        player.takeDamageSimple(reducedDamage);
-        showMessage(`-${Math.floor(reducedDamage)} DAMAGE!`, 500);
-      }
+        let lastTime = performance.now();
+        let waveTimer = 0;
+        let uiThrottleTimer = 0;
 
-      chestSystem.update(playerPos);
+        engine.start(() => {
+          const now = performance.now();
+          const deltaTime = now - lastTime;
+          lastTime = now;
+          const dt = deltaTime / 1000;
 
-      capsuleSystem.update(dt, playerPos);
-      shopSystem.update();
-      buildingSystem.update(dt);
-      multiplayer.update(dt);
-      setRemotePlayerCount(multiplayer.getRemotePlayerCount());
+          player.update(dt);
+          const playerPos = player.getPosition();
 
-      setStats(player.getStats());
-      setEnemyCount(enemySystem.getEnemyCount());
-      setChestCount(chestSystem.getChestCount());
-      setJetpackFuel(player.getJetpackFuel());
-      setMaxJetpackFuel(player.getMaxJetpackFuel());
-      setPlayerState(player.getPlayerState());
-      setBeamSabreActive(beamSabre.active);
-      setBeamSabreLevel(beamSabre.getLevel);
-      setActiveElement(armorSystem.getActiveElement());
-      setArmorDefense(armorSystem.getTotalDefense());
-      setIsFlying(player.getIsFlying());
-      setArmorEnergy(player.getArmorEnergy());
-      setMaxArmorEnergy(player.getMaxArmorEnergy());
-      setHasFlightArmor(player.getHasFlightArmor());
-      setBuildMode(buildingSystem.isBuildMode());
+          combatSystem.update(dt);
 
-      uiThrottleTimer += dt;
-      if (uiThrottleTimer >= 0.5) {
-        uiThrottleTimer = 0;
-        setCompanionCount(companionSystem.getCompanionCount());
-        setCompanionInfo(companionSystem.getCompanions());
-      }
+          const enemyMeshes = enemySystem.getEnemyMeshes();
+          const hits = weapons.update(enemyMeshes);
 
-      if (player.getStats().health <= 0) {
-        setGamePhase("gameover");
-      }
+          for (const hit of hits) {
+            const modifiedDamage = armorSystem.getModifiedOutgoingDamage(hit.damage);
+            enemySystem.damageEnemy(hit.hitEnemy, modifiedDamage);
+          }
 
-      waveTimer += deltaTime;
-      if (waveTimer >= 60000) {
-        waveTimer = 0;
-        enemySystem.nextWave();
-        setWaveNumber(enemySystem.getWaveNumber());
-        showMessage(`WAVE ${enemySystem.getWaveNumber()} INCOMING!`, 3000);
-      }
-    });
+          const specialHits = specialWeapons.update(dt, enemyMeshes, playerPos);
+          for (const hit of specialHits) {
+            enemySystem.damageEnemy(hit.hitEnemy, hit.damage);
+          }
 
-    canvasRef.current.onclick = () => {
-      canvasRef.current?.requestPointerLock();
-    };
+          beamSabre.update(dt, enemyMeshes);
 
-    } catch (error) {
+          const companionResult = companionSystem.update(dt, playerPos, enemyMeshes);
+          if (companionResult.healed > 0) {
+            player.heal(companionResult.healed);
+          }
+          for (const hit of companionResult.attackHits) {
+            enemySystem.damageEnemy(hit.mesh as BABYLON.Mesh, hit.damage);
+          }
+
+          const enemyResult = enemySystem.update(playerPos, deltaTime);
+          if (enemyResult.damage > 0) {
+            const reducedDamage = armorSystem.calculateDamageReduction(enemyResult.damage, DamageType.Melee);
+            player.takeDamageSimple(reducedDamage);
+            showMessage(`-${Math.floor(reducedDamage)} DAMAGE!`, 500);
+          }
+
+          chestSystem.update(playerPos);
+
+          capsuleSystem.update(dt, playerPos);
+          shopSystem.update();
+          buildingSystem.update(dt);
+          multiplayer.update(dt);
+          setRemotePlayerCount(multiplayer.getRemotePlayerCount());
+
+          setStats(player.getStats());
+          setEnemyCount(enemySystem.getEnemyCount());
+          setChestCount(chestSystem.getChestCount());
+          setJetpackFuel(player.getJetpackFuel());
+          setMaxJetpackFuel(player.getMaxJetpackFuel());
+          setPlayerState(player.getPlayerState());
+          setBeamSabreActive(beamSabre.active);
+          setBeamSabreLevel(beamSabre.getLevel);
+          setActiveElement(armorSystem.getActiveElement());
+          setArmorDefense(armorSystem.getTotalDefense());
+          setIsFlying(player.getIsFlying());
+          setArmorEnergy(player.getArmorEnergy());
+          setMaxArmorEnergy(player.getMaxArmorEnergy());
+          setHasFlightArmor(player.getHasFlightArmor());
+          setBuildMode(buildingSystem.isBuildMode());
+
+          uiThrottleTimer += dt;
+          if (uiThrottleTimer >= 0.5) {
+            uiThrottleTimer = 0;
+            setCompanionCount(companionSystem.getCompanionCount());
+            setCompanionInfo(companionSystem.getCompanions());
+          }
+
+          if (player.getStats().health <= 0) {
+            setGamePhase("gameover");
+          }
+
+          waveTimer += deltaTime;
+          if (waveTimer >= 60000) {
+            waveTimer = 0;
+            enemySystem.nextWave();
+            setWaveNumber(enemySystem.getWaveNumber());
+            showMessage(`WAVE ${enemySystem.getWaveNumber()} INCOMING!`, 3000);
+          }
+        });
+
+        canvasRef.current.onclick = () => {
+          canvasRef.current?.requestPointerLock();
+        };
+
+        initializingRef.current = false;
+      } catch (error) {
         console.error("Failed to initialize game:", error);
+        if (engineRef.current) {
+          try { engineRef.current.dispose(); } catch {}
+          engineRef.current = null;
+        }
+        playerRef.current = null;
+        weaponsRef.current = null;
+        enemySystemRef.current = null;
+        chestSystemRef.current = null;
+        combatSystemRef.current = null;
+        specialWeaponsRef.current = null;
+        beamSabreRef.current = null;
+        armorSystemRef.current = null;
+        craftingSystemRef.current = null;
+        inventoryRef.current = null;
+        companionRef.current = null;
+        capsuleRef.current = null;
+        shopRef.current = null;
+        buildingRef.current = null;
+        multiplayerRef.current = null;
+        initializingRef.current = false;
         const errorMsg = error instanceof Error ? error.message : String(error);
         setMessage(`CRITICAL ERROR: ${errorMsg}`);
         setGamePhase("menu");
       }
-    }, 100);
+    }, 150);
   }, [handleLootCollected, showMessage, currentUser]);
 
   const handleStart = useCallback(() => {
@@ -505,6 +523,7 @@ export const Game: React.FC = () => {
       engineRef.current.dispose();
       engineRef.current = null;
     }
+    initializingRef.current = false;
     EventBus.getInstance().clear();
     setStats({
       health: 100, maxHealth: 100, armor: 50, maxArmor: 100,

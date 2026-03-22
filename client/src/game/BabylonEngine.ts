@@ -21,29 +21,33 @@ export class BabylonEngine {
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    
-    try {
-      this.engine = new BABYLON.Engine(canvas, true, {
-        preserveDrawingBuffer: true,
-        stencil: true,
-        disableWebGL2Support: false,
-        doNotHandleContextLost: true
-      }, true);
-      
-      if (!this.engine || !this.engine.getRenderCanvas()) {
-        console.warn("Standard Engine failed, trying fallback...");
-        this.engine = new BABYLON.Engine(canvas, false);
-      }
-    } catch (e) {
-      console.error("Babylon.js Engine creation failed:", e);
-      throw new Error("WebGL initialization failed. Please check if hardware acceleration is enabled.");
+
+    if (canvas.width === 0 || canvas.height === 0) {
+      canvas.width = canvas.clientWidth || window.innerWidth;
+      canvas.height = canvas.clientHeight || window.innerHeight;
     }
+
+    this.engine = new BABYLON.Engine(canvas, true, {
+      preserveDrawingBuffer: true,
+      stencil: true,
+    });
 
     this.scene = new BABYLON.Scene(this.engine);
     this.camera = this.createCamera();
     this.setupLighting();
-    this.setupPostProcessing();
-    this.setupCellShadingOutline();
+
+    try {
+      this.setupPostProcessing();
+    } catch (e) {
+      console.warn("Post-processing setup failed, continuing without it:", e);
+    }
+
+    try {
+      this.setupCellShadingOutline();
+    } catch (e) {
+      console.warn("Cell-shading outline setup failed, continuing without it:", e);
+    }
+
     this.boostMaterialBrightness();
   }
 
@@ -57,10 +61,10 @@ export class BabylonEngine {
     camera.attachControl(this.canvas, true);
     camera.speed = 0.5;
     camera.angularSensibility = 2000;
-    camera.keysUp = [87]; // W
-    camera.keysDown = [83]; // S
-    camera.keysLeft = [65]; // A
-    camera.keysRight = [68]; // D
+    camera.keysUp = [87];
+    camera.keysDown = [83];
+    camera.keysLeft = [65];
+    camera.keysRight = [68];
     camera.minZ = 0.1;
     camera.maxZ = 1000;
     return camera;
@@ -212,7 +216,11 @@ export class BabylonEngine {
 
     let normalTexture: BABYLON.Nullable<BABYLON.BaseTexture> = null;
     if (geometryBufferRenderer) {
-      normalTexture = geometryBufferRenderer.getGBuffer().textures[1];
+      try {
+        normalTexture = geometryBufferRenderer.getGBuffer().textures[1];
+      } catch (e) {
+        console.warn("Could not get normal texture from geometry buffer");
+      }
     }
 
     this.outlinePostProcess = new BABYLON.PostProcess(
