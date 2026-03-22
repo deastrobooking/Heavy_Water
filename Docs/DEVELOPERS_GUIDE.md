@@ -39,6 +39,10 @@
 12. [Data Flow](#data-flow)
 13. [Controls Reference](#controls-reference)
 14. [How to Extend](#how-to-extend)
+15. [Editing Game Parameters](#editing-game-parameters)
+16. [Adding New Robots](#adding-new-robots)
+17. [Editing Robot Designs](#editing-robot-designs)
+18. [Adding / Editing Levels](#adding--editing-levels)
 
 ---
 
@@ -1618,3 +1622,525 @@ return n === "ground" || n.startsWith("skyPlat_") || ... || n === "myNewSurface"
 2. **Update state** in the render loop.
 3. **Pass as prop** to `GameUI`.
 4. **Render** in `GameUI.tsx` in appropriate panel position.
+
+---
+
+## Editing Game Parameters
+
+Game balance parameters are centralized throughout the codebase. Here's where to find and modify them:
+
+### Player Parameters
+
+**File**: `client/src/game/PlayerController.ts`
+
+| Parameter | Location | Purpose | Default |
+|-----------|----------|---------|---------|
+| `walkSpeed` | Line ~40 | Normal movement speed | 0.3 |
+| `sprintSpeed` | Line ~41 | Sprint movement speed | 0.55 |
+| `jumpForce` | Line ~42 | Jump velocity | 0.5 |
+| `gravity` | Line ~43 | Gravity acceleration per frame | 0.02 |
+| `dodgeCost` | Line ~52 | Stamina cost per dodge | 20 |
+| `dodgeDuration` | Line ~53 | Duration of dodge invulnerability | 0.3 |
+| `dodgeCooldown` | Line ~54 | Time before next dodge | 0.5 |
+| `parryWindow` | Line ~57 | Duration of parry active window | 0.2 |
+| `parryCooldown` | Line ~58 | Time before next parry | 1.0 |
+| `jetpackForce` | Line ~61 | Upward force per frame | 0.06 |
+| `jetpackFuelCost` | Line ~62 | Fuel burn per second | 20 |
+| `jetpackRegenRate` | Line ~63 | Fuel regeneration per second (grounded) | 30 |
+| `maxJetpackFuel` | Line ~64 | Maximum jetpack fuel | 200 |
+| `invulnerabilityTime` | Line ~68 | Invulnerability window after hit | 0.2 |
+| `armorDamageAbsorption` | Line ~451 (in takeDamage) | Armor absorbs this % of damage | 0.7 (70%) |
+| `minimumDamage` | Line ~460 | Minimum damage allowed (prevents 0 damage) | 1 |
+
+### Enemy Parameters
+
+**File**: `client/src/game/EnemySystem.ts`
+
+Enemy difficulty is configured in `ENEMY_CONFIGS` object. Example - Drone enemy:
+
+```ts
+drone: {
+  maxHealth: 80,           // Hit points
+  attackDamage: 12,        // Damage per hit
+  defense: 4,              // Defense reduction %
+  movementSpeed: 4,        // Move speed multiplier
+  attackCooldown: 2.0,     // Seconds between attacks
+  knockbackForce: 300,     // Knockback velocity
+  experienceValue: 15,     // XP dropped on death
+  detectionRange: 20,      // Distance to spot player
+  chaseRange: 30,          // Distance to stop chasing
+  attackRange: 5,          // Distance to attack from
+  patrolSpeed: 0.05,       // Patrol movement speed
+  chaseSpeed: 0.10,        // Chase movement speed
+  credits: 20,             // Currency dropped
+},
+```
+
+### Wave & Spawning
+
+**File**: `client/src/game/EnemySystem.ts`
+
+| Parameter | Location | Purpose |
+|-----------|----------|---------|
+| `baseSpawnCount` | `spawnEnemy()` | Initial enemies per wave |
+| `initialEnemyCount` | `Game.tsx` line ~352 | Enemies spawned at start (usually 5) |
+| `waveTimer` | `Game.tsx` line ~469 | Duration before next wave (60000ms = 60s) |
+| Wave multiplier | `selectEnemyType()` logic | Difficulty increases with wave number |
+
+### Weapon Parameters
+
+**File**: `client/src/game/WeaponsSystem.ts`
+
+Weapon stats are in the `initializeWeapons()` method:
+
+```ts
+// Example: Plasma Pistol (key 1)
+{
+  name: "Plasma Pistol",
+  type: "pistol",
+  damage: 15,              // Base damage
+  fireRate: 300,           // Milliseconds between shots
+  ammo: 50,                // Current ammo
+  maxAmmo: 50,             // Magazine size
+  speed: 2.0,              // Projectile speed
+  spread: 0.02,            // Accuracy spread
+  automatic: false,        // Hold to fire
+}
+```
+
+### Special Weapon Parameters
+
+**File**: `client/src/game/SpecialWeaponsSystem.ts`
+
+Each special weapon (keys 7-0) has cooldown, damage, and upgrade properties:
+
+```ts
+// Level 1-3 multipliers
+const upgradeLevels = {
+  7: { 1: { dmgMult: 1.0, cooldown: 2.0 }, 2: { dmgMult: 1.4, cooldown: 1.8 }, 3: { dmgMult: 1.4, cooldown: 1.6 } },
+  8: { 1: { dmgMult: 1.0, cooldown: 1.5 }, 2: { dmgMult: 1.2, cooldown: 1.3 }, 3: { dmgMult: 1.3, cooldown: 1.2 } },
+  // ...
+};
+```
+
+### Armor & Crafting
+
+**File**: `client/src/game/ArmorSystem.ts`
+
+Elemental types and defenses:
+
+```ts
+ELEMENTAL_DEFINITIONS: {
+  fire: { defense: 8, penalty: -2 },      // +8 fire defense, -2 cold
+  ice: { defense: 8, penalty: -2 },       // +8 cold defense, -2 fire
+  // ...
+}
+```
+
+### Leveling & Progression
+
+**File**: `client/src/game/PlayerController.ts`
+
+| Parameter | Location | Purpose |
+|-----------|----------|---------|
+| `xpFormula` | `addExperience()` | `level * 100` XP needed per level |
+| `healthGainPerLevel` | `levelUp()` | +10 maxHealth per level |
+| `staminaGainPerLevel` | `levelUp()` | +5 maxStamina per level |
+
+---
+
+## Adding New Robots
+
+Robots are procedurally generated from **robot descriptors** (style configurations). Follow this guide to add new robot types to enemies, allies, or pets.
+
+### Step 1: Create a Robot Style Definition
+
+**File**: `client/src/game/RobotPresets.ts`
+
+Add a new preset to one of the preset objects:
+
+```ts
+// Add to ROBOT_PRESETS (for enemies)
+export const ROBOT_PRESETS = {
+  // ... existing presets ...
+  
+  MyNewRobot: {
+    archetype: "brute",
+    scale: 1.0,
+    torsoWidth: 20, torsoHeight: 40, torsoDepth: 15,
+    headSize: 12, headShape: "box",
+    armLength: 30, armThickness: 8, armStyle: "box",
+    legLength: 35, legThickness: 10, legStyle: "box",
+    shoulderPadSize: 8, hipPadSize: 6,
+    hasWings: false, wingSpan: 30, wingAngle: 45,
+    hasCannons: true, cannonSize: 4,
+    hasBackpack: false, backpackSize: 10,
+    hasVisor: true, visorStyle: "slit",
+    hasHorns: true, hornLength: 15,
+    hasTail: false, tailLength: 20, tailSegments: 4,
+    hasAntennae: false, antennaLength: 25,
+    hasShield: false, shieldSize: 30,
+    extraPlating: 2, asymmetry: 0.3,
+    primary: new BABYLON.Color3(0.8, 0.2, 0.2),  // Red
+    secondary: new BABYLON.Color3(0.4, 0.1, 0.1), // Dark red
+    emissive: new BABYLON.Color3(1.0, 0.4, 0.0),  // Orange glow
+  },
+};
+```
+
+### Step 2: Register in Enemy System
+
+**File**: `client/src/game/EnemySystem.ts`
+
+Add config in `ENEMY_CONFIGS` object:
+
+```ts
+myNewRobot: {
+  maxHealth: 200,
+  attackDamage: 22,
+  defense: 10,
+  movementSpeed: 5,
+  attackCooldown: 1.5,
+  knockbackForce: 400,
+  experienceValue: 40,
+  detectionRange: 25,
+  chaseRange: 35,
+  attackRange: 6,
+  patrolSpeed: 0.08,
+  chaseSpeed: 0.12,
+  credits: 50,
+},
+```
+
+### Step 3: Register Type & Spawn Logic
+
+In `EnemySystem.ts`:
+
+```ts
+// Add to EnemyType union
+export type EnemyType = "drone" | "soldier" | ... | "myNewRobot";
+
+// In selectEnemyType() method, add spawn logic:
+if (wave >= 15) {
+  types.push({ type: "myNewRobot", weight: wave >= 20 ? 0.15 : 0.05 });
+}
+```
+
+### Step 4: Add to Mesh Factory
+
+**File**: `client/src/game/EnemySystem.ts`
+
+In `createEnemyMesh()` method, map to the preset:
+
+```ts
+case "myNewRobot":
+  return RobotFactory.createRobot(ROBOT_PRESETS.MyNewRobot, position);
+```
+
+### Step 5: Test
+
+Start game, progress waves until your robot spawns. Adjust stats in `ENEMY_CONFIGS` for balance.
+
+---
+
+## Editing Robot Designs
+
+All robot visual properties are controlled by **RobotStyle** objects. Here's how to customize robot appearance.
+
+### Robot Style Properties Reference
+
+**File**: `client/src/game/RobotDesigner.ts`
+
+```ts
+interface RobotStyle {
+  // Base
+  archetype: RobotArchetype;    // "scout" | "brute" | "flyer" | "tank" | "insectoid" | "hybrid"
+  scale: number;                // Size multiplier (0.5 - 2.0)
+  
+  // Torso
+  torsoWidth: number;           // 15 - 40
+  torsoHeight: number;          // 30 - 60
+  torsoDepth: number;           // 10 - 30
+  
+  // Head
+  headSize: number;             // 8 - 20
+  headShape: "box" | "sphere" | "cylinder" | "cone";
+  
+  // Arms
+  armLength: number;            // 20 - 50
+  armThickness: number;         // 4 - 12
+  armStyle: "cylinder" | "box" | "tapered";
+  
+  // Legs
+  legLength: number;            // 25 - 50
+  legThickness: number;         // 6 - 15
+  legStyle: "box" | "digitigrade" | "hoverpads";
+  
+  // Accessories
+  shoulderPadSize: number;      // 5 - 15
+  hipPadSize: number;           // 4 - 12
+  
+  // Wings, cannons, etc.
+  hasWings: boolean;
+  wingSpan: number;             // 25 - 60
+  wingAngle: number;            // 0 - 90 degrees
+  
+  hasCannons: boolean;
+  cannonSize: number;           // 2 - 8
+  
+  hasBackpack: boolean;
+  backpackSize: number;         // 5 - 20
+  
+  hasVisor: boolean;
+  visorStyle: "slit" | "round" | "full";
+  
+  hasHorns: boolean;
+  hornLength: number;           // 10 - 30
+  
+  hasTail: boolean;
+  tailLength: number;           // 15 - 40
+  tailSegments: number;         // 3 - 8
+  
+  hasAntennae: boolean;
+  antennaLength: number;        // 15 - 40
+  
+  hasShield: boolean;
+  shieldSize: number;           // 20 - 50
+  
+  // Plating
+  extraPlating: number;         // 0 - 3 (extra armor plates)
+  asymmetry: number;            // 0 - 1 (0=symmetric, 1=very asymmetric)
+  
+  // Colors
+  primary: BABYLON.Color3;      // Main body color
+  secondary: BABYLON.Color3;    // Secondary parts color
+  emissive: BABYLON.Color3;     // Glowing parts color
+}
+```
+
+### Quick Customization Examples
+
+**Make a Robot Skinnier**:
+```ts
+torsoWidth: 12,        // Narrow torso
+armThickness: 4,       // Thin arms
+legThickness: 6,       // Thin legs
+```
+
+**Make a Robot Bulkier**:
+```ts
+torsoWidth: 35,
+torsoHeight: 55,
+torsoDepth: 28,
+armThickness: 12,
+legThickness: 14,
+extraPlating: 3,
+```
+
+**Add Unique Features**:
+```ts
+hasWings: true,
+wingSpan: 50,
+wingAngle: 60,
+hasShield: true,
+shieldSize: 40,
+hasTail: true,
+tailLength: 30,
+tailSegments: 6,
+```
+
+**Change Colors**:
+```ts
+primary: new BABYLON.Color3(0.2, 0.8, 0.2),     // Green
+secondary: new BABYLON.Color3(0.1, 0.4, 0.1),   // Dark green
+emissive: new BABYLON.Color3(0.0, 1.0, 0.5),    // Cyan glow
+```
+
+### Editing Existing Robot Presets
+
+To modify an existing robot (e.g., ScoutPrime), find it in `RobotPresets.ts` and update its properties:
+
+```ts
+ScoutPrime: {
+  archetype: "scout",
+  scale: 1.0,        // <- Change to 0.8 to make smaller
+  torsoWidth: 18,    // <- Adjust width
+  headSize: 10,      // <- Smaller head
+  // ... rest of properties
+},
+```
+
+Then run the game to see the changes instantly.
+
+### Archetype Defaults
+
+Each archetype has sensible defaults created by `createDefaultStyle(archetype)`:
+
+- **scout**: Lightweight, slit visor, minimal accessories
+- **brute**: Heavy, cannons, horns, extra plating
+- **flyer**: Wings, hoverpads, backpack, sleek
+- **tank**: Largest, shield, maximum plating
+- **insectoid**: Digitigrade legs, wings, tail, antennae
+- **hybrid**: All features enabled (wings, tail, shield, cannons, etc.)
+
+---
+
+## Adding / Editing Levels
+
+Detroit 3026 uses procedural generation for the open world, but you can add new zones, adjust existing ones, or create entirely new environments.
+
+### World Structure
+
+**File**: `client/src/game/CityGenerator.ts`
+
+The world is 1200x1200 units divided into zones:
+
+```
+            North (+Z)
+       Mountains | Mountains
+            (-X) | (+X)
+                 |
+    Residential | Downtown | Industrial
+    (-220 to    | (-100 to | (120 to
+     -120)      | 100)     | 220)
+                 |
+            Highway
+                 |
+              River
+                 |
+       Mountains | Mountains
+```
+
+### Adding a New Zone
+
+1. **Create the generation method** in `CityGenerator.ts`:
+
+```ts
+private createMyNewZone(): void {
+  // Define bounds
+  const minX = -150;
+  const maxX = -50;
+  const minZ = -200;
+  const maxZ = -100;
+  
+  // Create terrain/structures
+  for (let i = 0; i < 10; i++) {
+    const x = minX + Math.random() * (maxX - minX);
+    const z = minZ + Math.random() * (maxZ - minZ);
+    
+    const building = BABYLON.MeshBuilder.CreateBox("myBuilding", 
+      { width: 20, height: 30, depth: 15 }, this.scene);
+    building.position = new BABYLON.Vector3(x, 15, z);
+    building.material = this.cellShadeMaterial;
+  }
+  
+  // Add NPCs, objects, loot markers, etc.
+}
+```
+
+2. **Call from generateCity()**:
+
+```ts
+public generateCity(): void {
+  this.createGround();
+  this.createDowntown();
+  this.createIndustrialZone();
+  this.createResidentialBlocks();
+  // ... existing calls ...
+  this.createMyNewZone();  // <- Add here
+  // ... rest of generation
+}
+```
+
+3. **Make surfaces walkable** by updating `PlayerController.ts` raycast filter:
+
+```ts
+// In PlayerController.updatePhysics() method
+const isGround = (n: string) => 
+  n === "ground" || n.startsWith("skyPlat_") || 
+  n.startsWith("bridge_") || n.startsWith("rooftop_") ||
+  n === "myZoneGround";  // <- Add your zone
+```
+
+### Editing Existing Zones
+
+To modify an existing zone (e.g., Downtown):
+
+1. Find the method: `createDowntown()` in `CityGenerator.ts`
+2. Adjust parameters:
+   - Building height: `height: 80` → `height: 120`
+   - Building density: Loop iterations
+   - Building materials: Change color/shader
+3. Respawn the world by restarting the game
+
+### Adding Interactive Objects
+
+Add NPCs, destructible objects, or special zones:
+
+```ts
+// Example: Add a destructible building
+const destructible = BABYLON.MeshBuilder.CreateBox("destructBuilding", 
+  { width: 25, height: 40, depth: 20 }, this.scene);
+destructible.position = new BABYLON.Vector3(100, 20, 150);
+destructible.metadata = {
+  isDestructible: true,
+  health: 500,
+  lootOnDestroy: { credits: 100, ammo: 30 },
+};
+```
+
+Then wire it into `EnemySystem.damageEnemy()` or a new `EnvironmentSystem`.
+
+### Wave Difficulty & Loot Scaling
+
+Zones can have difficulty modifiers:
+
+```ts
+// In a zone creation method
+zone.metadata = {
+  difficultyMultiplier: 1.5,      // 50% harder enemies
+  lootMultiplier: 1.2,            // 20% more loot
+  waveModifier: 2,                // Start spawning at wave 2
+};
+```
+
+Then read in `EnemySystem`:
+
+```ts
+const zoneModifier = mesh.metadata?.difficultyMultiplier || 1.0;
+enemy.maxHealth *= zoneModifier;
+enemy.attackDamage *= zoneModifier;
+```
+
+### Ambient Design
+
+Add atmosphere to zones using lights, particles, and shaders:
+
+```ts
+// Add zone-specific lighting
+const zoneLight = new BABYLON.PointLight("zoneLight", 
+  new BABYLON.Vector3(50, 100, 50), this.scene);
+zoneLight.range = 300;
+zoneLight.intensity = 0.6;
+zoneLight.diffuse = new BABYLON.Color3(0.2, 0.8, 1.0);  // Cyan glow
+
+// Add fog for depth
+this.scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
+this.scene.fogDensity = 0.002;
+this.scene.fogColor = new BABYLON.Color3(0.1, 0.2, 0.3);
+```
+
+### Spawning & Population
+
+Control what spawns in each zone via `EnemySystem.selectEnemyType()`:
+
+```ts
+// Biome-specific enemy selection
+if (this.isInZone(position, "myNewZone")) {
+  if (wave <= 5) types.push({ type: "drone", weight: 1.0 });
+  if (wave >= 10) types.push({ type: "soldier", weight: 0.8 });
+  if (wave >= 15) types.push({ type: "myNewRobot", weight: 0.5 });
+}
+```
+
+---
