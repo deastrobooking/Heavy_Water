@@ -1696,7 +1696,7 @@ export class CityGenerator {
         centralTower.position = new BABYLON.Vector3(plat.x, plat.y + 2 + towerHeight / 2, plat.z);
         const towerMat = this.createBuildingMaterial(
           new BABYLON.Color3(0.08, 0.1, 0.15),
-          new BABYLON.Color3(0, 1, 1)
+          new BABYLON.Color3(0.05, 0.15, 0.2)
         );
         centralTower.material = towerMat;
 
@@ -1707,7 +1707,8 @@ export class CityGenerator {
         );
         beacon.position = new BABYLON.Vector3(plat.x, plat.y + 2 + towerHeight + 2, plat.z);
         const beaconMat = new BABYLON.StandardMaterial(`beaconMat_${plat.label}`, this.scene);
-        beaconMat.emissiveColor = new BABYLON.Color3(0, 1, 1);
+        beaconMat.diffuseColor = new BABYLON.Color3(0.05, 0.2, 0.25);
+        beaconMat.emissiveColor = new BABYLON.Color3(0, 0, 0);
         beacon.material = beaconMat;
       }
 
