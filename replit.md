@@ -37,6 +37,7 @@ Detroit 3026 is a 3D futuristic sci-fi action game built with Babylon.js. Set in
 - **ShopSystem**: Features 5 shop locations with 3 distinct types (weapon, armor, general) offering dynamic pricing for buying and selling items.
 - **GardenSystem**: Four pet gardens provide safe zones for managing, training, and bonding with digital companions.
 - **CompanionSystem**: Manages allies and digital pets, including healing companions and combat companions, with an experience and leveling system.
+- **MapSystem**: Real-time minimap display with player position, enemy markers, shop and garden locations, grid overlay, and toggle control (M key).
 
 ### Enemy Systems
 - **EnemySystem**: Implements a wave spawner for 6 distinct enemy types, including Drone, Soldier, Heavy, Insectoid, Hybrid, and Commander. Commanders are humanoid captains with advanced AI, flight capabilities, and rare loot drops.

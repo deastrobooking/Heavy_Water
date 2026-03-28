@@ -17,6 +17,7 @@ import { CompanionSystem } from "./CompanionSystem";
 import { ArmorCapsuleSystem, ArmorUpgrade } from "./ArmorCapsuleSystem";
 import { ShopSystem, ShopDefinition } from "./ShopSystem";
 import { GardenSystem } from "./GardenSystem";
+import { MapSystem } from "./MapSystem";
 import { BuildingSystem } from "./BuildingSystem";
 import { MultiplayerSystem } from "./MultiplayerSystem";
 import { EventBus, GameEvents } from "./EventBus";
@@ -45,6 +46,7 @@ export const Game: React.FC = () => {
   const capsuleRef = useRef<ArmorCapsuleSystem | null>(null);
   const shopRef = useRef<ShopSystem | null>(null);
   const gardenRef = useRef<GardenSystem | null>(null);
+  const mapRef = useRef<MapSystem | null>(null);
   const buildingRef = useRef<BuildingSystem | null>(null);
   const multiplayerRef = useRef<MultiplayerSystem | null>(null);
 
@@ -292,6 +294,11 @@ export const Game: React.FC = () => {
 
         gardenSystem.createGardenBuildings();
 
+        const mapSystem = new MapSystem(scene);
+        mapRef.current = mapSystem;
+        mapSystem.setShops(shopSystem.getShops ? shopSystem.getShops() : []);
+        mapSystem.setGardens(gardenSystem.getGardens ? gardenSystem.getGardens() : []);
+
         const buildingSystem = new BuildingSystem(scene, engine.getCamera(), inventory);
         buildingRef.current = buildingSystem;
 
@@ -451,6 +458,11 @@ export const Game: React.FC = () => {
           shopSystem.update();
           buildingSystem.update(dt);
           multiplayer.update(dt);
+
+          mapSystem.updatePlayerPosition(playerPos);
+          const mapEnemyMeshes = enemySystem.getEnemyMeshes();
+          mapSystem.updateEnemies(mapEnemyMeshes.map(m => m.position));
+          mapSystem.draw();
           setRemotePlayerCount(multiplayer.getRemotePlayerCount());
 
           setStats(player.getStats());
@@ -514,6 +526,7 @@ export const Game: React.FC = () => {
         capsuleRef.current = null;
         shopRef.current = null;
         gardenRef.current = null;
+        mapRef.current = null;
         buildingRef.current = null;
         multiplayerRef.current = null;
         initializingRef.current = false;
@@ -536,6 +549,7 @@ export const Game: React.FC = () => {
     if (capsuleRef.current) capsuleRef.current.dispose();
     if (shopRef.current) shopRef.current.dispose();
     if (gardenRef.current) gardenRef.current.dispose();
+    if (mapRef.current) mapRef.current.dispose();
     if (buildingRef.current) buildingRef.current.dispose();
     if (multiplayerRef.current) multiplayerRef.current.dispose();
     if (engineRef.current) {
