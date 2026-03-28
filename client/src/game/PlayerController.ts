@@ -536,7 +536,7 @@ export class PlayerController implements IDamageable {
     let surfaceY = this.groundY;
     const rayLength = Math.max(8, Math.abs(this.velocity.y) * 20 + 5);
     const ray = new BABYLON.Ray(
-      new BABYLON.Vector3(this.meshRoot.position.x, this.meshRoot.position.y + 1, this.meshRoot.position.z),
+      new BABYLON.Vector3(this.meshRoot.position.x, this.meshRoot.position.y, this.meshRoot.position.z),
       BABYLON.Vector3.Down(),
       rayLength
     );
