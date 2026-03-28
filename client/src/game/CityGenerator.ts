@@ -106,6 +106,7 @@ export class CityGenerator {
     this.createDesertBiome();
     this.createJunkyardBiome();
     this.createSkyCities();
+    this.createSkyBridges();
     this.createOuterDistricts();
   }
 
@@ -208,9 +209,9 @@ export class CityGenerator {
 
   private createStreetLights(): void {
     const lightColorOptions = [
-      new BABYLON.Color3(0.1, 0.3, 0.4),
-      new BABYLON.Color3(0.3, 0.1, 0.3),
-      new BABYLON.Color3(0.3, 0.25, 0.1),
+      new BABYLON.Color3(0, 1, 1),
+      new BABYLON.Color3(1, 0, 1),
+      new BABYLON.Color3(1, 0.7, 0),
     ];
 
     let seed = 42;
@@ -254,10 +255,10 @@ export class CityGenerator {
 
   private createDowntown(): void {
     const colors = [
-      { base: new BABYLON.Color3(0.15, 0.15, 0.2), glow: new BABYLON.Color3(0.05, 0.15, 0.2) },
-      { base: new BABYLON.Color3(0.12, 0.12, 0.18), glow: new BABYLON.Color3(0.15, 0.05, 0.15) },
-      { base: new BABYLON.Color3(0.18, 0.15, 0.2), glow: new BABYLON.Color3(0.15, 0.1, 0.05) },
-      { base: new BABYLON.Color3(0.1, 0.15, 0.2), glow: new BABYLON.Color3(0.05, 0.15, 0.1) },
+      { base: new BABYLON.Color3(0.15, 0.15, 0.2), glow: new BABYLON.Color3(0, 1, 1) },
+      { base: new BABYLON.Color3(0.12, 0.12, 0.18), glow: new BABYLON.Color3(1, 0, 1) },
+      { base: new BABYLON.Color3(0.18, 0.15, 0.2), glow: new BABYLON.Color3(1, 0.5, 0) },
+      { base: new BABYLON.Color3(0.1, 0.15, 0.2), glow: new BABYLON.Color3(0, 1, 0.5) },
     ];
 
     let seed = 100;
@@ -309,6 +310,22 @@ export class CityGenerator {
     rooftopMat.emissiveColor = new BABYLON.Color3(0.02, 0.03, 0.05);
     rooftop.material = rooftopMat;
 
+    const edgeMat = new BABYLON.StandardMaterial("roofEdgeMat", this.scene);
+    edgeMat.emissiveColor = new BABYLON.Color3(0, 0.5, 0.7);
+    edgeMat.diffuseColor = new BABYLON.Color3(0, 0.2, 0.3);
+
+    const edgeN = BABYLON.MeshBuilder.CreateBox(`roofEdge`, { height: 0.3, width: platW, depth: 0.3 }, this.scene);
+    edgeN.position = new BABYLON.Vector3(x, height + 1.15, z + platD / 2);
+    edgeN.material = edgeMat;
+    const edgeS = BABYLON.MeshBuilder.CreateBox(`roofEdge`, { height: 0.3, width: platW, depth: 0.3 }, this.scene);
+    edgeS.position = new BABYLON.Vector3(x, height + 1.15, z - platD / 2);
+    edgeS.material = edgeMat;
+    const edgeE = BABYLON.MeshBuilder.CreateBox(`roofEdge`, { height: 0.3, width: 0.3, depth: platD }, this.scene);
+    edgeE.position = new BABYLON.Vector3(x + platW / 2, height + 1.15, z);
+    edgeE.material = edgeMat;
+    const edgeW = BABYLON.MeshBuilder.CreateBox(`roofEdge`, { height: 0.3, width: 0.3, depth: platD }, this.scene);
+    edgeW.position = new BABYLON.Vector3(x - platW / 2, height + 1.15, z);
+    edgeW.material = edgeMat;
 
     this.platforms.push(rooftop);
   }
@@ -459,11 +476,11 @@ export class CityGenerator {
 
   private createNeonLights(): void {
     const neonColors = [
-      new BABYLON.Color3(0.05, 0.4, 0.5),
-      new BABYLON.Color3(0.4, 0.05, 0.4),
-      new BABYLON.Color3(0.4, 0.3, 0.1),
-      new BABYLON.Color3(0.05, 0.4, 0.3),
-      new BABYLON.Color3(0.4, 0.05, 0.3),
+      new BABYLON.Color3(0, 1, 1),
+      new BABYLON.Color3(1, 0, 1),
+      new BABYLON.Color3(1, 0.5, 0),
+      new BABYLON.Color3(0, 1, 0.5),
+      new BABYLON.Color3(1, 0, 0.5),
     ];
 
     let seed = 400;
@@ -1679,7 +1696,7 @@ export class CityGenerator {
         centralTower.position = new BABYLON.Vector3(plat.x, plat.y + 2 + towerHeight / 2, plat.z);
         const towerMat = this.createBuildingMaterial(
           new BABYLON.Color3(0.08, 0.1, 0.15),
-          new BABYLON.Color3(0.05, 0.15, 0.2)
+          new BABYLON.Color3(0, 1, 1)
         );
         centralTower.material = towerMat;
 
@@ -1690,8 +1707,7 @@ export class CityGenerator {
         );
         beacon.position = new BABYLON.Vector3(plat.x, plat.y + 2 + towerHeight + 2, plat.z);
         const beaconMat = new BABYLON.StandardMaterial(`beaconMat_${plat.label}`, this.scene);
-        beaconMat.diffuseColor = new BABYLON.Color3(0.05, 0.2, 0.25);
-        beaconMat.emissiveColor = new BABYLON.Color3(0, 0, 0);
+        beaconMat.emissiveColor = new BABYLON.Color3(0, 1, 1);
         beacon.material = beaconMat;
       }
 

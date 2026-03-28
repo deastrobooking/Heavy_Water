@@ -88,6 +88,14 @@ export class BabylonEngine {
     sunLight.intensity = 1.2;
     sunLight.diffuse = new BABYLON.Color3(1, 0.9, 0.7);
 
+    const neonGlow = new BABYLON.PointLight(
+      "neonGlow",
+      new BABYLON.Vector3(0, 20, 0),
+      this.scene
+    );
+    neonGlow.diffuse = new BABYLON.Color3(0, 1, 1);
+    neonGlow.intensity = 0.3;
+    neonGlow.range = 100;
   }
 
   private setupPostProcessing(): void {
@@ -98,7 +106,11 @@ export class BabylonEngine {
       [this.camera]
     );
     
-    defaultPipeline.bloomEnabled = false;
+    defaultPipeline.bloomEnabled = true;
+    defaultPipeline.bloomThreshold = 0.5;
+    defaultPipeline.bloomWeight = 0.25;
+    defaultPipeline.bloomKernel = 32;
+    defaultPipeline.bloomScale = 0.3;
 
     defaultPipeline.chromaticAberrationEnabled = true;
     defaultPipeline.chromaticAberration.aberrationAmount = 8;
