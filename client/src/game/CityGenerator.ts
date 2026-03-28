@@ -310,22 +310,6 @@ export class CityGenerator {
     rooftopMat.emissiveColor = new BABYLON.Color3(0.02, 0.03, 0.05);
     rooftop.material = rooftopMat;
 
-    const edgeMat = new BABYLON.StandardMaterial("roofEdgeMat", this.scene);
-    edgeMat.emissiveColor = new BABYLON.Color3(0, 0, 0);
-    edgeMat.diffuseColor = new BABYLON.Color3(0.1, 0.12, 0.15);
-
-    const edgeN = BABYLON.MeshBuilder.CreateBox(`roofEdge`, { height: 0.3, width: platW, depth: 0.3 }, this.scene);
-    edgeN.position = new BABYLON.Vector3(x, height + 1.15, z + platD / 2);
-    edgeN.material = edgeMat;
-    const edgeS = BABYLON.MeshBuilder.CreateBox(`roofEdge`, { height: 0.3, width: platW, depth: 0.3 }, this.scene);
-    edgeS.position = new BABYLON.Vector3(x, height + 1.15, z - platD / 2);
-    edgeS.material = edgeMat;
-    const edgeE = BABYLON.MeshBuilder.CreateBox(`roofEdge`, { height: 0.3, width: 0.3, depth: platD }, this.scene);
-    edgeE.position = new BABYLON.Vector3(x + platW / 2, height + 1.15, z);
-    edgeE.material = edgeMat;
-    const edgeW = BABYLON.MeshBuilder.CreateBox(`roofEdge`, { height: 0.3, width: 0.3, depth: platD }, this.scene);
-    edgeW.position = new BABYLON.Vector3(x - platW / 2, height + 1.15, z);
-    edgeW.material = edgeMat;
 
     this.platforms.push(rooftop);
   }
