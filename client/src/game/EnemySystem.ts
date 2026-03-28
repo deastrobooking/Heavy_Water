@@ -4,6 +4,8 @@ import { EventBus, GameEvents } from "./EventBus";
 import { DamageInfo, DamageResult, DamageResistance, IDamageable, DamageType, applyDamage } from "./DamageSystem";
 import { RobotFactory } from "./RobotFactory";
 import { ROBOT_PRESETS } from "./RobotPresets";
+import { HumanoidCharacter } from "./HumanoidCharacter";
+import { HUMANOID_PRESETS } from "./HumanoidPresets";
 
 export type EnemyType = "drone" | "soldier" | "heavy" | "insectoid" | "hybrid" | "commander";
 export type EnemyAIState = "idle" | "patrol" | "chase" | "attack" | "stunned" | "dead" | "flying" | "hovering" | "dodging";
@@ -680,6 +682,35 @@ export class EnemySystem {
   }
 
   private createEnemyMesh(type: EnemyType, position: BABYLON.Vector3): BABYLON.Mesh {
+    // Commanders use humanoid models instead of robots
+    if (type === "commander") {
+      const captainPresets = [
+        "HumanoidCaptainAlpha",
+        "HumanoidCaptainBeta",
+        "HumanoidCaptainGamma",
+        "HumanoidCaptainOmega",
+      ];
+      const randomPreset = captainPresets[Math.floor(Math.random() * captainPresets.length)];
+      const def = HUMANOID_PRESETS[randomPreset];
+
+      if (def) {
+        const humanoid = new HumanoidCharacter(this.scene, def);
+        const root = humanoid.getRoot();
+        root.position = position;
+
+        const hitbox = BABYLON.MeshBuilder.CreateCapsule(`enemyHit_${type}_${Date.now()}`, {
+          height: 4.0,
+          radius: 0.9,
+        }, this.scene);
+        hitbox.isVisible = false;
+        hitbox.position.copyFrom(position);
+        root.parent = hitbox;
+        root.position = BABYLON.Vector3.Zero();
+
+        return hitbox;
+      }
+    }
+
     const presetMap: Record<EnemyType, string> = {
       drone: "JetWarden",
       soldier: "ScoutPrime",
@@ -695,8 +726,8 @@ export class EnemySystem {
     if (preset) {
       const root = this.robotFactory.createRobot(preset, position);
 
-      const hitboxH = type === "commander" ? 4.0 : type === "hybrid" ? 3.5 : type === "heavy" ? 3 : 2;
-      const hitboxR = type === "commander" ? 0.9 : type === "hybrid" ? 0.8 : type === "heavy" ? 0.7 : 0.5;
+      const hitboxH = type === "hybrid" ? 3.5 : type === "heavy" ? 3 : 2;
+      const hitboxR = type === "hybrid" ? 0.8 : type === "heavy" ? 0.7 : 0.5;
       const hitbox = BABYLON.MeshBuilder.CreateCapsule(`enemyHit_${type}_${Date.now()}`, {
         height: hitboxH,
         radius: hitboxR,

@@ -3,6 +3,8 @@ import { StateMachine } from "./StateMachine";
 import { EventBus, GameEvents } from "./EventBus";
 import { DamageInfo, DamageResult, DamageResistance, IDamageable, DamageType } from "./DamageSystem";
 import { AnimationSystem, AnimationState } from "./AnimationSystem";
+import { HumanoidCharacter } from "./HumanoidCharacter";
+import { HUMANOID_PRESETS } from "./HumanoidPresets";
 
 export type PlayerState = "idle" | "moving" | "sprinting" | "dodging" | "attacking" | "stunned" | "dead" | "jetpack" | "flying" | "hovering";
 
@@ -22,6 +24,8 @@ export class PlayerController implements IDamageable {
   private scene: BABYLON.Scene;
   private camera: BABYLON.FreeCamera;
   private mesh: BABYLON.Mesh;
+  private humanoid?: HumanoidCharacter;
+  private meshRoot: BABYLON.TransformNode | BABYLON.Mesh;
   private velocity: BABYLON.Vector3 = BABYLON.Vector3.Zero();
   private isGrounded: boolean = true;
 
@@ -164,15 +168,21 @@ export class PlayerController implements IDamageable {
   }
 
   private createPlayerMesh(): BABYLON.Mesh {
-    const player = BABYLON.MeshBuilder.CreateCapsule(
+    this.humanoid = new HumanoidCharacter(this.scene, HUMANOID_PRESETS.PlayerDefault);
+    const root = this.humanoid.getRoot();
+    root.position = new BABYLON.Vector3(0, 1, -15);
+    this.meshRoot = root;
+
+    const capsule = BABYLON.MeshBuilder.CreateCapsule(
       "player",
       { height: 2, radius: 0.5 },
       this.scene
     );
-    player.position = new BABYLON.Vector3(0, 1, -15);
-    player.isVisible = false;
-    player.metadata = { tag: "Player", playerController: this };
-    return player;
+    capsule.position = new BABYLON.Vector3(0, 1, -15);
+    capsule.isVisible = false;
+    capsule.parent = root;
+    capsule.metadata = { tag: "Player", playerController: this };
+    return capsule;
   }
 
   private setupControls(): void {
@@ -428,10 +438,10 @@ export class PlayerController implements IDamageable {
     this.velocity.y = this.velocity.y * damping + moveDir.y * (1 - damping);
     this.velocity.z = this.velocity.z * damping + moveDir.z * (1 - damping);
 
-    this.mesh.position.addInPlace(this.velocity);
+    this.meshRoot.position.addInPlace(this.velocity);
 
-    if (this.mesh.position.y < this.groundY + 1) {
-      this.mesh.position.y = this.groundY + 1;
+    if (this.meshRoot.position.y < this.groundY + 1) {
+      this.meshRoot.position.y = this.groundY + 1;
       this.velocity.y = 0;
       this.isGrounded = true;
       this.jumpCount = 0;
@@ -460,7 +470,7 @@ export class PlayerController implements IDamageable {
       this.dodgeCooldownTimer = this.dodgeCooldown;
       this.stateMachine.changeState("idle");
     } else {
-      this.mesh.position.addInPlace(this.dodgeDirection.scale(this.dodgeSpeed));
+      this.meshRoot.position.addInPlace(this.dodgeDirection.scale(this.dodgeSpeed));
     }
   }
 
@@ -521,12 +531,12 @@ export class PlayerController implements IDamageable {
       this.velocity.y = -maxFallSpeed;
     }
 
-    this.mesh.position.addInPlace(this.velocity);
+    this.meshRoot.position.addInPlace(this.velocity);
 
     let surfaceY = this.groundY;
     const rayLength = Math.max(8, Math.abs(this.velocity.y) * 20 + 5);
     const ray = new BABYLON.Ray(
-      new BABYLON.Vector3(this.mesh.position.x, this.mesh.position.y + 1, this.mesh.position.z),
+      new BABYLON.Vector3(this.meshRoot.position.x, this.meshRoot.position.y + 1, this.meshRoot.position.z),
       BABYLON.Vector3.Down(),
       rayLength
     );
@@ -545,8 +555,8 @@ export class PlayerController implements IDamageable {
       }
     }
 
-    if (this.mesh.position.y <= surfaceY + 1) {
-      this.mesh.position.y = surfaceY + 1;
+    if (this.meshRoot.position.y <= surfaceY + 1) {
+      this.meshRoot.position.y = surfaceY + 1;
       this.velocity.y = 0;
       this.isGrounded = true;
       this.jumpCount = 0;
@@ -561,9 +571,9 @@ export class PlayerController implements IDamageable {
 
   private updateCamera(): void {
     this.camera.position = new BABYLON.Vector3(
-      this.mesh.position.x,
-      this.mesh.position.y + 1.5,
-      this.mesh.position.z
+      this.meshRoot.position.x,
+      this.meshRoot.position.y + 1.5,
+      this.meshRoot.position.z
     );
   }
 
@@ -734,7 +744,7 @@ export class PlayerController implements IDamageable {
   }
 
   getPosition(): BABYLON.Vector3 {
-    return this.mesh.position.clone();
+    return this.meshRoot.position.clone();
   }
 
   getRotation(): BABYLON.Vector3 {

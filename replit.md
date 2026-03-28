@@ -36,6 +36,8 @@ client/
       RobotFactory.ts         - Procedural robot mesh generation
       RobotPresets.ts         - Robot archetype presets including CommanderOmega
       RobotDesigner.ts        - Robot descriptor interface
+      HumanoidCharacter.ts    - Procedural humanoid mesh generation with body, armor, hair
+      HumanoidPresets.ts      - Humanoid character presets (player + 4 captain variants)
       MultiplayerSystem.ts    - WebSocket multiplayer client with room/lobby/chat/sync
       AuthUI.tsx              - Login/register authentication screen
       GameUI.tsx              - HUD with all system displays, shop UI, capsule UI, multiplayer lobby
@@ -60,7 +62,8 @@ shared/
 - **DamageSystem**: Unified damage pipeline with DamageType enum, resistances, IDamageable interface, area damage
 
 ### Player Systems
-- **PlayerController**: Implements IDamageable, full state machine (idle/moving/sprinting/dodging/attacking/stunned/dead/jetpack/flying/hovering). Triple-jump flight system: 1st jump = normal, 2nd = double jump, 3rd = sky launch into flight mode. Air momentum system preserves horizontal velocity.
+- **PlayerController**: Humanoid character mesh with full state machine (idle/moving/sprinting/dodging/attacking/stunned/dead/jetpack/flying/hovering). Triple-jump flight system: 1st jump = normal, 2nd = double jump, 3rd = sky launch into flight mode. Air momentum system preserves horizontal velocity.
+- **HumanoidCharacter**: Procedural humanoid mesh generation system with modular body parts, clothing, armor, and hair. Supports multiple color customization and armor types (light/heavy/captain).
 - **AnimationSystem**: Procedural multi-part character animations. States: idle, running, sprinting, jumping, doubleJump, tripleJumpLaunch, flyingHover, lightPunch, heavySlam, dodgeRoll, edgeGrab, landing, dead. Smooth blending between states.
 - **CombatSystem**: Light/heavy melee combo chains with input buffering, hitbox detection, damage multipliers
 - **InventorySystem**: 24-slot grid inventory with item stacking, item definitions catalog
@@ -92,10 +95,11 @@ shared/
 ### Enemy Systems
 - **EnemyUnit**: Implements IDamageable, FSM-driven AI
 - **EnemySystem**: Wave spawner with 6 enemy types
-  - Drone, Soldier, Heavy, Insectoid, Hybrid, Commander
+  - Drone (robot), Soldier (robot), Heavy (robot), Insectoid (robot), Hybrid (robot), Commander (humanoid captain)
   - Commanders: 1500 HP, flight/hover AI, dodge attacks (40% chance), rooftop spawning
-  - Commander aura, beam attacks, rare loot drops with upgrade modules
-  - Appear at wave 7+ with larger hitbox and unique CommanderOmega preset
+  - Humanoid captains spawn with random preset (Alpha/Beta/Gamma/Omega) with different colors, body types, and armor
+  - Rare loot drops on commander defeat
+  - Appear at wave 7+ with larger hitbox and specialized behavior
 
 ### City & Environment
 - **CityGenerator**: Massive open world 1200x1200 with city center + 4 biomes
