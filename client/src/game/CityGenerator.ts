@@ -100,6 +100,7 @@ export class CityGenerator {
     this.createHighways();
     this.createNeonLights();
     this.createSpaceports();
+    this.createStreetLights();
     this.createMountainBiome();
     this.createJungleBiome();
     this.createDesertBiome();
