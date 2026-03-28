@@ -16,6 +16,7 @@ import { InventorySystem } from "./InventorySystem";
 import { CompanionSystem } from "./CompanionSystem";
 import { ArmorCapsuleSystem, ArmorUpgrade } from "./ArmorCapsuleSystem";
 import { ShopSystem, ShopDefinition } from "./ShopSystem";
+import { GardenSystem } from "./GardenSystem";
 import { BuildingSystem } from "./BuildingSystem";
 import { MultiplayerSystem } from "./MultiplayerSystem";
 import { EventBus, GameEvents } from "./EventBus";
@@ -43,6 +44,7 @@ export const Game: React.FC = () => {
   const companionRef = useRef<CompanionSystem | null>(null);
   const capsuleRef = useRef<ArmorCapsuleSystem | null>(null);
   const shopRef = useRef<ShopSystem | null>(null);
+  const gardenRef = useRef<GardenSystem | null>(null);
   const buildingRef = useRef<BuildingSystem | null>(null);
   const multiplayerRef = useRef<MultiplayerSystem | null>(null);
 
@@ -275,6 +277,21 @@ export const Game: React.FC = () => {
           showMessage(msg, 1500);
         });
 
+        shopSystem.createShopBuildings();
+
+        const gardenSystem = new GardenSystem(scene, engine.getCamera(), companionSystem);
+        gardenRef.current = gardenSystem;
+
+        gardenSystem.setOnGardenOpen((gardenId) => {
+          showMessage(`Entered ${gardenId}`, 1500);
+        });
+
+        gardenSystem.setOnGardenClose(() => {
+          showMessage("Left garden", 1000);
+        });
+
+        gardenSystem.createGardenBuildings();
+
         const buildingSystem = new BuildingSystem(scene, engine.getCamera(), inventory);
         buildingRef.current = buildingSystem;
 
@@ -496,6 +513,7 @@ export const Game: React.FC = () => {
         companionRef.current = null;
         capsuleRef.current = null;
         shopRef.current = null;
+        gardenRef.current = null;
         buildingRef.current = null;
         multiplayerRef.current = null;
         initializingRef.current = false;
@@ -517,6 +535,7 @@ export const Game: React.FC = () => {
     if (companionRef.current) companionRef.current.dispose();
     if (capsuleRef.current) capsuleRef.current.dispose();
     if (shopRef.current) shopRef.current.dispose();
+    if (gardenRef.current) gardenRef.current.dispose();
     if (buildingRef.current) buildingRef.current.dispose();
     if (multiplayerRef.current) multiplayerRef.current.dispose();
     if (engineRef.current) {
