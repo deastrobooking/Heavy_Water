@@ -35,22 +35,22 @@ export class HumanoidCharacter {
 
   private createMaterials(scene: BABYLON.Scene): void {
     const skinMat = new BABYLON.StandardMaterial("skinMat", scene);
-    skinMat.diffuse = this.definition.colors.skin;
+    skinMat.diffuseColor = this.definition.colors.skin;
     skinMat.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
     this.materials.set("skin", skinMat);
 
     const hairMat = new BABYLON.StandardMaterial("hairMat", scene);
-    hairMat.diffuse = this.definition.colors.hair;
+    hairMat.diffuseColor = this.definition.colors.hair;
     hairMat.emissiveColor = this.definition.colors.hair.scale(0.2);
     this.materials.set("hair", hairMat);
 
     const primaryMat = new BABYLON.StandardMaterial("primaryMat", scene);
-    primaryMat.diffuse = this.definition.colors.primary;
+    primaryMat.diffuseColor = this.definition.colors.primary;
     primaryMat.emissiveColor = this.definition.colors.primary.scale(0.1);
     this.materials.set("primary", primaryMat);
 
     const secondaryMat = new BABYLON.StandardMaterial("secondaryMat", scene);
-    secondaryMat.diffuse = this.definition.colors.secondary;
+    secondaryMat.diffuseColor = this.definition.colors.secondary;
     secondaryMat.specularColor = new BABYLON.Color3(0.4, 0.4, 0.4);
     this.materials.set("secondary", secondaryMat);
   }
