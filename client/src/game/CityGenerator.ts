@@ -106,7 +106,6 @@ export class CityGenerator {
     this.createDesertBiome();
     this.createJunkyardBiome();
     this.createSkyCities();
-    this.createSkyBridges();
     this.createOuterDistricts();
   }
 
