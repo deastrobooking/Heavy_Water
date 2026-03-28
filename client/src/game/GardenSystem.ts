@@ -138,16 +138,6 @@ export class GardenSystem {
     planter4.position.set(3, 0.4, 3);
     planter4.parent = root;
 
-    const beacon = BABYLON.MeshBuilder.CreateTorus("gardenBeacon_" + garden.id, {
-      diameter: 2, thickness: 0.2, tessellation: 16,
-    }, this.scene);
-    beacon.position.y = 8;
-    beacon.parent = root;
-    const beaconMat = new BABYLON.StandardMaterial("gardenBeaconMat_" + garden.id, this.scene);
-    beaconMat.diffuseColor = accentColor;
-    beaconMat.emissiveColor = accentColor.scale(0.6);
-    beacon.material = beaconMat;
-    beacon.rotation.z = Math.PI / 4;
 
     return root;
   }
