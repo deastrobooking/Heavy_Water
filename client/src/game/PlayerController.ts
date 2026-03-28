@@ -180,8 +180,14 @@ export class PlayerController implements IDamageable {
     );
     capsule.position = new BABYLON.Vector3(0, 1, -15);
     capsule.isVisible = false;
+    capsule.renderingGroupId = 1;
     capsule.parent = root;
     capsule.metadata = { tag: "Player", playerController: this };
+    
+    const invisMat = new BABYLON.StandardMaterial("playerInvis", this.scene);
+    invisMat.alpha = 0;
+    capsule.material = invisMat;
+    
     return capsule;
   }
 
