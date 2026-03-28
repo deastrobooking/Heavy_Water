@@ -209,9 +209,9 @@ export class CityGenerator {
 
   private createStreetLights(): void {
     const lightColorOptions = [
-      new BABYLON.Color3(0, 1, 1),
-      new BABYLON.Color3(1, 0, 1),
-      new BABYLON.Color3(1, 0.7, 0),
+      new BABYLON.Color3(0.1, 0.3, 0.4),
+      new BABYLON.Color3(0.3, 0.1, 0.3),
+      new BABYLON.Color3(0.3, 0.25, 0.1),
     ];
 
     let seed = 42;
@@ -255,10 +255,10 @@ export class CityGenerator {
 
   private createDowntown(): void {
     const colors = [
-      { base: new BABYLON.Color3(0.15, 0.15, 0.2), glow: new BABYLON.Color3(0, 1, 1) },
-      { base: new BABYLON.Color3(0.12, 0.12, 0.18), glow: new BABYLON.Color3(1, 0, 1) },
-      { base: new BABYLON.Color3(0.18, 0.15, 0.2), glow: new BABYLON.Color3(1, 0.5, 0) },
-      { base: new BABYLON.Color3(0.1, 0.15, 0.2), glow: new BABYLON.Color3(0, 1, 0.5) },
+      { base: new BABYLON.Color3(0.15, 0.15, 0.2), glow: new BABYLON.Color3(0.05, 0.15, 0.2) },
+      { base: new BABYLON.Color3(0.12, 0.12, 0.18), glow: new BABYLON.Color3(0.15, 0.05, 0.15) },
+      { base: new BABYLON.Color3(0.18, 0.15, 0.2), glow: new BABYLON.Color3(0.15, 0.1, 0.05) },
+      { base: new BABYLON.Color3(0.1, 0.15, 0.2), glow: new BABYLON.Color3(0.05, 0.15, 0.1) },
     ];
 
     let seed = 100;
@@ -311,8 +311,8 @@ export class CityGenerator {
     rooftop.material = rooftopMat;
 
     const edgeMat = new BABYLON.StandardMaterial("roofEdgeMat", this.scene);
-    edgeMat.emissiveColor = new BABYLON.Color3(0, 0.5, 0.7);
-    edgeMat.diffuseColor = new BABYLON.Color3(0, 0.2, 0.3);
+    edgeMat.emissiveColor = new BABYLON.Color3(0, 0, 0);
+    edgeMat.diffuseColor = new BABYLON.Color3(0.1, 0.12, 0.15);
 
     const edgeN = BABYLON.MeshBuilder.CreateBox(`roofEdge`, { height: 0.3, width: platW, depth: 0.3 }, this.scene);
     edgeN.position = new BABYLON.Vector3(x, height + 1.15, z + platD / 2);
@@ -476,11 +476,11 @@ export class CityGenerator {
 
   private createNeonLights(): void {
     const neonColors = [
-      new BABYLON.Color3(0, 1, 1),
-      new BABYLON.Color3(1, 0, 1),
-      new BABYLON.Color3(1, 0.5, 0),
-      new BABYLON.Color3(0, 1, 0.5),
-      new BABYLON.Color3(1, 0, 0.5),
+      new BABYLON.Color3(0.05, 0.4, 0.5),
+      new BABYLON.Color3(0.4, 0.05, 0.4),
+      new BABYLON.Color3(0.4, 0.3, 0.1),
+      new BABYLON.Color3(0.05, 0.4, 0.3),
+      new BABYLON.Color3(0.4, 0.05, 0.3),
     ];
 
     let seed = 400;
