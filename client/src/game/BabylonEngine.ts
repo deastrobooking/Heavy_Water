@@ -98,11 +98,7 @@ export class BabylonEngine {
       [this.camera]
     );
     
-    defaultPipeline.bloomEnabled = true;
-    defaultPipeline.bloomThreshold = 0.5;
-    defaultPipeline.bloomWeight = 0.25;
-    defaultPipeline.bloomKernel = 32;
-    defaultPipeline.bloomScale = 0.3;
+    defaultPipeline.bloomEnabled = false;
 
     defaultPipeline.chromaticAberrationEnabled = true;
     defaultPipeline.chromaticAberration.aberrationAmount = 8;
