@@ -83,6 +83,7 @@ export class MapSystem {
         ["X", "Toggle Flight"],
         ["Ctrl", "Descend (in flight)"],
         ["Q", "Dodge / Dash"],
+        ["C", "Toggle 1st / 3rd person"],
       ]],
       ["COMBAT", [
         ["LMB", "Fire weapon"],

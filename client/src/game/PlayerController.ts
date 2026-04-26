@@ -76,6 +76,20 @@ export class PlayerController implements IDamageable {
   private jetpackFuelRegen: number = 30;
 
   private invulnerabilityTimer: number = 0;
+  private cameraMode: "first" | "third" = "first";
+
+  setCameraMode(mode: "first" | "third"): void {
+    this.cameraMode = mode;
+  }
+
+  getCameraMode(): "first" | "third" {
+    return this.cameraMode;
+  }
+
+  toggleCameraMode(): "first" | "third" {
+    this.cameraMode = this.cameraMode === "first" ? "third" : "first";
+    return this.cameraMode;
+  }
 
   private onMeleeAttack: (() => void) | null = null;
   private onHeavyMeleeAttack: (() => void) | null = null;
@@ -276,6 +290,10 @@ export class PlayerController implements IDamageable {
 
       if (e.code === "KeyX" && this.hasFlightArmor) {
         this.toggleFlightMode();
+      }
+
+      if (e.code === "KeyC") {
+        this.toggleCameraMode();
       }
     };
 
@@ -658,8 +676,6 @@ export class PlayerController implements IDamageable {
 
   private updateCamera(dt: number = 1 / 60): void {
     const headHeight = 1.7;
-    const cameraDistance = 6.5;
-    const cameraHeight = 2.2;
 
     const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
     const flatForward = new BABYLON.Vector3(forward.x, 0, forward.z);
@@ -669,18 +685,31 @@ export class PlayerController implements IDamageable {
       flatForward.normalize();
     }
 
-    const target = new BABYLON.Vector3(
-      this.meshRoot.position.x,
-      this.meshRoot.position.y + headHeight,
-      this.meshRoot.position.z,
-    );
+    if (this.cameraMode === "third") {
+      const cameraDistance = 6.5;
+      const cameraHeight = 2.2;
 
-    const desired = target
-      .add(flatForward.scale(-cameraDistance))
-      .add(new BABYLON.Vector3(0, cameraHeight, 0));
+      const target = new BABYLON.Vector3(
+        this.meshRoot.position.x,
+        this.meshRoot.position.y + headHeight,
+        this.meshRoot.position.z,
+      );
 
-    desired.y = Math.max(desired.y, 0.6);
-    this.camera.position.copyFrom(desired);
+      const desired = target
+        .add(flatForward.scale(-cameraDistance))
+        .add(new BABYLON.Vector3(0, cameraHeight, 0));
+
+      desired.y = Math.max(desired.y, 0.6);
+      this.camera.position.copyFrom(desired);
+    } else {
+      const eyeForwardOffset = 0.25;
+      const desired = new BABYLON.Vector3(
+        this.meshRoot.position.x + flatForward.x * eyeForwardOffset,
+        this.meshRoot.position.y + headHeight,
+        this.meshRoot.position.z + flatForward.z * eyeForwardOffset,
+      );
+      this.camera.position.copyFrom(desired);
+    }
 
     if (this.meshRoot instanceof BABYLON.Mesh || this.meshRoot instanceof BABYLON.TransformNode) {
       const targetYaw = Math.atan2(flatForward.x, flatForward.z);
