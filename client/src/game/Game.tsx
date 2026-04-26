@@ -995,6 +995,12 @@ export const Game: React.FC = () => {
           const ok = bioRef.current.attemptCaptureNearest();
           if (!ok) showMessage("NO CREATURE IN RANGE", 1200);
         }
+      } else if (e.code === "BracketLeft") {
+        MusicSystem.prev();
+      } else if (e.code === "BracketRight") {
+        MusicSystem.next();
+      } else if (e.code === "Backslash") {
+        MusicSystem.togglePlay();
       } else if (e.code === "KeyE") {
         if (!playerRef.current) return;
         const pos = playerRef.current.getPosition();

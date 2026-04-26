@@ -128,6 +128,9 @@ export const MusicPlayerUI: React.FC<MusicPlayerUIProps> = ({ variant }) => {
               </button>
             ))}
           </div>
+          <div className="mt-2 text-[10px] text-cyan-400/70 leading-tight">
+            Shortcuts: <span className="text-cyan-200 font-bold">[</span> prev · <span className="text-cyan-200 font-bold">]</span> next · <span className="text-cyan-200 font-bold">\</span> play/pause
+          </div>
           {availableCount === 0 && (
             <div className="mt-2 text-[10px] text-amber-300/80 leading-tight">
               No tracks found. Drop MP3s named <span className="text-amber-200 font-bold">track_01.mp3 … track_12.mp3</span> into <span className="text-amber-200 font-bold">client/public/music/</span> (and <span className="text-amber-200 font-bold">menu.mp3</span> for the title screen).
