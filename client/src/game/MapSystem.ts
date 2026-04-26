@@ -107,6 +107,16 @@ export class MapSystem {
         ["Wheel", "Cycle weapon/block"],
         ["M", "Toggle this panel"],
       ]],
+      ["GAMEPAD (XInput)", [
+        ["L Stick", "Move"],
+        ["R Stick", "Look"],
+        ["RT / LT", "Fire / Mine"],
+        ["A / B / X / Y", "Jump / Parry / Light / Heavy"],
+        ["LB / RB", "Dodge / Reload"],
+        ["LS / RS click", "Sprint / Cam toggle"],
+        ["DPad U/D/L/R", "Flight / Sabre / Use / Plan"],
+        ["Start / Back", "Build / Map"],
+      ]],
     ];
 
     for (const [heading, rows] of sections) {

@@ -7,6 +7,7 @@ import { PlayerController, PlayerStats } from "./PlayerController";
 import { WeaponsSystem, Weapon } from "./WeaponsSystem";
 import { EnemySystem } from "./EnemySystem";
 import { EnemyHealthBarSystem } from "./EnemyHealthBarSystem";
+import { GamepadInput } from "./GamepadInput";
 import { ChestSystem, Loot } from "./ChestSystem";
 import { CombatSystem } from "./CombatSystem";
 import { SpecialWeaponsSystem } from "./SpecialWeaponsSystem";
@@ -42,6 +43,7 @@ export const Game: React.FC = () => {
   const weaponsRef = useRef<WeaponsSystem | null>(null);
   const enemySystemRef = useRef<EnemySystem | null>(null);
   const enemyHealthBarsRef = useRef<EnemyHealthBarSystem | null>(null);
+  const gamepadRef = useRef<GamepadInput | null>(null);
   const chestSystemRef = useRef<ChestSystem | null>(null);
   const combatSystemRef = useRef<CombatSystem | null>(null);
   const specialWeaponsRef = useRef<SpecialWeaponsSystem | null>(null);
@@ -419,6 +421,12 @@ export const Game: React.FC = () => {
         enemyHealthBars.setEnemyProvider(() => enemySystem.getActiveEnemies());
         enemyHealthBarsRef.current = enemyHealthBars;
 
+        const gamepad = new GamepadInput(engine.getCamera());
+        gamepad.onConnectionChange((connected, padId) => {
+          showMessage(connected ? `CONTROLLER CONNECTED: ${padId}` : "CONTROLLER DISCONNECTED", 2500);
+        });
+        gamepadRef.current = gamepad;
+
         const chestSystem = new ChestSystem(scene);
         chestSystemRef.current = chestSystem;
         chestSystem.setOnLootCollected(handleLootCollected);
@@ -575,6 +583,8 @@ export const Game: React.FC = () => {
         weaponsRef.current = null;
         if (enemyHealthBarsRef.current) { try { enemyHealthBarsRef.current.dispose(); } catch {} }
         enemyHealthBarsRef.current = null;
+        if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} }
+        gamepadRef.current = null;
         enemySystemRef.current = null;
         chestSystemRef.current = null;
         combatSystemRef.current = null;
@@ -719,6 +729,7 @@ export const Game: React.FC = () => {
       if (effectsRef.current) effectsRef.current.dispose();
       if (skyRef.current) skyRef.current.dispose();
       if (enemyHealthBarsRef.current) enemyHealthBarsRef.current.dispose();
+      if (gamepadRef.current) gamepadRef.current.dispose();
       if (multiplayerRef.current) multiplayerRef.current.dispose();
       if (engineRef.current) engineRef.current.dispose();
       EventBus.getInstance().clear();
