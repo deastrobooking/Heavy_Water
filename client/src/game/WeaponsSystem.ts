@@ -465,6 +465,34 @@ export class WeaponsSystem {
     return Array.from(this.weapons.keys()).map(t => this.getUpgradeInfo(t)!).filter(x => !!x);
   }
 
+  /** Snapshot weapon levels for persistence */
+  getWeaponLevels(): Record<string, number> {
+    const out: Record<string, number> = {};
+    this.weapons.forEach((w, type) => { out[type] = w.level; });
+    return out;
+  }
+
+  /** Restore weapon levels from a saved snapshot (recomputes derived stats) */
+  setWeaponLevels(levels: Record<string, number>): void {
+    for (const [typeKey, lvl] of Object.entries(levels || {})) {
+      const w = this.weapons.get(typeKey as WeaponType);
+      if (!w) continue;
+      const clamped = Math.max(1, Math.min(MAX_WEAPON_LEVEL, lvl));
+      w.level = clamped;
+      const stats = levelStats(
+        { damage: w.baseDamage, fireRate: w.baseFireRate, spread: w.baseSpread, explosionRadius: w.baseExplosionRadius },
+        w.level,
+      );
+      w.damage = stats.damage;
+      w.fireRate = stats.fireRate;
+      w.spread = stats.spread;
+      w.explosionRadiusBonus = stats.explosionBonus;
+      w.knockbackBonus = stats.knockback;
+    }
+    const cur = this.weapons.get(this.currentWeapon);
+    if (cur) this.onWeaponChange?.(cur);
+  }
+
   upgradeWeapon(type: WeaponType): boolean {
     const w = this.weapons.get(type);
     if (!w) return false;

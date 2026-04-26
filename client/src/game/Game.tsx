@@ -15,7 +15,7 @@ import { SpecialWeaponsSystem } from "./SpecialWeaponsSystem";
 import { BeamSabreSystem } from "./BeamSabreSystem";
 import { ArmorSystem } from "./ArmorSystem";
 import { CraftingSystem } from "./CraftingSystem";
-import { InventorySystem } from "./InventorySystem";
+import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
 import { CompanionSystem } from "./CompanionSystem";
 import { ArmorCapsuleSystem, ArmorUpgrade } from "./ArmorCapsuleSystem";
 import { ShopSystem, ShopDefinition } from "./ShopSystem";
@@ -36,6 +36,9 @@ import { LevelSerializer } from "./LevelSerializer";
 import { MultiplayerSystem } from "./MultiplayerSystem";
 import { EffectsSystem } from "./EffectsSystem";
 import { SkySystem } from "./SkySystem";
+import { MiningSystem } from "./MiningSystem";
+import { EnemyBaseSystem } from "./EnemyBaseSystem";
+import { loadProgress, saveProgress, ProgressSnapshot } from "./ProgressSync";
 import { EventBus, GameEvents } from "./EventBus";
 import { DamageType } from "./DamageSystem";
 import { GameUI } from "./GameUI";
@@ -78,6 +81,11 @@ export const Game: React.FC = () => {
   const multiplayerRef = useRef<MultiplayerSystem | null>(null);
   const effectsRef = useRef<EffectsSystem | null>(null);
   const skyRef = useRef<SkySystem | null>(null);
+  const miningRef = useRef<MiningSystem | null>(null);
+  const enemyBaseRef = useRef<EnemyBaseSystem | null>(null);
+  const respawnTimeoutRef = useRef<number | null>(null);
+  const autosaveTimerRef = useRef<number | null>(null);
+  const lastSaveAtRef = useRef<number>(0);
 
   const [gamePhase, setGamePhase] = useState<GamePhase>("auth");
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -486,11 +494,24 @@ export const Game: React.FC = () => {
         aerialEnemySystem.spawnFighter(initialPos);
         aerialEnemySystem.spawnBattleship(initialPos);
 
+        const miningSystem = new MiningSystem(scene);
+        miningRef.current = miningSystem;
+        miningSystem.seedWorld(28);
+
+        const enemyBaseSystem = new EnemyBaseSystem(scene);
+        enemyBaseRef.current = enemyBaseSystem;
+        enemyBaseSystem.seedWorld([
+          new BABYLON.Vector3(250, 0, 250),
+          new BABYLON.Vector3(-250, 0, 250),
+          new BABYLON.Vector3(0, 0, -280),
+        ]);
+
         const enemyHealthBars = new EnemyHealthBarSystem(scene, engine.getCamera());
         enemyHealthBars.setEnemyProvider(() => {
           const ground: EnemyLike[] = enemySystem.getActiveEnemies();
           const aerial: EnemyLike[] = aerialEnemySystem.getActiveUnits();
-          return ground.concat(aerial);
+          const baseUnits: EnemyLike[] = enemyBaseSystem.getEnemyLikes();
+          return ground.concat(aerial).concat(baseUnits);
         });
         enemyHealthBarsRef.current = enemyHealthBars;
 
@@ -515,11 +536,93 @@ export const Game: React.FC = () => {
         vehicleSystem.spawnPreset("RaiderATV", new BABYLON.Vector3(-6, 0.6, -10));
         vehicleSystem.spawnPreset("CometFighter", new BABYLON.Vector3(8, 1.2, -10));
 
+        let totalKillsLocal = 0;
+        let highestWaveLocal = 1;
+
+        const buildSnapshot = (): ProgressSnapshot => {
+          const inventoryCounts: Record<string, number> = {};
+          const slots = inventory.getSlots();
+          for (const slot of slots) {
+            if (slot) {
+              inventoryCounts[slot.item.id] = (inventoryCounts[slot.item.id] || 0) + slot.quantity;
+            }
+          }
+          const captures = bioSystem.getCaptured ? bioSystem.getCaptured() : [];
+          return {
+            stats: player.getStats(),
+            weaponLevels: weapons.getWeaponLevels(),
+            inventoryCounts,
+            hasFlightArmor: player.getHasFlightArmor(),
+            totalKills: totalKillsLocal,
+            highestWave: Math.max(highestWaveLocal, enemySystem.getWaveNumber()),
+            capturedCreatures: captures as any[],
+            savedAt: Date.now(),
+          };
+        };
+
+        const doSaveProgress = async (): Promise<void> => {
+          if (!currentUser) return;
+          const now = performance.now();
+          if (now - lastSaveAtRef.current < 2000) return; // throttle
+          lastSaveAtRef.current = now;
+          await saveProgress(buildSnapshot());
+        };
+
+        // Initial load + apply
+        if (currentUser) {
+          void loadProgress().then((snap) => {
+            if (!snap) return;
+            try {
+              player.applyLoadedSnapshot({ stats: snap.stats as any, hasFlightArmor: snap.hasFlightArmor });
+              if (snap.weaponLevels) weapons.setWeaponLevels(snap.weaponLevels);
+              if (snap.inventoryCounts) {
+                inventory.clear();
+                for (const [itemId, qty] of Object.entries(snap.inventoryCounts)) {
+                  const def = ITEM_DEFINITIONS[itemId];
+                  if (def && qty > 0) inventory.addItem(def, qty);
+                }
+              }
+              totalKillsLocal = snap.totalKills || 0;
+              highestWaveLocal = snap.highestWave || 1;
+              showMessage(`PROGRESS LOADED — LVL ${snap.stats.level} | ${snap.stats.credits}cr`, 2500);
+            } catch (err) {
+              console.warn("[ProgressSync] apply failed:", err);
+            }
+          });
+        }
+
+        // Autosave every 15s
+        if (currentUser) {
+          if (autosaveTimerRef.current !== null) window.clearInterval(autosaveTimerRef.current);
+          autosaveTimerRef.current = window.setInterval(() => { void doSaveProgress(); }, 15000);
+        }
+
+        bus.on(GameEvents.PLAYER_LEVEL_UP, () => { void doSaveProgress(); });
+        bus.on(GameEvents.WEAPON_UPGRADED, () => { void doSaveProgress(); });
+        bus.on(GameEvents.CREATURE_CAPTURED, () => { void doSaveProgress(); });
+
         bus.on(GameEvents.PLAYER_DIED, () => {
           if (vehicleSystem.getActive()) {
             vehicleSystem.exit();
             player.setMounted(null);
           }
+          // Trigger save before respawn so progression survives crash/disconnect
+          if (currentUser) void doSaveProgress();
+          // Friendly respawn flow — preserve all stats/inventory/weapons
+          showMessage("YOU FELL — RESPAWNING IN 3...", 1100);
+          if (respawnTimeoutRef.current !== null) {
+            window.clearTimeout(respawnTimeoutRef.current);
+          }
+          window.setTimeout(() => showMessage("RESPAWNING IN 2...", 1100), 1000);
+          window.setTimeout(() => showMessage("RESPAWNING IN 1...", 1100), 2000);
+          respawnTimeoutRef.current = window.setTimeout(() => {
+            respawnTimeoutRef.current = null;
+            const cur = playerRef.current;
+            if (!cur) return;
+            const spawn = new BABYLON.Vector3(0, 2, 0);
+            cur.respawn(spawn);
+            showMessage("RESPAWNED — YOUR PROGRESS IS SAFE", 2500);
+          }, 3000);
         });
 
         for (let i = 0; i < 5; i++) {
@@ -534,6 +637,7 @@ export const Game: React.FC = () => {
         bus.on(GameEvents.ENEMY_KILLED, (data: any) => {
           player.addCredits(data.credits);
           player.addExperience(data.experience);
+          totalKillsLocal += 1;
           showMessage(`+${data.credits} CREDITS | +${data.experience} XP`, 1000);
         });
 
@@ -577,21 +681,27 @@ export const Game: React.FC = () => {
 
           const groundEnemyMeshes = enemySystem.getEnemyMeshes();
           const aerialMeshes = aerialEnemySystem.getMeshes();
-          const enemyMeshes = groundEnemyMeshes.concat(aerialMeshes);
+          const miningMeshes = miningSystem.getActiveMeshes();
+          const baseMeshes = enemyBaseSystem.getActiveMeshes();
+          const enemyMeshes = groundEnemyMeshes.concat(aerialMeshes).concat(miningMeshes).concat(baseMeshes);
           const hits = weapons.update(enemyMeshes);
+
+          const routeHit = (mesh: BABYLON.AbstractMesh, dmg: number) => {
+            // Try mining first (cheap), then enemy bases, then aerial, then ground
+            if (miningSystem.damageNode(mesh, dmg)) return;
+            if (enemyBaseSystem.damageStructure(mesh, dmg)) return;
+            if (aerialEnemySystem.damageEnemy(mesh as BABYLON.Mesh, dmg)) return;
+            enemySystem.damageEnemy(mesh as BABYLON.Mesh, dmg);
+          };
 
           for (const hit of hits) {
             const modifiedDamage = armorSystem.getModifiedOutgoingDamage(hit.damage);
-            if (!aerialEnemySystem.damageEnemy(hit.hitEnemy, modifiedDamage)) {
-              enemySystem.damageEnemy(hit.hitEnemy, modifiedDamage);
-            }
+            routeHit(hit.hitEnemy, modifiedDamage);
           }
 
           const specialHits = specialWeapons.update(dt, enemyMeshes, playerPos);
           for (const hit of specialHits) {
-            if (!aerialEnemySystem.damageEnemy(hit.hitEnemy, hit.damage)) {
-              enemySystem.damageEnemy(hit.hitEnemy, hit.damage);
-            }
+            routeHit(hit.hitEnemy, hit.damage);
           }
 
           beamSabre.update(dt, enemyMeshes);
@@ -602,9 +712,7 @@ export const Game: React.FC = () => {
           }
           for (const hit of companionResult.attackHits) {
             const m = hit.mesh as BABYLON.Mesh;
-            if (!aerialEnemySystem.damageEnemy(m, hit.damage)) {
-              enemySystem.damageEnemy(m, hit.damage);
-            }
+            routeHit(m, hit.damage);
           }
 
           const enemyResult = enemySystem.update(playerPos, deltaTime);
@@ -619,6 +727,14 @@ export const Game: React.FC = () => {
             const reducedAerial = armorSystem.calculateDamageReduction(aerialResult.damage, DamageType.Plasma);
             player.takeDamageSimple(reducedAerial);
             showMessage(`-${Math.floor(reducedAerial)} AIR STRIKE!`, 600);
+          }
+
+          enemyBaseSystem.setPlayerPosition(playerPos);
+          const baseResult = enemyBaseSystem.update(dt);
+          if (baseResult.damage > 0) {
+            const reducedBase = armorSystem.calculateDamageReduction(baseResult.damage, DamageType.Plasma);
+            player.takeDamageSimple(reducedBase);
+            showMessage(`-${Math.floor(reducedBase)} TURRET FIRE!`, 600);
           }
 
           chestSystem.update(playerPos);
@@ -741,6 +857,12 @@ export const Game: React.FC = () => {
         pickupRef.current = null;
         if (bioRef.current) { try { bioRef.current.dispose(); } catch {} }
         bioRef.current = null;
+        if (miningRef.current) { try { miningRef.current.dispose(); } catch {} }
+        miningRef.current = null;
+        if (enemyBaseRef.current) { try { enemyBaseRef.current.dispose(); } catch {} }
+        enemyBaseRef.current = null;
+        if (autosaveTimerRef.current !== null) { window.clearInterval(autosaveTimerRef.current); autosaveTimerRef.current = null; }
+        if (respawnTimeoutRef.current !== null) { window.clearTimeout(respawnTimeoutRef.current); respawnTimeoutRef.current = null; }
         baseRef.current = null;
         multiplayerRef.current = null;
         initializingRef.current = false;
@@ -780,6 +902,10 @@ export const Game: React.FC = () => {
     if (prefabRef.current) prefabRef.current.dispose();
     if (pickupRef.current) pickupRef.current.dispose();
     if (bioRef.current) bioRef.current.dispose();
+    if (miningRef.current) { miningRef.current.dispose(); miningRef.current = null; }
+    if (enemyBaseRef.current) { enemyBaseRef.current.dispose(); enemyBaseRef.current = null; }
+    if (autosaveTimerRef.current !== null) { window.clearInterval(autosaveTimerRef.current); autosaveTimerRef.current = null; }
+    if (respawnTimeoutRef.current !== null) { window.clearTimeout(respawnTimeoutRef.current); respawnTimeoutRef.current = null; }
     if (multiplayerRef.current) multiplayerRef.current.dispose();
     if (engineRef.current) {
       engineRef.current.dispose();
@@ -1132,6 +1258,10 @@ export const Game: React.FC = () => {
       if (bioRef.current) bioRef.current.dispose();
       if (vehicleRef.current) vehicleRef.current.dispose();
       if (baseRef.current) baseRef.current.dispose();
+      if (miningRef.current) miningRef.current.dispose();
+      if (enemyBaseRef.current) enemyBaseRef.current.dispose();
+      if (autosaveTimerRef.current !== null) window.clearInterval(autosaveTimerRef.current);
+      if (respawnTimeoutRef.current !== null) window.clearTimeout(respawnTimeoutRef.current);
       if (effectsRef.current) effectsRef.current.dispose();
       if (skyRef.current) skyRef.current.dispose();
       if (enemyHealthBarsRef.current) enemyHealthBarsRef.current.dispose();

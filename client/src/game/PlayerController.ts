@@ -836,6 +836,46 @@ export class PlayerController implements IDamageable {
     this.bus.emit(GameEvents.PLAYER_DIED);
   }
 
+  respawn(spawnPosition: BABYLON.Vector3): void {
+    this.isAlive = true;
+    this.isInvulnerable = false;
+    this.stats.health = this.stats.maxHealth;
+    this.health = this.stats.health;
+    this.stats.armor = this.stats.maxArmor;
+    this.stats.stamina = this.stats.maxStamina;
+    this.armorEnergy = this.maxArmorEnergy;
+    this.jetpackFuel = this.maxJetpackFuel;
+    this.isFlying = false;
+    this.isJetpacking = false;
+    this.isDodging = false;
+    this.isParrying = false;
+    this.velocity.setAll(0);
+    this.meshRoot.position.copyFrom(spawnPosition);
+    this.stateMachine.forceState("idle");
+    this.bus.emit(GameEvents.PLAYER_HEALED, { amount: this.stats.maxHealth, health: this.stats.health });
+  }
+
+  applyLoadedSnapshot(snap: { stats?: Partial<PlayerStats>; hasFlightArmor?: boolean }): void {
+    if (snap.stats) {
+      if (typeof snap.stats.maxHealth === "number") {
+        this.stats.maxHealth = snap.stats.maxHealth;
+        this.maxHealth = snap.stats.maxHealth;
+      }
+      if (typeof snap.stats.maxStamina === "number") this.stats.maxStamina = snap.stats.maxStamina;
+      if (typeof snap.stats.credits === "number") this.stats.credits = snap.stats.credits;
+      if (typeof snap.stats.experience === "number") this.stats.experience = snap.stats.experience;
+      if (typeof snap.stats.level === "number") this.stats.level = snap.stats.level;
+      // Always heal to full on apply (player just logged in)
+      this.stats.health = this.stats.maxHealth;
+      this.health = this.stats.health;
+      this.stats.stamina = this.stats.maxStamina;
+      this.stats.armor = this.stats.maxArmor;
+    }
+    if (snap.hasFlightArmor && !this.hasFlightArmor) {
+      this.hasFlightArmor = true;
+    }
+  }
+
   heal(amount: number): void {
     this.stats.health = Math.min(this.stats.maxHealth, this.stats.health + amount);
     this.health = this.stats.health;

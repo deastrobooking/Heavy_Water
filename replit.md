@@ -1,7 +1,7 @@
 # Heavy Water
 
 ## Overview
-Heavy Water is a 3D futuristic sci-fi action game built with Babylon.js. Set in a far-future Detroit, it features anime-style cell-shaded graphics, immersive ground & aerial combat, DBZ-style flight, open-world biomes, and an explorable cityscape. The game's core objective is to defend the city from an invasion of insane hybrid organoids (AI fused with human and tardigrade DNA) — both ground swarms and now hostile sky forces (battleships and small fighters). The project aims to deliver a rich, engaging experience with deep exploration, dynamic combat, and robust progression systems, including character customization, crafting, and base building.
+Heavy Water is a 3D futuristic sci-fi action game developed using Babylon.js. It is set in a far-future Detroit and features anime-style cell-shaded graphics. The game offers immersive ground and aerial combat, DBZ-style flight mechanics, open-world biomes, and an explorable cityscape. The primary goal is to defend the city from an invasion of insane hybrid organoids, encompassing both ground swarms and hostile aerial forces like battleships and fighters. The project aims to deliver a rich, engaging experience with deep exploration, dynamic combat, and robust progression systems, including character customization, crafting, and base building.
 
 ## User Preferences
 - Design choice: Anime retro 80's sci-fi cell-shaded graphics style
@@ -12,67 +12,55 @@ Heavy Water is a 3D futuristic sci-fi action game built with Babylon.js. Set in 
 ## System Architecture
 
 ### Core Systems
-The game uses an EventBus for decoupled communication and a generic StateMachine for managing entity behaviors. A unified DamageSystem handles all combat calculations. The game utilizes Babylon.js v8.x for WebGL rendering, with a cell-shaded anime aesthetic, ink outlines, bloom, chromatic aberration, and FXAA. The frontend is built with React, TypeScript, and Vite.
+The game architecture relies on an EventBus for decoupled communication and a generic StateMachine for managing entity behaviors. A unified DamageSystem handles all combat calculations. Babylon.js v8.x is used for WebGL rendering, implementing a cell-shaded anime aesthetic with ink outlines, bloom, chromatic aberration, and FXAA. The frontend is built with React, TypeScript, and Vite.
 
-### Player Systems
-The PlayerController manages a humanoid character with extensive state machines for movement, combat, and a triple-jump flight system with free flight mode. The camera supports both first-person and third-person modes. The HumanoidCharacter system allows for procedural generation, modular body parts, clothing, and customizable colors. The AnimationSystem provides procedural, multi-part character animations with smooth blending. A CharacterEditor allows players to customize their character.
+### Player and Character Systems
+The PlayerController manages humanoid characters with extensive state machines for movement, combat, and a triple-jump flight system with a free-flight mode. The camera supports both first-person and third-person views. The HumanoidCharacter system enables procedural generation, modular body parts, clothing, and customizable colors. An AnimationSystem provides procedural, multi-part character animations with smooth blending. A CharacterEditor allows player customization.
 
-### Robot Armor System
-The ArmorMaterialFactory produces reusable material types. The RobotArmorParts system defines a data-driven registry of parametric armor parts, and the RobotArmorSystem equips these to humanoid rigs, handling mirroring and disposal.
+### Robot and Armor Systems
+The ArmorMaterialFactory produces reusable material types. The RobotArmorParts system provides a data-driven registry of parametric armor parts, which the RobotArmorSystem equips to humanoid rigs, handling mirroring and disposal.
 
-### Combat, Inventory & Crafting
-Combat features light and heavy melee combo chains with input buffering. An InventorySystem provides a 24-slot grid. The CraftingSystem supports recipe-based crafting for weapons, armor, and base components. All ranged weapons have unlimited ammo.
+### Combat, Inventory, and Crafting
+Combat features light and heavy melee combo chains with input buffering. An InventorySystem offers a 24-slot grid. The CraftingSystem supports recipe-based crafting for weapons, armor, and base components. All ranged weapons have unlimited ammo.
 
-### Music Player (Menu + In-Game)
-**MusicSystem.ts** is a singleton that manages an HTMLAudio element for menu (loops `/music/menu.mp3`) and a separate one for gameplay (cycles through `/music/track_01.mp3` … `track_12.mp3`). On `init()` it HEAD-probes all 12 expected URLs in parallel and marks each track as `available: true/false` so missing files are silently skipped. Public API: `init / playMenu / startGameMusic / play / pause / togglePlay / next / prev / selectTrack(i) / setVolume / subscribe(state) / dispose`. Track titles can be customized by editing the `TRACK_TITLES` array in `MusicSystem.ts`. Files live in `client/public/music/` (with a README.txt listing required filenames). **MusicPlayerUI.tsx** has two variants — `variant="menu"` is a small bottom-right pill on the title screen with PLAY/PAUSE + volume; `variant="game"` is a collapsible top-right drawer showing the now-playing track, prev/play/next/volume controls, and a 12-slot playlist where unavailable tracks are dimmed and labeled "missing." Keyboard shortcuts while in-game: `[` prev track, `]` next track, `\` play/pause. Browsers block autoplay until a user gesture, so MainMenu also retries `playMenu` on the first pointerdown/keydown. `handleStart` in Game.tsx kicks off `MusicSystem.startGameMusic()` which auto-pauses the menu track and starts the first available game track; the in-game player auto-advances on track end.
+### Music and Sound
+A singleton MusicSystem manages menu and in-game music, supporting dynamic track loading and playback controls. It includes an in-game UI (MusicPlayerUI) with track selection, volume control, and keyboard shortcuts.
 
-### Respawn Vehicles Button
-Game.tsx renders a fixed bottom-right "⟳ RESPAWN VEHICLES" button while playing. It calls `VehicleSystem.respawnVehicle("atv", "RaiderATV", playerPos+(-6,0.6,-4))` and `respawnVehicle("spaceFighter", "CometFighter", playerPos+(6,1.2,-4))`. `VehicleSystem.respawnVehicle(kind, preset, pos)` disposes any existing vehicle of that kind then spawns a fresh one — but it skips disposal of the actively-mounted vehicle so the player can't be tossed out mid-drive (a HUD message indicates "DISMOUNT FIRST" in that case). This guarantees the player always has a way to recover a lost or destroyed ATV / fighter without needing to reload the level.
+### Vehicles
+A parametric vehicle pipeline, similar to the robot pipeline, allows for defining and generating ATVs and space fighters with customizable styles and parts. VehicleFactory builds primitive-only meshes, and VehicleSystem manages vehicle instances and physics for both ground and aerial vehicles, including a respawn mechanism.
 
-### Vehicles (ATV + Space Fighter)
-A parametric vehicle pipeline, similar to the robot pipeline, allows for defining and generating ATVs and space fighters with customizable styles and parts. VehicleFactory builds primitive-only meshes, and VehicleSystem manages vehicle instances and physics for both ground and aerial vehicles.
+### Loot and Pickups
+The PickupSystem spawns physical glowing world meshes from defeated enemies, which magnetize towards the player and trigger collection events. Drop tables are enemy-specific.
 
-### Loot Drops & Pickups
-The PickupSystem spawns physical glowing world meshes when enemies die, which magnetize towards the player and emit `PICKUP_COLLECTED` events upon collection. Drop tables vary by enemy type.
+### Upgrades and Progression
+The WeaponsSystem implements per-weapon level progression, boosting damage, fire rate, and impact. The CompanionSystem manages companion upgrades for health, damage, and speed. An in-game UpgradeMenu provides the interface for these upgrades.
 
-### Weapon & Companion Upgrades
-The WeaponsSystem implements per-weapon level progression, boosting damage, fire rate, and impact. The CompanionSystem manages companion upgrades for health, damage, and speed. An in-game UpgradeMenu provides an interface for these upgrades.
+### Base Structures
+The BaseSystem tracks player-placed, multi-level base structures like labs and gardens. Lab levels control companion roster caps and unlock robot blueprints, while Garden levels control capture roster caps and capture bonus chances. These structures have interactive UIs, including a LabUI for building robots and a GardenCaptureUI for managing captured bio-creatures.
 
-### Base Structures (Lab + Garden)
-The BaseSystem tracks player-placed base structures (lab, garden) with multiple levels. Lab level controls companion roster cap and unlocks robot blueprints; Garden level controls capture roster cap and capture bonus chance. These structures have interactive UIs.
+### Building and Prefab Systems
+The BuildingSystem facilitates Minecraft-style mining and building with various block types and grid-snapped placement. The PrefabSystem enables placing pre-designed structures, with both systems supporting serialization via the LevelSerializer.
 
-### Lab UI (Build Robots)
-The LabUI displays robot blueprints across different tiers. Players can build companions by spending resources.
-
-### Bio Creature Capture & Garden UI
-The BioCreatureSystem defines wandering bio-robotic species. Players can attempt to capture these creatures, which are then managed by the GardenCaptureUI and can be deployed as companions.
-
-### Building & Prefab Systems
-The BuildingSystem offers Minecraft-style mining and building with various block types and grid-snapped placement. The PrefabSystem allows placing pre-designed structures, both serialized by the LevelSerializer.
-
-### Commerce & Companion Systems
+### Commerce and Companions
 A ShopSystem manages 5 shop locations with dynamic pricing. The GardenSystem and CompanionSystem manage digital companions with leveling and bonding mechanics. A MapSystem provides a real-time minimap.
 
-### Enemy Systems & Robot Generation
-The EnemySystem features a wave spawner for distinct enemy types, including Commanders with advanced AI. The Robot Shape Engine is a data-driven system for generating all robots (enemies, allies, pets) with extensive parametric descriptors and reusable themes.
+### Enemy Systems
+The EnemySystem features a wave spawner for distinct enemy types, including Commanders with advanced AI. The Robot Shape Engine is a data-driven system for generating all robots (enemies, allies, pets) using parametric descriptors and reusable themes. This includes aerial enemies like fighters and battleships, with specialized behaviors, health bars, and loot drops. Hostile Enemy Bases are strategically seeded, featuring turrets and a destructible loot vault.
 
-### Aerial Enemies (Battleships + Fighters)
-**AerialEnemySystem.ts** spawns hostile air units that patrol above the player. Two kinds: `fighter` (small primitive-built delta wedge: body box + canopy sphere + 2 angled wing boxes + tail fin + engine glow spheres; HP 70, speed 14, orbits player at altitude 22-32m and fires periodic plasma tracers) and `battleship` (massive 22m-long hull box + bow + bridge tower + 4 turret domes/barrels + underside lights + 3 rear engine glows; HP 480, speed 2.6, drifts at altitude 48-60m and lobs heavier slower plasma down at the player). Each unit is wrapped in an invisible BABYLON capsule hitbox whose `metadata.hitRadius` is read by the patched `WeaponsSystem.update` proximity check (so big battleships are actually hittable from range). Hits use the same impact pipeline as ground enemies: red-flash whole mesh hierarchy 160ms, xz shake 180ms, throttled `effect:hitImpact` (80ms), and `ENEMY_DAMAGED` event. Aerial fire is hit-scan with a tracer cylinder that lives 120ms; ~70% accuracy. Death emits `ENEMY_KILLED` with type `aerial_fighter` (60 credits / 45 XP) or `aerial_battleship` (250 credits / 200 XP) so the existing handler grants credits/XP/toast and PickupSystem drops loot (fighters: 3 gear / 4 scrap / 1 energy core; battleships: 18 gear / 12 scrap / 4 energy core / 4 circuit board / 3 nano fiber). The wreck falls and despawns after 1.5s. **Health bars**: `AerialUnit` exposes the `EnemyLike` shape (`mesh` getter + `health/maxHealth/isAlive`) plus optional bar styling hints (`barWidth`, `barHeight`, `barColor`, `barAccent`, `barLabel`, `barMaxDistance`); `EnemyHealthBarSystem` honors them so fighters get a 70px orange "FIGHTER" bar visible to 160m and battleships get a wide 140px purple/magenta "BATTLESHIP" bar visible to 250m, both auto-positioned above the craft. `Game.tsx` instantiates the system, seeds 2 fighters + 1 battleship at start, merges aerial hitboxes into the array passed to `weapons.update`, routes hits to the correct system by trying aerial first, applies aerial damage to the player as `DamageType.Plasma` with an `-N AIR STRIKE!` toast, merges ground+aerial units into the health-bar provider, and disposes on cleanup.
+### Resource Nodes
+The MiningSystem scatters destructible glowing resource nodes across the open world, providing resources upon destruction and respawning after a delay.
 
-### Environment & World
-A CityGenerator creates a massive 1200x1200 open world with a central city and four distinct biomes.
+### Player Progress and Persistence
+ProgressSync.ts handles saving and loading player progress to a database, including stats, weapon levels, inventory, and captured creatures. Auto-save occurs periodically and on key game events, ensuring progression is preserved. A "friendly respawn" mechanism allows players to revive at a default location after death without losing progress, enhancing multiplayer-friendliness.
 
-### Sky & Day/Night System
-The SkySystem renders a custom-shader gradient skybox and drives a full day/night cycle, smoothly interpolating sky, sun direction/intensity/color, ambient color, fog color, and scene clear color. It also supports weather modes.
+### Environment and World
+A CityGenerator creates a massive 1200x1200 open world featuring a central city and four distinct biomes. The SkySystem renders a custom-shader gradient skybox and drives a full day/night cycle, interpolating environmental lighting and fog, and supports weather modes.
 
 ### Multiplayer
 A MultiplayerSystem provides client-side WebSocket integration for real-time multiplayer, supporting room management, position synchronization, chat, and enemy damage syncing for up to 4 players.
 
-### Controller Support (Gamepad)
-GamepadInput polls connected gamepads and synthesizes existing keyboard/mouse/pointer events, providing seamless controller integration without requiring game-specific branches.
-
-### Effects & UI
-An EffectsSystem drives transient visual effects including a `spawnHitImpact(position, color, scale)` (also via `effect:hitImpact` event) — a billboarded shock-ring + bright flash sphere + radial spark shards that fires every time an enemy takes damage. Enemies also flash their entire mesh hierarchy red for 160ms and shake (xz jitter for 180ms) when hit so impacts feel weighty. Player base health is 250 / armor 100 (formerly 100 / 50) and tough enemies (heavy/hybrid/commander) drop health kits at 85% chance with a 50% chance for a second kit; basic enemies drop at 50%. The top-left HUD has been redesigned to be much more prominent — wider 288px bars, larger glowing text with drop-shadow, big numeric readouts for HEALTH/ARMOR shown to the right of each label, and a glowing cyan border with backdrop blur. The UI includes an AuthUI, a GameUI with HUD, shop interfaces, upgrade interfaces, a multiplayer lobby, and a contextual build hotbar. A MainMenu provides game start and character customization options. EnemyHealthBarSystem renders HTML overlays for active enemies.
+### Input and UI
+GamepadInput provides seamless controller integration by synthesizing keyboard/mouse/pointer events. The EffectsSystem drives transient visual effects for combat feedback. The UI includes a redesigned HUD with prominent health/armor displays, an AuthUI, GameUI, shop interfaces, upgrade interfaces, a multiplayer lobby, a contextual build hotbar, and a MainMenu with character customization options. An EnemyHealthBarSystem renders HTML overlays for active enemies and objects like mining nodes and enemy base turrets/vaults. Player base health and armor have been significantly increased.
 
 ## External Dependencies
 - **PostgreSQL**: Primary database with Drizzle ORM.
