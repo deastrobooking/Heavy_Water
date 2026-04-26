@@ -1,4 +1,6 @@
-import React from "react";
+import React, { useEffect } from "react";
+import { MusicSystem } from "./MusicSystem";
+import { MusicPlayerUI } from "./MusicPlayerUI";
 
 interface MainMenuProps {
   onStart: () => void;
@@ -6,6 +8,21 @@ interface MainMenuProps {
 }
 
 export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize }) => {
+  useEffect(() => {
+    let cancelled = false;
+    void MusicSystem.init().then(() => {
+      if (!cancelled) void MusicSystem.playMenu();
+    });
+    const tryStart = () => { if (!cancelled) void MusicSystem.playMenu(); };
+    window.addEventListener("pointerdown", tryStart, { once: true });
+    window.addEventListener("keydown", tryStart, { once: true });
+    return () => {
+      cancelled = true;
+      window.removeEventListener("pointerdown", tryStart);
+      window.removeEventListener("keydown", tryStart);
+    };
+  }, []);
+
   return (
     <div className="fixed inset-0 bg-gradient-to-b from-gray-900 via-purple-900 to-black flex flex-col items-center justify-center">
       <div className="absolute inset-0 overflow-hidden">
@@ -92,6 +109,8 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize }) => {
 
       <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-cyan-900/30 to-transparent" />
       <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-purple-900/30 to-transparent" />
+
+      <MusicPlayerUI variant="menu" />
     </div>
   );
 };

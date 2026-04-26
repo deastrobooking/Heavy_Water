@@ -65,6 +65,24 @@ export class VehicleSystem {
     return this.spawn(desc, position);
   }
 
+  /**
+   * Removes any existing vehicle of `kind`, then spawns a fresh one of the
+   * given preset at `position`. Used by the in-game "Respawn Vehicle" button.
+   */
+  respawnVehicle(kind: VehicleKind, presetName: string, position: BABYLON.Vector3): VehicleInstance | null {
+    if (this.active && this.active.kind === kind) {
+      // Don't kill the vehicle the player is currently driving
+      return null;
+    }
+    for (let i = this.vehicles.length - 1; i >= 0; i--) {
+      const v = this.vehicles[i];
+      if (v.kind !== kind) continue;
+      try { v.meshes.root.dispose(); } catch {}
+      this.vehicles.splice(i, 1);
+    }
+    return this.spawnPreset(presetName, position);
+  }
+
   spawn(desc: VehicleDescriptor, position: BABYLON.Vector3): VehicleInstance {
     const meshes = this.factory.createVehicle(desc, position);
     const inst: VehicleInstance = {

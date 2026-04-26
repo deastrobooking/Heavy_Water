@@ -26,6 +26,8 @@ import { PickupSystem } from "./PickupSystem";
 import { BaseSystem, BaseStructure } from "./BaseSystem";
 import { BioCreatureSystem, CapturedCreature } from "./BioCreatureSystem";
 import { VehicleSystem } from "./VehicleSystem";
+import { MusicSystem } from "./MusicSystem";
+import { MusicPlayerUI } from "./MusicPlayerUI";
 import { WeaponUpgradeInfo } from "./WeaponsSystem";
 import { CompanionUpgradeInfo } from "./CompanionSystem";
 import { LabBlueprint } from "./LabUI";
@@ -718,8 +720,20 @@ export const Game: React.FC = () => {
   }, [handleLootCollected, showMessage, currentUser]);
 
   const handleStart = useCallback(() => {
+    void MusicSystem.init().then(() => MusicSystem.startGameMusic());
     initializeGame();
   }, [initializeGame]);
+
+  const handleRespawnVehicles = useCallback(() => {
+    if (!playerRef.current || !vehicleRef.current) return;
+    const pos = playerRef.current.getPosition();
+    const offsetA = new BABYLON.Vector3(pos.x - 6, 0.6, pos.z - 4);
+    const offsetB = new BABYLON.Vector3(pos.x + 6, 1.2, pos.z - 4);
+    const a = vehicleRef.current.respawnVehicle("atv", "RaiderATV", offsetA);
+    const b = vehicleRef.current.respawnVehicle("spaceFighter", "CometFighter", offsetB);
+    if (a || b) showMessage("VEHICLES RESPAWNED", 1500);
+    else showMessage("CANNOT RESPAWN — DISMOUNT FIRST", 1800);
+  }, [showMessage]);
 
   const handleRestart = useCallback(() => {
     if (combatSystemRef.current) combatSystemRef.current.dispose();
@@ -1086,6 +1100,7 @@ export const Game: React.FC = () => {
       if (gamepadRef.current) gamepadRef.current.dispose();
       if (multiplayerRef.current) multiplayerRef.current.dispose();
       if (engineRef.current) engineRef.current.dispose();
+      MusicSystem.pause();
       EventBus.getInstance().clear();
     };
   }, []);
@@ -1233,6 +1248,19 @@ export const Game: React.FC = () => {
           onToggleLobby={handleToggleLobby}
           onLogout={handleLogout}
         />
+      )}
+
+      {gamePhase === "playing" && (
+        <>
+          <MusicPlayerUI variant="game" />
+          <button
+            onClick={handleRespawnVehicles}
+            className="fixed bottom-4 right-4 z-40 px-4 py-2 bg-black/70 border border-amber-500/60 text-amber-200 text-xs font-bold rounded-lg hover:bg-amber-500/20 backdrop-blur-md shadow-lg shadow-amber-500/20"
+            title="Respawn ATV + Fighter near you"
+          >
+            ⟳ RESPAWN VEHICLES
+          </button>
+        </>
       )}
 
       {gamePhase === "gameover" && (
