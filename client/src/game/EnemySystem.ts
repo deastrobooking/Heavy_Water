@@ -711,16 +711,17 @@ export class EnemySystem {
       }
     }
 
-    const presetMap: Record<EnemyType, string> = {
-      drone: "JetWarden",
-      soldier: "ScoutPrime",
-      heavy: "TankTitan",
-      insectoid: "InsectoidStalker",
-      hybrid: "HybridOmega",
-      commander: "CommanderOmega",
+    const presetMap: Record<EnemyType, string[]> = {
+      drone: ["JetWarden"],
+      soldier: ["ScoutPrime"],
+      heavy: ["TankTitan", "OptimusForge"],
+      insectoid: ["InsectoidStalker"],
+      hybrid: ["HybridOmega", "HybridApex"],
+      commander: ["CommanderOmega"],
     };
 
-    const presetName = presetMap[type] || "ScoutPrime";
+    const variants = presetMap[type] || ["ScoutPrime"];
+    const presetName = variants[Math.floor(Math.random() * variants.length)];
     const preset = ROBOT_PRESETS[presetName];
 
     if (preset) {

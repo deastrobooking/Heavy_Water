@@ -1,5 +1,8 @@
 import * as BABYLON from "@babylonjs/core";
-import { RobotDescriptor, RobotStyle, validateStyle } from "./RobotDesigner";
+import {
+  RobotDescriptor, RobotStyle, validateStyle,
+  RobotThemeId, ROBOT_THEMES, applyTheme, createDefaultStyle,
+} from "./RobotDesigner";
 
 type MatKey = "primary" | "secondary" | "emissive";
 
@@ -429,6 +432,264 @@ export class RobotFactory {
     coreGlow.position.set(0, torsoY + style.torsoHeight * 0.15, style.torsoDepth * 0.55);
     emissiveParts.push(coreGlow);
 
+    if (style.hasArmCannon) {
+      const sides: Array<-1 | 1> = style.hasArmCannon === "both"
+        ? [-1, 1]
+        : style.hasArmCannon === "left" ? [-1] : [1];
+      const cs = style.armCannonScale ?? 1.0;
+      for (const side of sides) {
+        const baseX = side * (shoulderX + style.armLength * 0.95);
+        const cannonLen = style.armThickness * 2.6 * cs;
+        const cannonDia = style.armThickness * 1.5 * cs;
+        const housing = BABYLON.MeshBuilder.CreateCylinder("acH", {
+          height: cannonLen * 0.55,
+          diameter: cannonDia,
+          tessellation: 14,
+        }, this.scene);
+        housing.rotation.z = Math.PI / 2;
+        housing.position.set(baseX + side * cannonLen * 0.25, armAnchorY - style.armThickness * 0.15, 0);
+        primaryParts.push(housing);
+
+        const barrel = BABYLON.MeshBuilder.CreateCylinder("acB", {
+          height: cannonLen * 0.6,
+          diameterTop: cannonDia * 0.7,
+          diameterBottom: cannonDia * 0.95,
+          tessellation: 14,
+        }, this.scene);
+        barrel.rotation.z = Math.PI / 2;
+        barrel.position.set(baseX + side * cannonLen * 0.7, armAnchorY - style.armThickness * 0.15, 0);
+        secondaryParts.push(barrel);
+
+        const muzzle = BABYLON.MeshBuilder.CreateTorus("acM", {
+          diameter: cannonDia * 0.95,
+          thickness: cannonDia * 0.18,
+          tessellation: 14,
+        }, this.scene);
+        muzzle.rotation.z = Math.PI / 2;
+        muzzle.position.set(baseX + side * cannonLen * 1.0, armAnchorY - style.armThickness * 0.15, 0);
+        emissiveParts.push(muzzle);
+
+        const inner = BABYLON.MeshBuilder.CreateDisc("acI", {
+          radius: cannonDia * 0.32,
+          tessellation: 12,
+        }, this.scene);
+        inner.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+        inner.position.set(baseX + side * cannonLen * 1.005, armAnchorY - style.armThickness * 0.15, 0);
+        emissiveParts.push(inner);
+      }
+    }
+
+    if (style.bootStyle === "rounded" || style.bootStyle === "wheeled") {
+      const bootR = style.legThickness * 1.05;
+      for (const side of [-1, 1] as const) {
+        const boot = BABYLON.MeshBuilder.CreateSphere("bt", {
+          diameterX: bootR * 1.6,
+          diameterY: bootR * 1.2,
+          diameterZ: bootR * 2.2,
+          segments: 10,
+        }, this.scene);
+        boot.position.set(side * legOffsetX, bootR * 0.5, style.legThickness * 0.35);
+        secondaryParts.push(boot);
+
+        const cuff = BABYLON.MeshBuilder.CreateTorus("bc", {
+          diameter: bootR * 1.6,
+          thickness: bootR * 0.18,
+          tessellation: 16,
+        }, this.scene);
+        cuff.position.set(side * legOffsetX, bootR * 1.1, 0);
+        emissiveParts.push(cuff);
+      }
+    }
+
+    if (style.gauntletStyle === "rounded" || style.gauntletStyle === "armored") {
+      const gR = style.armThickness * 1.6;
+      for (const side of [-1, 1] as const) {
+        const gauntlet = style.gauntletStyle === "rounded"
+          ? BABYLON.MeshBuilder.CreateSphere("gl", {
+              diameterX: gR * 1.0, diameterY: gR * 0.95, diameterZ: gR * 1.1, segments: 10,
+            }, this.scene)
+          : BABYLON.MeshBuilder.CreateBox("gl", {
+              width: gR * 1.0, height: gR * 0.95, depth: gR * 1.1,
+            }, this.scene);
+        gauntlet.position.set(
+          side * (shoulderX + style.armLength * 0.85),
+          armAnchorY - style.armThickness * 0.15,
+          0,
+        );
+        secondaryParts.push(gauntlet);
+
+        const knuckle = BABYLON.MeshBuilder.CreateTorus("gk", {
+          diameter: gR * 0.9, thickness: gR * 0.12, tessellation: 12,
+        }, this.scene);
+        knuckle.rotation.z = Math.PI / 2;
+        knuckle.position.set(
+          side * (shoulderX + style.armLength * 0.95),
+          armAnchorY - style.armThickness * 0.15,
+          0,
+        );
+        emissiveParts.push(knuckle);
+      }
+    }
+
+    if (style.hasWheels) {
+      const where = style.wheelStyle ?? "shoulders";
+      const wheelDia = style.legThickness * 1.4;
+      const positions: Array<[number, number, number]> = [];
+      if (where === "shoulders") {
+        positions.push([-shoulderX - 0.05, shoulderY - 0.05, -style.torsoDepth * 0.2]);
+        positions.push([shoulderX + 0.05, shoulderY - 0.05, -style.torsoDepth * 0.2]);
+      } else if (where === "back") {
+        positions.push([-style.torsoWidth * 0.35, torsoY, -style.torsoDepth * 0.7]);
+        positions.push([style.torsoWidth * 0.35, torsoY, -style.torsoDepth * 0.7]);
+      } else {
+        positions.push([-legOffsetX, wheelDia * 0.5, -style.legThickness * 0.4]);
+        positions.push([legOffsetX, wheelDia * 0.5, -style.legThickness * 0.4]);
+      }
+      for (const [x, y, z] of positions) {
+        const tire = BABYLON.MeshBuilder.CreateTorus("wht", {
+          diameter: wheelDia, thickness: wheelDia * 0.28, tessellation: 18,
+        }, this.scene);
+        tire.rotation.x = Math.PI / 2;
+        tire.position.set(x, y, z);
+        primaryParts.push(tire);
+
+        const hub = BABYLON.MeshBuilder.CreateCylinder("whh", {
+          height: wheelDia * 0.32, diameter: wheelDia * 0.55, tessellation: 12,
+        }, this.scene);
+        hub.rotation.z = Math.PI / 2;
+        hub.position.set(x, y, z);
+        secondaryParts.push(hub);
+
+        const rimGlow = BABYLON.MeshBuilder.CreateTorus("whg", {
+          diameter: wheelDia * 0.62, thickness: wheelDia * 0.05, tessellation: 16,
+        }, this.scene);
+        rimGlow.rotation.x = Math.PI / 2;
+        rimGlow.position.set(x, y, z);
+        emissiveParts.push(rimGlow);
+      }
+    }
+
+    if (style.hasBackpackEngine) {
+      const engineW = style.torsoWidth * 0.85;
+      const engineH = style.torsoHeight * 0.7;
+      const engineD = style.torsoDepth * 0.45;
+      const engineZ = -style.torsoDepth * 0.55 - engineD * 0.5;
+
+      const block = BABYLON.MeshBuilder.CreateBox("eng", {
+        width: engineW, height: engineH, depth: engineD,
+      }, this.scene);
+      block.position.set(0, torsoY + style.torsoHeight * 0.1, engineZ);
+      secondaryParts.push(block);
+
+      const ventCount = Math.max(2, Math.min(8, style.engineVentCount ?? 4));
+      const ventH = engineH * 0.7 / ventCount;
+      for (let v = 0; v < ventCount; v++) {
+        const slat = BABYLON.MeshBuilder.CreateBox("vs", {
+          width: engineW * 0.78,
+          height: ventH * 0.5,
+          depth: engineD * 0.18,
+        }, this.scene);
+        slat.position.set(
+          0,
+          torsoY + style.torsoHeight * 0.1 - engineH * 0.3 + v * ventH,
+          engineZ - engineD * 0.5 - 0.02,
+        );
+        emissiveParts.push(slat);
+      }
+
+      for (const side of [-1, 1] as const) {
+        const exhaust = BABYLON.MeshBuilder.CreateCylinder("ex", {
+          height: engineD * 1.3,
+          diameterTop: engineW * 0.2,
+          diameterBottom: engineW * 0.16,
+          tessellation: 12,
+        }, this.scene);
+        exhaust.position.set(side * engineW * 0.35, torsoY + style.torsoHeight * 0.4, engineZ);
+        exhaust.rotation.x = Math.PI / 2;
+        primaryParts.push(exhaust);
+
+        const exGlow = BABYLON.MeshBuilder.CreateDisc("eg", {
+          radius: engineW * 0.085, tessellation: 10,
+        }, this.scene);
+        exGlow.position.set(side * engineW * 0.35, torsoY + style.torsoHeight * 0.4, engineZ - engineD * 0.65);
+        exGlow.rotation.x = Math.PI / 2;
+        emissiveParts.push(exGlow);
+      }
+    }
+
+    if (style.hasVents) {
+      for (const side of [-1, 1] as const) {
+        for (let i = 0; i < 3; i++) {
+          const vent = BABYLON.MeshBuilder.CreateBox("vt", {
+            width: style.shoulderPadSize * 0.55,
+            height: style.shoulderPadSize * 0.06,
+            depth: style.shoulderPadSize * 0.45,
+          }, this.scene);
+          vent.position.set(
+            side * shoulderX,
+            shoulderY + style.shoulderPadSize * 0.18 - i * style.shoulderPadSize * 0.12,
+            -style.torsoDepth * 0.05,
+          );
+          emissiveParts.push(vent);
+        }
+      }
+    }
+
+    if (style.hasWedges) {
+      const count = Math.max(1, Math.min(6, style.wedgeCount ?? 2));
+      for (let i = 0; i < count; i++) {
+        const t = (i + 1) / (count + 1);
+        const wedge = BABYLON.MeshBuilder.CreateBox("wd", {
+          width: style.torsoWidth * (0.85 - t * 0.45),
+          height: style.torsoHeight * 0.06,
+          depth: style.torsoDepth * 0.18,
+        }, this.scene);
+        wedge.rotation.x = -0.35;
+        wedge.position.set(
+          0,
+          torsoY - style.torsoHeight * 0.15 + t * style.torsoHeight * 0.5,
+          style.torsoDepth * 0.55 + 0.02,
+        );
+        secondaryParts.push(wedge);
+      }
+      for (const side of [-1, 1] as const) {
+        const legWedge = BABYLON.MeshBuilder.CreateBox("lwd", {
+          width: style.legThickness * 0.4,
+          height: style.legLength * 0.15,
+          depth: style.legThickness * 1.4,
+        }, this.scene);
+        legWedge.rotation.z = side * 0.3;
+        legWedge.position.set(side * legOffsetX, style.legLength * 0.55, style.legThickness * 0.4);
+        secondaryParts.push(legWedge);
+      }
+    }
+
+    if (style.hasPanelLines) {
+      const density = Math.max(0, Math.min(1, style.panelLineDensity ?? 0.5));
+      const lineCount = Math.round(2 + density * 5);
+      for (let i = 0; i < lineCount; i++) {
+        const t = (i + 1) / (lineCount + 1);
+        const horiz = BABYLON.MeshBuilder.CreateBox("pl", {
+          width: style.torsoWidth * 0.82,
+          height: 0.02,
+          depth: 0.04,
+        }, this.scene);
+        horiz.position.set(
+          0,
+          torsoY - style.torsoHeight * 0.4 + t * style.torsoHeight * 0.8,
+          style.torsoDepth * 0.51,
+        );
+        emissiveParts.push(horiz);
+      }
+      const vert = BABYLON.MeshBuilder.CreateBox("plv", {
+        width: 0.025,
+        height: style.torsoHeight * 0.78,
+        depth: 0.04,
+      }, this.scene);
+      vert.position.set(0, torsoY, style.torsoDepth * 0.51);
+      emissiveParts.push(vert);
+    }
+
     if (primaryParts.length > 0) {
       const merged = BABYLON.Mesh.MergeMeshes(primaryParts, true, true, undefined, false, true);
       if (merged) {
@@ -457,8 +718,36 @@ export class RobotFactory {
     return root;
   }
 
+  buildFromTheme(themeId: RobotThemeId, name: string, position: BABYLON.Vector3): BABYLON.TransformNode {
+    const baseStyle = createDefaultStyle();
+    const themed = applyTheme(baseStyle, themeId);
+    const desc: RobotDescriptor = {
+      name,
+      faction: themeId === "hybrid" ? "enemy" : themeId === "megaMan" ? "ally" : "neutral",
+      style: themed,
+    };
+    return this.createRobot(desc, position);
+  }
+
   dispose(): void {
     this.mats.forEach(m => m.dispose());
     this.mats.clear();
   }
+}
+
+export function buildRobotDemo(
+  scene: BABYLON.Scene,
+  themeId: RobotThemeId,
+  position: BABYLON.Vector3 = BABYLON.Vector3.Zero(),
+): { root: BABYLON.TransformNode; factory: RobotFactory; dispose: () => void } {
+  const factory = new RobotFactory(scene);
+  const theme = ROBOT_THEMES[themeId] ?? ROBOT_THEMES.default;
+  const root = factory.buildFromTheme(themeId, `demo_${theme.label.replace(/\s+/g, "")}`, position);
+  console.log(`[buildRobotDemo] Built ${theme.label} robot at`, position);
+  const dispose = () => {
+    root.getChildMeshes().forEach(m => m.dispose());
+    root.dispose();
+    factory.dispose();
+  };
+  return { root, factory, dispose };
 }

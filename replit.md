@@ -1,7 +1,7 @@
 # Detroit 3026: The First Attack
 
 ## Overview
-Detroit 3026 is a 3D futuristic sci-fi action game built with Babylon.js. Set in Detroit in the year 3026, the game features anime-style cell-shaded graphics, immersive combat, DBZ-style flight, open-world biomes, and an explorable cityscape. The core objective is to defend Detroit from an invasion of insane hybrid organoids, which are AI fused with human and tardigrade DNA. The project aims to deliver a rich, engaging experience with deep exploration, dynamic combat, and robust progression systems.
+Detroit 3026 is a 3D futuristic sci-fi action game built with Babylon.js, set in Detroit in the year 3026. The game features anime-style cell-shaded graphics, immersive combat, DBZ-style flight, open-world biomes, and an explorable cityscape. The core objective is to defend Detroit from an invasion of insane hybrid organoids (AI fused with human and tardigrade DNA). The project aims to deliver a rich, engaging experience with deep exploration, dynamic combat, and robust progression systems, including character customization, crafting, and base building.
 
 ## User Preferences
 - Design choice: Anime retro 80's sci-fi cell-shaded graphics style
@@ -12,82 +12,40 @@ Detroit 3026 is a 3D futuristic sci-fi action game built with Babylon.js. Set in
 ## System Architecture
 
 ### Core Systems
-- **EventBus**: Singleton pattern for decoupled communication between game components.
-- **StateMachine**: Generic Finite State Machine for managing entity behaviors with state configurations and transition validation.
-- **DamageSystem**: Unified pipeline for managing damage, incorporating damage types, resistances, and area-of-effect calculations.
+The game uses an EventBus for decoupled communication and a generic StateMachine for managing entity behaviors. A unified DamageSystem handles all combat calculations.
 
 ### Player Systems
-- **PlayerController**: Manages a humanoid character with a comprehensive state machine (idle, moving, sprinting, dodging, attacking, stunned, dead, jetpack, flying, hovering). Features a triple-jump flight system allowing for sky launches into free flight mode with air momentum preservation. On construction it loads any saved character from `localStorage` (`detroit3026_character_v1`) so customizations from the Character Editor persist into gameplay.
-- **HumanoidCharacter**: Procedural generation for humanoid meshes, supporting modular body parts, clothing, armor, hair, and customizable colors and armor types. Exposes `getAnimatableLimbs()` returning the joint pivot transform-nodes (head, torso, left/right arm and leg pivots) so the AnimationSystem can drive the actual visible body — preventing duplicate "white shape" placeholders.
-- **AnimationSystem**: Procedural, multi-part character animations with smooth blending for various states including running, jumping, combat moves, and flight. Can either create its own placeholder limbs OR `attachToParts()` to animate an existing HumanoidCharacter's limb pivots (the player path uses attach-mode, so only one body is rendered).
-- **CharacterEditor** (`CharacterEditor.tsx`): React modal opened from the main menu's CUSTOMIZE button. Three tabs:
-  - **BODY**: sliders for height, head scale, shoulder width, arm/leg length, body type (lean/athletic/heavy).
-  - **ARMOR**: dropdowns for 10 modular slots (helmet, chest, back, L/R shoulder, L/R arm, L/R weapon, legs) drawn from `ARMOR_PART_REGISTRY` with multiple math-driven options per slot. Two one-click presets in the preview pane: **BASIC** (cyan combat plate) and **TITAN** (horned helm + reactor + cannon + plasma blade).
-  - **COLORS**: pickers for character primary/secondary/skin/hair AND the four armor-palette channels (primary metal, secondary ceramic, gold trim, neon glow).
-  - Renders a live preview in its own mini Babylon scene with arc-rotate camera; rebuilds the humanoid + reattaches the procedural armor whenever any field changes.
-  - Persists to `localStorage` (`detroit3026_character_v1`) and supports **EXPORT JSON / IMPORT JSON** for sharing builds.
+The PlayerController manages a humanoid character with extensive state machines for movement, combat, and a triple-jump flight system with free flight mode. The HumanoidCharacter system allows for procedural generation of character meshes, modular body parts, clothing, and customizable colors. The AnimationSystem provides procedural, multi-part character animations with smooth blending. A CharacterEditor, accessible from the main menu, allows players to customize body parameters, modular armor (from a data-driven registry of parametric parts), and colors, with changes persisting via local storage.
 
 ### Robot Armor System
-- **ArmorMaterialFactory** (`ArmorMaterialFactory.ts`): produces five reusable material types — `metal` (high-spec primary), `black` (matte armor), `ceramic` (matte secondary), `gold` (glowing trim), `neon` (emissive glow), `trim` (lit accent). Cached per-instance with a salt id so multiple characters can co-exist. Disposed deterministically. The same factory is also reused by the prefab/level builder so player structures match the armor aesthetic.
-- **RobotArmorParts** (`RobotArmorParts.ts` + `RobotArmorPartsExtra.ts`): data-driven part registry. Each `ArmorPartDefinition` has an `id`, `name`, `slot`, and a `build(ctx)` function that returns procedurally generated meshes (`MeshBuilder.CreateSphere/Box/Cylinder/Torus`) using parametric math (rings of bolts, cone spikes, torus crowns, slice domes, layered plates). Expanded slot catalog: 9 helmets (basic, horned, cyber crown, pilot visor, sensor cyber, **samurai kabuto, oni mask, knight helm**, none), 7 chest plates (combat, reactor core, layered, sternum strip, titan, **samurai do, ornate cuirass**, none), 5 shoulder pads (round, spike, mounted cannon, plate cap, **titan pauldron**), 3 arm wraps (gauntlet, forearm blade, wrist thrusters), 5 weapons (energy blade, plasma cannon, sidearm, **dual blade, missile pod**), 5 leg sets (greaves, boost greaves, titan, **mech tank legs, hover treads**), 5 back pieces (jetpack, energy wings, tactical cape, **speaker stack, banner pole**, none). Adding new parts is a one-file change in `RobotArmorPartsExtra.ts`.
-- **RobotArmorSystem** (`RobotArmorSystem.ts`): `equipArmorSet(scene, limbs, set, params)` parents each part to the correct `HumanoidLimbs` anchor (helmet→head, chest/back→torso, shoulder/arm/weapon→arm pivots, legs→leg pivots) so armor swings with the animated rig. Right-side parts get mirrored via `scaling.x *= -1`. Includes `DEFAULT_ARMOR_SET` and `TITAN_ARMOR_SET` presets and `EquippedArmor.dispose()` for clean teardown.
-- **PlayerController integration**: on construction reads `armorSet` from `localStorage` and calls `equipArmorSet` against the humanoid; suppresses the legacy `hasArmor` build path so the new system owns all armor rendering.
-- **CombatSystem**: Implements light and heavy melee combo chains with input buffering and hitbox detection.
-- **InventorySystem**: A 24-slot grid-based inventory system with item stacking and a catalog of item definitions.
+The ArmorMaterialFactory produces reusable material types for consistent aesthetics. The RobotArmorParts system defines a data-driven registry of parametric armor parts, and the RobotArmorSystem equips these parts to humanoid rigs, handling mirroring and clean disposal. Player armor customization is integrated with this system.
 
-### Weapon Systems
-- **WeaponsSystem**: Manages 6 primary weapon types with distinct projectile physics.
-- **SpecialWeaponsSystem**: Implements 4 unique special weapons.
-- **BeamSabreSystem**: A toggleable melee weapon offering slash combos and energy wave attacks.
+### Combat, Inventory & Crafting
+Combat involves light and heavy melee combo chains with input buffering. An InventorySystem provides a 24-slot grid. The CraftingSystem supports recipe-based crafting for weapons, armor, and base components.
 
-### Armor & Upgrade Systems
-- **ArmorSystem**: Features 4 armor slots and 5 elemental armor types, each providing different strengths and effects.
-- **ArmorCapsuleSystem**: An interactive laboratory building where players can upgrade armor through 6 tiers, with the first tier granting essential flight capabilities.
-- **CraftingSystem**: Recipe-based crafting for weapons, armor, and base components utilizing inventory materials.
-- **BuildingSystem**: A Minecraft-style mining and building system allowing terrain manipulation, structure destruction, and the placement of 19 block types with **grid-snapped placement** (2-unit grid) and a live **GridMaterial** ground overlay (from `@babylonjs/materials/grid`) that follows the player while in build mode. Block catalog: Metal Wall, Glass, Platform, Ramp, Door, Light, Cube, Sphere, Pyramid, Pillar, Foundation, Fence, Neon Strip, **Brick, Stairs (stepped wedge), Window (framed glass), Tower (tall pillar), Cone Roof, Turret (composite base + dome + barrel)** — each with material costs, health, and (where appropriate) emissive color. Controls: G toggles build mode, mouse-wheel cycles the hotbar, number keys 1–9/0/-/= jump-select, R rotates, LMB places, RMB mines. The currently-selected block and full hotbar are surfaced through `getSelectedBlockType()` and `getHotbar()` so the in-game HUD can render the live hotbar strip. Composite shapes (Stairs, Window, Turret) are built from primitives and `Mesh.MergeMeshes` so they remain a single mesh per block. Exposes `exportPlaced()`, `clearAll()`, and `placeAt(type, pos, rot)` for level save/load.
-- **PrefabSystem** (`PrefabSystem.ts`): the level/base/village/city builder. Sits next to `BuildingSystem` and is mutually exclusive with it (toggling one auto-disables the other via EventBus `building:modeChanged` / `prefab:modeChanged` events). Recycles the same `ArmorMaterialFactory` so every placed structure shares the metal/ceramic/gold/neon palette of the player's armor. Controls: **P** toggles plan mode, mouse-wheel or `[`/`]` cycles prefabs, **R** rotates 45°, **LMB** places (raycast clamped to ground plane within 60m, **2-unit grid-snapped** with live wireframe footprint preview), **RMB** removes the structure under the crosshair, **ESC** exits. Each placed structure is a `TransformNode` with its own materials so `dispose()` is clean. Prefab catalog (14 across 4 categories):
-  - **Defense**: Watchtower, Bunker, Gate Arch, Turret Emplacement
-  - **Housing**: Small House, Market Stall, Energy Well, Lamp Post, **City Block (composite mini-city: 4 corner houses + central plaza with fountain + corner lamps)**
-  - **Industry**: Power Pylon, Comms Dish, Storage Silo
-  - **Decoration**: Monument, Banner
-
-  Each prefab has a parametric `build(ctx)` that returns a `Mesh[]` from `MeshBuilder` primitives (boxes, cylinders, spheres, tori) — same authoring style as the armor parts, so adding a new structure is a single record in `PREFAB_REGISTRY`. Costs are paid from the inventory like blocks. Exposes `exportPlaced()`, `clearAll()`, and `placeAt(defId, pos, rot)` for level save/load.
-
-- **LevelSerializer** (`LevelSerializer.ts`): serializes both `BuildingSystem` blocks and `PrefabSystem` structures into a single JSON snapshot (versioned, with timestamp + name). Methods: `serialize()`, `toJson()`, `download(filename?)` (creates a Blob, triggers a browser download), `restore(data)` (clears current level then re-places everything via `placeAt`), `loadFromFile(file)` (reads a `File` from a hidden file input and restores). Defensive: silently skips malformed entries with console warnings, rejects unknown `version`. Wired into `GameUI` as **SAVE / LOAD / CLEAR** buttons in the top-right corner — visible only while the player is in Build Mode (G) or Plan Mode (P).
+### Building & Prefab Systems
+The BuildingSystem offers Minecraft-style mining and building with 19 block types, grid-snapped placement, and a live GridMaterial overlay. The PrefabSystem allows players to place pre-designed structures (e.g., watchtowers, houses, city blocks) using the same material factory as the armor system, also with grid-snapped placement. Both systems are serialized by the LevelSerializer for saving and loading.
 
 ### Commerce & Companion Systems
-- **ShopSystem**: Features 5 shop locations with 3 distinct types (weapon, armor, general) offering dynamic pricing for buying and selling items.
-- **GardenSystem**: Four pet gardens provide safe zones for managing, training, and bonding with digital companions.
-- **CompanionSystem**: Manages allies and digital pets, including healing companions and combat companions, with an experience and leveling system.
-- **MapSystem**: Real-time minimap display with player position, enemy markers, shop and garden locations, grid overlay, and toggle control (M key).
+A ShopSystem manages 5 shop locations with dynamic pricing. The GardenSystem and CompanionSystem manage digital companions, including healing and combat types, with leveling and bonding mechanics. A MapSystem provides a real-time minimap.
 
-### Enemy Systems
-- **EnemySystem**: Implements a wave spawner for 6 distinct enemy types, including Drone, Soldier, Heavy, Insectoid, Hybrid, and Commander. Commanders are humanoid captains with advanced AI, flight capabilities, and rare loot drops.
+### Enemy Systems & Robot Generation
+The EnemySystem features a wave spawner for 6 distinct enemy types, including Commanders with advanced AI and flight. The Robot Shape Engine (RobotDesigner/Factory) is a data-driven system for generating all robots (enemies, allies, pets) with extensive parametric descriptors for visual styles, including new features like arm cannons, rounded boots, wheels, and engine blocks. Reusable themes (e.g., transformer, mega-man, hybrid) allow for quick styling.
 
 ### Environment & World
-- **CityGenerator**: Creates a massive 1200x1200 open world featuring a central city and four unique biomes: Mountains, Jungle, Desert, and Junkyard Robot City. Each biome includes temples, villages, and secret areas, along with sky cities and dynamic environmental elements.
-- **Rendering**: Utilizes cell-shaded shader materials with rim lighting, outlines, panel lines, animated water, and neon accents.
+A CityGenerator creates a massive 1200x1200 open world with a central city and four distinct biomes (Mountains, Jungle, Desert, Junkyard Robot City), featuring temples, villages, and sky cities.
 
 ### Multiplayer
-- **MultiplayerSystem**: Client-side WebSocket integration for real-time multiplayer, supporting room creation, joining, listing, position synchronization, chat, and enemy damage syncing for up to 4 players.
+A MultiplayerSystem provides client-side WebSocket integration for real-time multiplayer, supporting room management, position synchronization, chat, and enemy damage syncing for up to 4 players.
 
-### Effects & Polish
-- **EffectsSystem** (`EffectsSystem.ts`): Pokemon-style transient VFX driven by EventBus events. Effects: `effect:sparkle` (radial burst of small glowing spheres with gravity), `effect:capture` (rotating ring + pulsing beam-of-light + sparkle burst — used when bonding companions and opening chests), `effect:levelUp` (golden expanding pillar + sparkles), `effect:pickup` (small green sparkle). The CompanionSystem fires a green `effect:capture` for allies and pink for pets when one bonds, and the ChestSystem fires a gold `effect:capture` when a chest opens.
-
-### User Interface
-- **AuthUI**: Login/register authentication screen with an option for offline play.
-- **GameUI**: In-game HUD displaying critical information, shop interfaces, capsule upgrade interface, multiplayer lobby, and a contextual **build hotbar** (only visible while build mode is active) that highlights the currently selected block plus its number-key shortcut.
-- **MainMenu**: The primary game start menu, now featuring a START MISSION button and a CUSTOMIZE button that opens the CharacterEditor.
+### Effects & UI
+An EffectsSystem drives transient visual effects (sparkles, captures, level-ups). The UI includes an AuthUI, a GameUI with HUD, shop interfaces, upgrade interfaces, a multiplayer lobby, and a contextual build hotbar. A MainMenu provides game start and character customization options.
 
 ### Technical Details
-- **Engine**: Babylon.js v8.x, WebGL rendering.
-- **Graphics**: Cell-shaded anime aesthetic with ink outlines (Sobel edge detection), bloom, chromatic aberration, and FXAA.
-- **Frontend**: React + TypeScript + Vite.
-- **Backend**: Express.js.
-- **Architecture**: Event-driven with FSM-based entity states.
+The game uses Babylon.js v8.x for WebGL rendering, with a cell-shaded anime aesthetic, ink outlines, bloom, chromatic aberration, and FXAA. The frontend is built with React, TypeScript, and Vite, while the backend uses Express.js. The architecture is event-driven with FSM-based entity states.
 
 ## External Dependencies
-- **PostgreSQL**: Used as the primary database with Drizzle ORM for schema management and interaction.
-- **Passport.js**: Utilized for user authentication, including local strategy and scrypt password hashing.
-- **Express-session with connect-pg-simple**: For persistent session management.
-- **ws library**: Powers the WebSocket server for real-time multiplayer functionality.
+- **PostgreSQL**: Primary database with Drizzle ORM.
+- **Passport.js**: User authentication with local strategy and scrypt hashing.
+- **Express-session with connect-pg-simple**: Persistent session management.
+- **ws library**: WebSocket server for multiplayer.

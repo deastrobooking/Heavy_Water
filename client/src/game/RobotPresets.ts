@@ -1,5 +1,5 @@
 import * as BABYLON from "@babylonjs/core";
-import { RobotDescriptor } from "./RobotDesigner";
+import { RobotDescriptor, applyTheme, createDefaultStyle } from "./RobotDesigner";
 
 export const ROBOT_PRESETS: Record<string, RobotDescriptor> = {
   ScoutPrime: {
@@ -164,6 +164,22 @@ export const ROBOT_PRESETS: Record<string, RobotDescriptor> = {
       },
     },
   },
+  OptimusForge: {
+    name: "OptimusForge",
+    faction: "enemy",
+    style: applyTheme(
+      { ...createDefaultStyle("transformer"), scale: 1.25 },
+      "transformer"
+    ),
+  },
+  HybridApex: {
+    name: "HybridApex",
+    faction: "enemy",
+    style: applyTheme(
+      { ...createDefaultStyle("hybrid"), scale: 1.5 },
+      "hybrid"
+    ),
+  },
   CommanderOmega: {
     name: "CommanderOmega",
     faction: "enemy",
@@ -194,6 +210,14 @@ export const ROBOT_PRESETS: Record<string, RobotDescriptor> = {
 };
 
 export const ALLY_PRESETS: Record<string, RobotDescriptor> = {
+  MegaUnitX: {
+    name: "MegaUnitX",
+    faction: "ally",
+    style: applyTheme(
+      { ...createDefaultStyle("megaMan"), scale: 1.0 },
+      "megaMan"
+    ),
+  },
   GuardianUnit: {
     name: "GuardianUnit",
     faction: "ally",
