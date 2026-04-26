@@ -296,8 +296,16 @@ export class EnvironmentPropSystem {
     return this.props.filter(p => p.damageable.isAlive).map(p => p.hitbox);
   }
 
-  /** Spawn a single prop; returns the active record. */
+  /** Spawn a single prop; returns the active record (or throws if over budget). */
   spawn(kind: PropKind, position: BABYLON.Vector3, yaw: number = 0): ActiveProp {
+    if (this.props.length >= EnvironmentPropSystem.MAX_PROPS) {
+      // Hard guard so direct `spawn()` callers also respect the world budget.
+      // Throwing is loud on purpose: silently dropping props led to confusing
+      // missing-loot reports during world layout iteration.
+      throw new Error(
+        `[EnvironmentPropSystem] MAX_PROPS (${EnvironmentPropSystem.MAX_PROPS}) reached; refusing to spawn '${kind}' at ${position.toString()}.`,
+      );
+    }
     const config = PROP_CONFIGS[kind];
     const id = this.nextId++;
     const root = new BABYLON.Mesh(`prop_${kind}_${id}`, this.scene);
@@ -388,27 +396,104 @@ export class EnvironmentPropSystem {
   }
 
   /**
+   * Soft cap on total spawned props world-wide. spawnCluster / spawn skip
+   * additional props past this so a future content-creep doesn't tank
+   * frame rate on lower-end devices. Tuned generously for current world
+   * (~130 props placed); raise if a real budget profile demands it.
+   */
+  static readonly MAX_PROPS = 220;
+
+  /**
    * Helper: spawn a small cluster of mixed props at `center`.
+   *
+   * `theme` biases the prop pool so areas feel distinct:
+   *   - "industrial": crate/barrel/canister heavy (no holo signs by default)
+   *   - "military": container/crate/barrel heavy (no holo signs by default)
+   *   - "holo":      holo_sign heavy with a few crates/barrels
+   *   - "mixed" (default): the original pool with everything
+   *
+   * `requiredKinds` guarantees those kinds are placed first (deterministic
+   * cluster composition — e.g. ["open_container", "crate", "crate", "barrel"]
+   * for a base "supply cache" that must always include a mix of crates,
+   * barrels, and an open container). These count toward `count`.
+   *
+   * `forceOpenContainer` is a shorthand for `requiredKinds: ["open_container"]`
+   * (kept for back-compat with the original API).
    */
   spawnCluster(
     center: BABYLON.Vector3,
-    options?: { count?: number; radius?: number; includeOpenContainer?: boolean; includeHoloSign?: boolean },
+    options?: {
+      count?: number;
+      radius?: number;
+      includeOpenContainer?: boolean;
+      includeHoloSign?: boolean;
+      theme?: "industrial" | "military" | "holo" | "mixed";
+      forceOpenContainer?: boolean;
+      requiredKinds?: PropKind[];
+    },
   ): void {
     const count = Math.max(2, options?.count ?? 4 + Math.floor(Math.random() * 3));
     const radius = options?.radius ?? 5;
-    const pool: PropKind[] = ["crate", "crate", "barrel", "barrel", "canister", "container"];
-    if (options?.includeOpenContainer !== false) pool.push("open_container");
-    if (options?.includeHoloSign !== false) pool.push("holo_sign");
+    const theme = options?.theme ?? "mixed";
+
+    let pool: PropKind[];
+    let themeAllowsHolo = true;
+    let themeAllowsOpen = true;
+    switch (theme) {
+      case "industrial":
+        pool = ["crate", "crate", "crate", "barrel", "barrel", "canister"];
+        themeAllowsHolo = false;
+        themeAllowsOpen = false;
+        break;
+      case "military":
+        pool = ["container", "container", "crate", "crate", "barrel", "canister"];
+        themeAllowsHolo = false;
+        themeAllowsOpen = false;
+        break;
+      case "holo":
+        pool = ["holo_sign", "holo_sign", "holo_sign", "crate", "barrel"];
+        themeAllowsOpen = false;
+        break;
+      case "mixed":
+      default:
+        pool = ["crate", "crate", "barrel", "barrel", "canister", "container"];
+        break;
+    }
+
+    // Per-call overrides win over theme defaults.
+    const includeOpen = options?.includeOpenContainer ?? themeAllowsOpen;
+    const includeHolo = options?.includeHoloSign ?? themeAllowsHolo;
+    if (includeOpen) pool.push("open_container");
+    if (includeHolo) pool.push("holo_sign");
+
+    // Compose the required-kinds list (back-compat with forceOpenContainer).
+    const required: PropKind[] = [];
+    if (options?.requiredKinds) required.push(...options.requiredKinds);
+    if (options?.forceOpenContainer && !required.includes("open_container")) {
+      required.unshift("open_container");
+    }
+
+    const positions: BABYLON.Vector3[] = [];
     for (let i = 0; i < count; i++) {
       const angle = (i / count) * Math.PI * 2 + Math.random() * 0.5;
       const r = Math.random() * radius;
-      const pos = new BABYLON.Vector3(
+      positions.push(new BABYLON.Vector3(
         center.x + Math.cos(angle) * r,
         center.y,
         center.z + Math.sin(angle) * r,
-      );
-      const kind = pool[Math.floor(Math.random() * pool.length)];
-      this.spawn(kind, pos, Math.random() * Math.PI * 2);
+      ));
+    }
+
+    // Plant required kinds first (deterministic), then random-fill from pool.
+    for (let i = 0; i < positions.length; i++) {
+      if (this.props.length >= EnvironmentPropSystem.MAX_PROPS) {
+        console.warn(`[EnvironmentPropSystem] MAX_PROPS (${EnvironmentPropSystem.MAX_PROPS}) reached; skipping further cluster props.`);
+        break;
+      }
+      const kind = i < required.length
+        ? required[i]
+        : pool[Math.floor(Math.random() * pool.length)];
+      this.spawn(kind, positions[i], Math.random() * Math.PI * 2);
     }
   }
 

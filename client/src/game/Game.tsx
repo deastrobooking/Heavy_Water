@@ -555,29 +555,77 @@ export const Game: React.FC = () => {
         propSystemRef.current = propSystem;
         atvHitCooldownRef.current.clear();
 
-        // Cluster locations: spawn-area, near each enemy base, plus scattered nodes.
-        const clusterCenters: Array<{ pos: BABYLON.Vector3; opts?: { count?: number; radius?: number } }> = [
-          { pos: new BABYLON.Vector3(18, 0, 22), opts: { count: 5, radius: 4.5 } },
-          { pos: new BABYLON.Vector3(-22, 0, 14), opts: { count: 4, radius: 4 } },
-          { pos: new BABYLON.Vector3(40, 0, -18), opts: { count: 6, radius: 5 } },
-          { pos: new BABYLON.Vector3(-46, 0, -32), opts: { count: 5, radius: 5 } },
-          // Outpost props near each enemy base
-          { pos: new BABYLON.Vector3(232, 0, 232), opts: { count: 6, radius: 6 } },
-          { pos: new BABYLON.Vector3(-232, 0, 232), opts: { count: 6, radius: 6 } },
-          { pos: new BABYLON.Vector3(0, 0, -262), opts: { count: 6, radius: 6 } },
-          // Scattered roadside caches
-          { pos: new BABYLON.Vector3(120, 0, 60), opts: { count: 4, radius: 4 } },
-          { pos: new BABYLON.Vector3(-110, 0, -80), opts: { count: 4, radius: 4 } },
-          { pos: new BABYLON.Vector3(180, 0, -140), opts: { count: 5, radius: 5 } },
-          { pos: new BABYLON.Vector3(-160, 0, 120), opts: { count: 4, radius: 4 } },
+        // Cluster locations: spawn-area, dense rings around each enemy base,
+        // roadside caches at true ~150-180m intervals along main approaches,
+        // plus a few scattered industrial dumps. Themes keep areas distinct:
+        //   - "industrial" near spawn / roadside (crates+barrels+canisters)
+        //   - "military"   ringing each enemy base (containers+crates)
+        //   - "holo"       at base approaches / signage points
+        //
+        // Each base has at least one cluster with `requiredKinds` that
+        // deterministically guarantees a mix of crates, barrels, and an
+        // open container ("supply cache"). Total prop count is also bounded
+        // by EnvironmentPropSystem.MAX_PROPS as a perf guardrail.
+        type ClusterOpts = NonNullable<Parameters<typeof propSystem.spawnCluster>[1]>;
+        // Guaranteed "supply cache" composition for each base: open container
+        // + 2 crates + 2 barrels, then theme-random fills remaining slots.
+        const baseSupplyCacheKinds: ("crate" | "barrel" | "open_container")[] = [
+          "open_container", "crate", "crate", "barrel", "barrel",
+        ];
+        const clusterCenters: Array<{ pos: BABYLON.Vector3; opts?: ClusterOpts }> = [
+          // === Spawn-area industrial scatter ===
+          { pos: new BABYLON.Vector3(18, 0, 22),  opts: { count: 5, radius: 4.5, theme: "industrial" } },
+          { pos: new BABYLON.Vector3(-22, 0, 14), opts: { count: 4, radius: 4,   theme: "industrial" } },
+          { pos: new BABYLON.Vector3(40, 0, -18), opts: { count: 6, radius: 5,   theme: "industrial", forceOpenContainer: true } },
+          { pos: new BABYLON.Vector3(-46, 0, -32),opts: { count: 5, radius: 5,   theme: "industrial" } },
+
+          // === NE Base @ (250,250) — military ring + guaranteed supply cache + holo signage ===
+          { pos: new BABYLON.Vector3(232, 0, 232), opts: { count: 7, radius: 6, theme: "military", requiredKinds: baseSupplyCacheKinds } },
+          { pos: new BABYLON.Vector3(272, 0, 228), opts: { count: 5, radius: 5, theme: "military" } },
+          { pos: new BABYLON.Vector3(228, 0, 272), opts: { count: 5, radius: 5, theme: "military", forceOpenContainer: true } },
+          { pos: new BABYLON.Vector3(218, 0, 218), opts: { count: 4, radius: 4, theme: "holo" } },
+
+          // === NW Base @ (-250,250) — military ring + guaranteed supply cache + holo signage ===
+          { pos: new BABYLON.Vector3(-232, 0, 232), opts: { count: 7, radius: 6, theme: "military", requiredKinds: baseSupplyCacheKinds } },
+          { pos: new BABYLON.Vector3(-272, 0, 228), opts: { count: 5, radius: 5, theme: "military" } },
+          { pos: new BABYLON.Vector3(-228, 0, 272), opts: { count: 5, radius: 5, theme: "military", forceOpenContainer: true } },
+          { pos: new BABYLON.Vector3(-218, 0, 218), opts: { count: 4, radius: 4, theme: "holo" } },
+
+          // === South Base @ (0,-280) — military ring + guaranteed supply cache + holo signage ===
+          { pos: new BABYLON.Vector3(0, 0, -262),   opts: { count: 7, radius: 6, theme: "military", requiredKinds: baseSupplyCacheKinds } },
+          { pos: new BABYLON.Vector3(-26, 0, -300), opts: { count: 5, radius: 5, theme: "military" } },
+          { pos: new BABYLON.Vector3(26, 0, -255),  opts: { count: 5, radius: 5, theme: "military", forceOpenContainer: true } },
+          { pos: new BABYLON.Vector3(0, 0, -232),   opts: { count: 4, radius: 4, theme: "holo" } },
+
+          // === Roadside supply caches at true ~150-180m intervals along main routes ===
+          // Spawn -> NE base (route length ~354m): caches at ~155m and ~310m.
+          { pos: new BABYLON.Vector3(110, 0, 110), opts: { count: 4, radius: 4, theme: "industrial" } }, // ~155m from origin
+          { pos: new BABYLON.Vector3(220, 0, 220), opts: { count: 5, radius: 4.5, theme: "industrial", forceOpenContainer: true } }, // ~155m gap
+          // Spawn -> NW base (mirror)
+          { pos: new BABYLON.Vector3(-110, 0, 110), opts: { count: 4, radius: 4, theme: "industrial" } },
+          { pos: new BABYLON.Vector3(-220, 0, 220), opts: { count: 5, radius: 4.5, theme: "industrial", forceOpenContainer: true } },
+          // Spawn -> South base (route length ~280m): one cache at ~160m.
+          { pos: new BABYLON.Vector3(0, 0, -160),  opts: { count: 5, radius: 4.5, theme: "industrial", forceOpenContainer: true } }, // 160m from origin
+
+          // === Scattered industrial dumps off main routes ===
+          { pos: new BABYLON.Vector3(120, 0, 60),   opts: { count: 4, radius: 4, theme: "industrial" } },
+          { pos: new BABYLON.Vector3(-110, 0, -80), opts: { count: 4, radius: 4, theme: "industrial", forceOpenContainer: true } },
+          { pos: new BABYLON.Vector3(180, 0, -140), opts: { count: 5, radius: 5, theme: "industrial" } },
+          { pos: new BABYLON.Vector3(-160, 0, 120), opts: { count: 4, radius: 4, theme: "industrial" } },
         ];
         for (const c of clusterCenters) {
           propSystem.spawnCluster(c.pos, c.opts);
         }
-        // A handful of standalone holo-signs along main approaches
+        // A handful of standalone holo-signs as roadside markers along main approaches
         propSystem.spawn("holo_sign", new BABYLON.Vector3(0, 0, 30));
         propSystem.spawn("holo_sign", new BABYLON.Vector3(60, 0, -10));
         propSystem.spawn("holo_sign", new BABYLON.Vector3(-60, 0, -10));
+        propSystem.spawn("holo_sign", new BABYLON.Vector3(120, 0, 120));
+        propSystem.spawn("holo_sign", new BABYLON.Vector3(-120, 0, 120));
+        propSystem.spawn("holo_sign", new BABYLON.Vector3(0, 0, -140));
+        // Diagnostic: log final placed prop count vs. MAX_PROPS budget.
+        // Helps validate perf budgets as world content grows.
+        console.log(`[Game] Environment props placed: ${propSystem.getActiveProps().length} (cap ${EnvironmentPropSystem.MAX_PROPS})`);
 
         let totalKillsLocal = 0;
         let highestWaveLocal = 1;
