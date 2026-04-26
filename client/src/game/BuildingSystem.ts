@@ -10,6 +10,13 @@ export enum BlockType {
   Ramp = "ramp",
   Door = "door",
   Light = "light",
+  Cube = "cube",
+  Sphere = "sphere",
+  Pyramid = "pyramid",
+  Pillar = "pillar",
+  Foundation = "foundation",
+  Fence = "fence",
+  NeonStrip = "neon_strip",
 }
 
 export interface BlockDefinition {
@@ -95,7 +102,78 @@ const BLOCK_DEFINITIONS: Record<BlockType, BlockDefinition> = {
     health: 60,
     emissive: new BABYLON.Color3(0.8, 0.9, 1.0),
   },
+  [BlockType.Cube]: {
+    type: BlockType.Cube,
+    name: "Cube",
+    size: { width: 2, height: 2, depth: 2 },
+    color: new BABYLON.Color3(0.55, 0.55, 0.6),
+    alpha: 1,
+    materialCost: [{ materialId: "scrap_metal", quantity: 2 }],
+    health: 120,
+  },
+  [BlockType.Sphere]: {
+    type: BlockType.Sphere,
+    name: "Sphere",
+    size: { width: 2, height: 2, depth: 2 },
+    color: new BABYLON.Color3(0.6, 0.7, 0.8),
+    alpha: 1,
+    materialCost: [{ materialId: "scrap_metal", quantity: 2 }, { materialId: "nano_fiber", quantity: 1 }],
+    health: 110,
+  },
+  [BlockType.Pyramid]: {
+    type: BlockType.Pyramid,
+    name: "Pyramid",
+    size: { width: 3, height: 3, depth: 3 },
+    color: new BABYLON.Color3(0.7, 0.5, 0.3),
+    alpha: 1,
+    materialCost: [{ materialId: "scrap_metal", quantity: 4 }],
+    health: 200,
+  },
+  [BlockType.Pillar]: {
+    type: BlockType.Pillar,
+    name: "Pillar",
+    size: { width: 1, height: 4, depth: 1 },
+    color: new BABYLON.Color3(0.5, 0.5, 0.55),
+    alpha: 1,
+    materialCost: [{ materialId: "scrap_metal", quantity: 3 }],
+    health: 180,
+  },
+  [BlockType.Foundation]: {
+    type: BlockType.Foundation,
+    name: "Foundation",
+    size: { width: 6, height: 0.6, depth: 6 },
+    color: new BABYLON.Color3(0.35, 0.35, 0.4),
+    alpha: 1,
+    materialCost: [{ materialId: "scrap_metal", quantity: 6 }],
+    health: 300,
+  },
+  [BlockType.Fence]: {
+    type: BlockType.Fence,
+    name: "Fence",
+    size: { width: 4, height: 1.5, depth: 0.2 },
+    color: new BABYLON.Color3(0.3, 0.3, 0.35),
+    alpha: 1,
+    materialCost: [{ materialId: "scrap_metal", quantity: 1 }],
+    health: 60,
+  },
+  [BlockType.NeonStrip]: {
+    type: BlockType.NeonStrip,
+    name: "Neon Strip",
+    size: { width: 4, height: 0.3, depth: 0.3 },
+    color: new BABYLON.Color3(1.0, 0.2, 0.8),
+    alpha: 0.95,
+    materialCost: [{ materialId: "energy_core", quantity: 1 }, { materialId: "circuit_board", quantity: 1 }],
+    health: 40,
+    emissive: new BABYLON.Color3(1.0, 0.1, 0.6),
+  },
 };
+
+const BLOCK_HOTBAR: BlockType[] = [
+  BlockType.MetalWall, BlockType.Glass, BlockType.Platform, BlockType.Ramp,
+  BlockType.Door, BlockType.Light, BlockType.Cube, BlockType.Sphere,
+  BlockType.Pyramid, BlockType.Pillar, BlockType.Foundation, BlockType.Fence,
+  BlockType.NeonStrip,
+];
 
 const GRID_SIZE = 2;
 
@@ -127,6 +205,8 @@ export class BuildingSystem {
     console.log("[BuildingSystem] Initialized");
   }
 
+  private wheelHandler: ((e: WheelEvent) => void) | null = null;
+
   private setupControls(): void {
     this.keyHandler = (e: KeyboardEvent) => {
       if (e.code === "KeyG") {
@@ -137,13 +217,32 @@ export class BuildingSystem {
         if (e.code === "KeyR") {
           this.rotatePlacement();
         }
-        if (e.code === "Digit1") this.selectBlock(BlockType.MetalWall);
-        if (e.code === "Digit2") this.selectBlock(BlockType.Glass);
-        if (e.code === "Digit3") this.selectBlock(BlockType.Platform);
-        if (e.code === "Digit4") this.selectBlock(BlockType.Ramp);
-        if (e.code === "Digit5") this.selectBlock(BlockType.Door);
-        if (e.code === "Digit6") this.selectBlock(BlockType.Light);
+        const digitMap: Record<string, number> = {
+          Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4,
+          Digit6: 5, Digit7: 6, Digit8: 7, Digit9: 8, Digit0: 9,
+        };
+        if (e.code in digitMap) {
+          const idx = digitMap[e.code];
+          if (idx < BLOCK_HOTBAR.length) {
+            this.selectBlock(BLOCK_HOTBAR[idx]);
+          }
+        }
+        if (e.code === "Minus" && BLOCK_HOTBAR.length > 10) {
+          this.selectBlock(BLOCK_HOTBAR[10]);
+        }
+        if (e.code === "Equal" && BLOCK_HOTBAR.length > 11) {
+          this.selectBlock(BLOCK_HOTBAR[11]);
+        }
       }
+    };
+
+    this.wheelHandler = (e: WheelEvent) => {
+      if (!this.buildMode) return;
+      e.preventDefault();
+      const currentIdx = BLOCK_HOTBAR.indexOf(this.selectedBlockType);
+      const dir = e.deltaY > 0 ? 1 : -1;
+      const nextIdx = (currentIdx + dir + BLOCK_HOTBAR.length) % BLOCK_HOTBAR.length;
+      this.selectBlock(BLOCK_HOTBAR[nextIdx]);
     };
 
     this.clickHandler = (e: PointerEvent) => {
@@ -158,6 +257,11 @@ export class BuildingSystem {
 
     window.addEventListener("keydown", this.keyHandler);
     window.addEventListener("pointerdown", this.clickHandler);
+    window.addEventListener("wheel", this.wheelHandler, { passive: false });
+  }
+
+  getHotbar(): BlockType[] {
+    return [...BLOCK_HOTBAR];
   }
 
   toggleBuildMode(): void {
@@ -206,19 +310,63 @@ export class BuildingSystem {
     console.log(`[BuildingSystem] Rotation: ${this.placementRotation}°`);
   }
 
+  private buildShapeMesh(name: string, type: BlockType, def: BlockDefinition): BABYLON.Mesh {
+    switch (type) {
+      case BlockType.Ramp:
+        return this.createRampMesh(name, def);
+      case BlockType.Sphere:
+        return BABYLON.MeshBuilder.CreateSphere(name, {
+          diameter: def.size.width, segments: 16,
+        }, this.scene);
+      case BlockType.Pyramid:
+        return BABYLON.MeshBuilder.CreateCylinder(name, {
+          height: def.size.height, diameterTop: 0, diameterBottom: def.size.width, tessellation: 4,
+        }, this.scene);
+      case BlockType.Pillar:
+        return BABYLON.MeshBuilder.CreateCylinder(name, {
+          height: def.size.height, diameter: def.size.width, tessellation: 16,
+        }, this.scene);
+      case BlockType.Fence:
+        return this.createFenceMesh(name, def);
+      default:
+        return BABYLON.MeshBuilder.CreateBox(name,
+          { width: def.size.width, height: def.size.height, depth: def.size.depth },
+          this.scene
+        );
+    }
+  }
+
+  private createFenceMesh(name: string, def: BlockDefinition): BABYLON.Mesh {
+    const top = BABYLON.MeshBuilder.CreateBox(name + "_top", {
+      width: def.size.width, height: 0.2, depth: def.size.depth,
+    }, this.scene);
+    top.position.y = def.size.height - 0.1;
+    const bot = BABYLON.MeshBuilder.CreateBox(name + "_bot", {
+      width: def.size.width, height: 0.2, depth: def.size.depth,
+    }, this.scene);
+    bot.position.y = 0.1;
+    const slats: BABYLON.Mesh[] = [];
+    for (let i = 0; i < 5; i++) {
+      const slat = BABYLON.MeshBuilder.CreateBox(name + "_slat" + i, {
+        width: 0.15, height: def.size.height, depth: def.size.depth,
+      }, this.scene);
+      slat.position.x = -def.size.width / 2 + (i + 0.5) * (def.size.width / 5);
+      slat.position.y = def.size.height / 2;
+      slats.push(slat);
+    }
+    const merged = BABYLON.Mesh.MergeMeshes([top, bot, ...slats], true, true);
+    if (merged) {
+      merged.name = name;
+      return merged;
+    }
+    return top;
+  }
+
   private createPreviewMesh(): void {
     this.destroyPreviewMesh();
     const def = BLOCK_DEFINITIONS[this.selectedBlockType];
 
-    if (this.selectedBlockType === BlockType.Ramp) {
-      this.previewMesh = this.createRampMesh("buildPreview", def);
-    } else {
-      this.previewMesh = BABYLON.MeshBuilder.CreateBox(
-        "buildPreview",
-        { width: def.size.width, height: def.size.height, depth: def.size.depth },
-        this.scene
-      );
-    }
+    this.previewMesh = this.buildShapeMesh("buildPreview", this.selectedBlockType, def);
 
     const mat = new BABYLON.StandardMaterial("previewMat", this.scene);
     mat.diffuseColor = new BABYLON.Color3(0, 1, 0.5);
@@ -284,16 +432,9 @@ export class BuildingSystem {
 
     this.consumeMaterials(this.selectedBlockType);
 
-    let mesh: BABYLON.Mesh;
-    if (this.selectedBlockType === BlockType.Ramp) {
-      mesh = this.createRampMesh(`block_${this.blockIdCounter}`, def);
-    } else {
-      mesh = BABYLON.MeshBuilder.CreateBox(
-        `block_${this.blockIdCounter}`,
-        { width: def.size.width, height: def.size.height, depth: def.size.depth },
-        this.scene
-      );
-    }
+    const mesh: BABYLON.Mesh = this.buildShapeMesh(
+      `block_${this.blockIdCounter}`, this.selectedBlockType, def
+    );
 
     mesh.position = pos.clone();
     mesh.rotation.y = BABYLON.Tools.ToRadians(this.placementRotation);
@@ -580,6 +721,9 @@ export class BuildingSystem {
     }
     if (this.clickHandler) {
       window.removeEventListener("pointerdown", this.clickHandler);
+    }
+    if (this.wheelHandler) {
+      window.removeEventListener("wheel", this.wheelHandler);
     }
 
     this.destroyPreviewMesh();

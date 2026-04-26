@@ -1,5 +1,6 @@
 import * as BABYLON from "@babylonjs/core";
 import { WeaponType } from "./WeaponsSystem";
+import { EventBus } from "./EventBus";
 
 export type LootType = "credits" | "health" | "armor" | "ammo" | "weapon_upgrade";
 
@@ -118,6 +119,10 @@ export class ChestSystem {
     }
 
     this.createLootEffect(chest);
+    EventBus.getInstance().emit("effect:capture", {
+      position: chest.mesh.position.clone(),
+      color: new BABYLON.Color3(1.0, 0.85, 0.3),
+    });
     this.onLootCollected?.(chest.loot);
 
     setTimeout(() => {

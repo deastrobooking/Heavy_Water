@@ -132,6 +132,13 @@ export class CompanionSystem {
 
     this.companions.push(companion);
     this.collected.add(presetName);
+
+    this.bus.emit("effect:capture", {
+      position: spawnPos.clone(),
+      color: type === "ally"
+        ? new BABYLON.Color3(0.4, 0.95, 0.6)
+        : new BABYLON.Color3(0.95, 0.55, 1.0),
+    });
     return true;
   }
 

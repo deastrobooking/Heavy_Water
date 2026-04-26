@@ -25,7 +25,7 @@ export class PlayerController implements IDamageable {
   private camera: BABYLON.FreeCamera;
   private mesh: BABYLON.Mesh;
   private humanoid?: HumanoidCharacter;
-  private meshRoot: BABYLON.TransformNode | BABYLON.Mesh;
+  private meshRoot!: BABYLON.TransformNode | BABYLON.Mesh;
   private velocity: BABYLON.Vector3 = BABYLON.Vector3.Zero();
   private isGrounded: boolean = true;
 
@@ -104,7 +104,9 @@ export class PlayerController implements IDamageable {
     this.camera = camera;
     this.mesh = this.createPlayerMesh();
     this.animationSystem = new AnimationSystem();
-    this.animationSystem.createCharacterMesh(scene, this.mesh);
+    if (this.humanoid) {
+      this.animationSystem.attachToParts(this.humanoid.getAnimatableLimbs());
+    }
     this.bus = EventBus.getInstance();
 
     this.stats = {
@@ -168,7 +170,36 @@ export class PlayerController implements IDamageable {
   }
 
   private createPlayerMesh(): BABYLON.Mesh {
-    this.humanoid = new HumanoidCharacter(this.scene, HUMANOID_PRESETS.PlayerDefault);
+    let humanoidDef = HUMANOID_PRESETS.PlayerDefault;
+    try {
+      const raw = typeof localStorage !== "undefined"
+        ? localStorage.getItem("detroit3026_character_v1")
+        : null;
+      if (raw) {
+        const saved = JSON.parse(raw);
+        humanoidDef = {
+          ...humanoidDef,
+          height: saved.height ?? humanoidDef.height,
+          headScale: saved.headScale ?? humanoidDef.headScale,
+          shoulderWidth: saved.shoulderWidth ?? humanoidDef.shoulderWidth,
+          chestWidth: saved.shoulderWidth ?? humanoidDef.chestWidth,
+          armLength: saved.armLength ?? humanoidDef.armLength,
+          legLength: saved.legLength ?? humanoidDef.legLength,
+          bodyType: saved.bodyType ?? humanoidDef.bodyType,
+          armorType: saved.armorType ?? humanoidDef.armorType,
+          colors: saved.colors ? {
+            primary: BABYLON.Color3.FromArray(saved.colors.primary),
+            secondary: BABYLON.Color3.FromArray(saved.colors.secondary),
+            skin: BABYLON.Color3.FromArray(saved.colors.skin),
+            hair: BABYLON.Color3.FromArray(saved.colors.hair),
+          } : humanoidDef.colors,
+        };
+        console.log("[PlayerController] Loaded saved character");
+      }
+    } catch (e) {
+      console.warn("[PlayerController] Could not load saved character:", e);
+    }
+    this.humanoid = new HumanoidCharacter(this.scene, humanoidDef);
     const root = this.humanoid.getRoot();
     root.position = new BABYLON.Vector3(0, 1, -15);
     this.meshRoot = root;
@@ -191,8 +222,11 @@ export class PlayerController implements IDamageable {
     return capsule;
   }
 
+  private keyDownHandler: ((e: KeyboardEvent) => void) | null = null;
+  private keyUpHandler: ((e: KeyboardEvent) => void) | null = null;
+
   private setupControls(): void {
-    window.addEventListener("keydown", (e) => {
+    this.keyDownHandler = (e: KeyboardEvent) => {
       this.keys[e.code] = true;
 
       if (e.code === "Space") {
@@ -223,11 +257,35 @@ export class PlayerController implements IDamageable {
       if (e.code === "KeyX" && this.hasFlightArmor) {
         this.toggleFlightMode();
       }
-    });
+    };
 
-    window.addEventListener("keyup", (e) => {
+    this.keyUpHandler = (e: KeyboardEvent) => {
       this.keys[e.code] = false;
-    });
+    };
+
+    window.addEventListener("keydown", this.keyDownHandler);
+    window.addEventListener("keyup", this.keyUpHandler);
+  }
+
+  dispose(): void {
+    if (this.keyDownHandler) {
+      window.removeEventListener("keydown", this.keyDownHandler);
+      this.keyDownHandler = null;
+    }
+    if (this.keyUpHandler) {
+      window.removeEventListener("keyup", this.keyUpHandler);
+      this.keyUpHandler = null;
+    }
+    if (this.animationSystem) {
+      this.animationSystem.dispose();
+    }
+    if (this.humanoid) {
+      this.humanoid.dispose();
+    }
+    if (this.mesh && !this.mesh.isDisposed()) {
+      this.mesh.dispose();
+    }
+    console.log("[PlayerController] Disposed");
   }
 
   private handleJump(): void {

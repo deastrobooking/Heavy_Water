@@ -2,9 +2,10 @@ import React from "react";
 
 interface MainMenuProps {
   onStart: () => void;
+  onCustomize?: () => void;
 }
 
-export const MainMenu: React.FC<MainMenuProps> = ({ onStart }) => {
+export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize }) => {
   return (
     <div className="fixed inset-0 bg-gradient-to-b from-gray-900 via-purple-900 to-black flex flex-col items-center justify-center">
       <div className="absolute inset-0 overflow-hidden">
@@ -43,15 +44,27 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart }) => {
           </p>
         </div>
 
-        <button
-          onClick={onStart}
-          className="px-12 py-4 text-xl font-bold text-black bg-gradient-to-r from-cyan-400 to-purple-500 
-                     rounded-lg transform hover:scale-105 transition-all duration-300
-                     shadow-lg shadow-cyan-500/50 hover:shadow-purple-500/50
-                     border-2 border-white/20"
-        >
-          START MISSION
-        </button>
+        <div className="flex gap-4 justify-center">
+          <button
+            onClick={onStart}
+            className="px-12 py-4 text-xl font-bold text-black bg-gradient-to-r from-cyan-400 to-purple-500 
+                       rounded-lg transform hover:scale-105 transition-all duration-300
+                       shadow-lg shadow-cyan-500/50 hover:shadow-purple-500/50
+                       border-2 border-white/20"
+          >
+            START MISSION
+          </button>
+          {onCustomize && (
+            <button
+              onClick={onCustomize}
+              className="px-8 py-4 text-xl font-bold text-cyan-300 bg-black/40 border-2 border-cyan-400
+                         rounded-lg transform hover:scale-105 transition-all duration-300
+                         shadow-lg shadow-cyan-500/30 hover:bg-cyan-500/20"
+            >
+              CUSTOMIZE
+            </button>
+          )}
+        </div>
 
         <div className="mt-12 text-gray-500 text-xs">
           <p>WASD - Move | SHIFT - Sprint | Mouse - Look | LMB - Fire</p>

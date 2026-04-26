@@ -18,10 +18,27 @@ export interface HumanoidDefinition {
   armorType?: "light" | "heavy" | "captain";
 }
 
+export interface HumanoidLimbs {
+  root: BABYLON.TransformNode;
+  head: BABYLON.TransformNode;
+  torso: BABYLON.TransformNode;
+  leftArm: BABYLON.TransformNode;
+  rightArm: BABYLON.TransformNode;
+  leftLeg: BABYLON.TransformNode;
+  rightLeg: BABYLON.TransformNode;
+}
+
 export class HumanoidCharacter {
   private root: BABYLON.TransformNode;
   private definition: HumanoidDefinition;
   private materials: Map<string, BABYLON.StandardMaterial> = new Map();
+
+  private headMesh!: BABYLON.Mesh;
+  private torsoMesh!: BABYLON.Mesh;
+  private leftArmPivot!: BABYLON.TransformNode;
+  private rightArmPivot!: BABYLON.TransformNode;
+  private leftLegPivot!: BABYLON.TransformNode;
+  private rightLegPivot!: BABYLON.TransformNode;
 
   constructor(scene: BABYLON.Scene, definition: HumanoidDefinition) {
     this.definition = definition;
@@ -31,6 +48,18 @@ export class HumanoidCharacter {
     if (definition.hasArmor) {
       this.buildArmor(scene);
     }
+  }
+
+  public getAnimatableLimbs(): HumanoidLimbs {
+    return {
+      root: this.root,
+      head: this.headMesh,
+      torso: this.torsoMesh,
+      leftArm: this.leftArmPivot,
+      rightArm: this.rightArmPivot,
+      leftLeg: this.leftLegPivot,
+      rightLeg: this.rightLegPivot,
+    };
   }
 
   private createMaterials(scene: BABYLON.Scene): void {
@@ -65,6 +94,12 @@ export class HumanoidCharacter {
     const neckY = pelvisY + torsoHeight;
 
     const torsoRadius = this.definition.chestWidth * 0.22;
+    const armR = Math.max(0.12, this.definition.chestWidth * 0.06);
+    const legR = Math.max(0.14, this.definition.chestWidth * 0.07);
+    const upperArmLen = this.definition.armLength * 0.50;
+    const forearmLen = this.definition.armLength * 0.50;
+    const thighLen = this.definition.legLength * 0.50;
+    const shinLen = this.definition.legLength * 0.50;
 
     const torso = BABYLON.MeshBuilder.CreateCapsule("torso", {
       height: torsoHeight,
@@ -74,6 +109,7 @@ export class HumanoidCharacter {
     torso.position.y = chestY;
     torso.material = this.materials.get("primary")!;
     torso.parent = this.root;
+    this.torsoMesh = torso;
 
     const head = BABYLON.MeshBuilder.CreateSphere("head", {
       diameterX: headScale * 0.9,
@@ -84,95 +120,100 @@ export class HumanoidCharacter {
     head.position.y = neckY + headScale * 0.6;
     head.material = this.materials.get("skin")!;
     head.parent = this.root;
+    this.headMesh = head;
 
     this.buildHair(scene, head.position.y);
 
-    const leftUpperArm = BABYLON.MeshBuilder.CreateCapsule("leftUpperArm", {
-      height: this.definition.armLength * 0.45,
-      radius: 0.12,
+    const shoulderY = chestY + torsoHeight * 0.4;
+    const hipY = pelvisY - torsoRadius * 0.2;
+    const shoulderX = this.definition.shoulderWidth * 0.45;
+    const hipX = this.definition.shoulderWidth * 0.20;
+
+    this.leftArmPivot = this.buildArmRig(
+      scene, "leftArm", new BABYLON.Vector3(-shoulderX, shoulderY, 0),
+      upperArmLen, forearmLen, armR
+    );
+    this.rightArmPivot = this.buildArmRig(
+      scene, "rightArm", new BABYLON.Vector3(shoulderX, shoulderY, 0),
+      upperArmLen, forearmLen, armR
+    );
+
+    this.leftLegPivot = this.buildLegRig(
+      scene, "leftLeg", new BABYLON.Vector3(-hipX, hipY, 0),
+      thighLen, shinLen, legR
+    );
+    this.rightLegPivot = this.buildLegRig(
+      scene, "rightLeg", new BABYLON.Vector3(hipX, hipY, 0),
+      thighLen, shinLen, legR
+    );
+  }
+
+  private buildArmRig(
+    scene: BABYLON.Scene, name: string, jointPos: BABYLON.Vector3,
+    upperLen: number, foreLen: number, radius: number
+  ): BABYLON.TransformNode {
+    const pivot = new BABYLON.TransformNode(`${name}Pivot`, scene);
+    pivot.position = jointPos.clone();
+    pivot.parent = this.root;
+
+    const upper = BABYLON.MeshBuilder.CreateCapsule(`${name}Upper`, {
+      height: upperLen,
+      radius: radius,
       tessellation: 10,
     }, scene);
-    leftUpperArm.rotation.z = Math.PI / 2;
-    leftUpperArm.position = new BABYLON.Vector3(
-      -this.definition.shoulderWidth * 0.5,
-      chestY + 0.1,
-      0
-    );
-    leftUpperArm.material = this.materials.get("primary")!;
-    leftUpperArm.parent = this.root;
+    upper.position.y = -upperLen * 0.5;
+    upper.material = this.materials.get("primary")!;
+    upper.parent = pivot;
 
-    const rightUpperArm = leftUpperArm.clone("rightUpperArm")!;
-    rightUpperArm.position.x *= -1;
-    rightUpperArm.parent = this.root;
-
-    const leftForearm = BABYLON.MeshBuilder.CreateCapsule("leftForearm", {
-      height: this.definition.armLength * 0.40,
-      radius: 0.10,
+    const fore = BABYLON.MeshBuilder.CreateCapsule(`${name}Fore`, {
+      height: foreLen,
+      radius: radius * 0.85,
       tessellation: 10,
     }, scene);
-    leftForearm.rotation.z = Math.PI / 2;
-    leftForearm.position = new BABYLON.Vector3(
-      -this.definition.shoulderWidth * 0.5 - this.definition.armLength * 0.25,
-      chestY - 0.2,
-      0
-    );
-    leftForearm.material = this.materials.get("primary")!;
-    leftForearm.parent = this.root;
+    fore.position.y = -upperLen - foreLen * 0.5;
+    fore.material = this.materials.get("primary")!;
+    fore.parent = pivot;
 
-    const rightForearm = leftForearm.clone("rightForearm")!;
-    rightForearm.position.x *= -1;
-    rightForearm.parent = this.root;
+    return pivot;
+  }
 
-    const leftThigh = BABYLON.MeshBuilder.CreateCapsule("leftThigh", {
-      height: this.definition.legLength * 0.48,
-      radius: 0.14,
+  private buildLegRig(
+    scene: BABYLON.Scene, name: string, jointPos: BABYLON.Vector3,
+    thighLen: number, shinLen: number, radius: number
+  ): BABYLON.TransformNode {
+    const pivot = new BABYLON.TransformNode(`${name}Pivot`, scene);
+    pivot.position = jointPos.clone();
+    pivot.parent = this.root;
+
+    const thigh = BABYLON.MeshBuilder.CreateCapsule(`${name}Thigh`, {
+      height: thighLen,
+      radius: radius,
       tessellation: 10,
     }, scene);
-    leftThigh.position = new BABYLON.Vector3(
-      -this.definition.shoulderWidth * 0.18,
-      pelvisY - this.definition.legLength * 0.22,
-      0
-    );
-    leftThigh.material = this.materials.get("primary")!;
-    leftThigh.parent = this.root;
+    thigh.position.y = -thighLen * 0.5;
+    thigh.material = this.materials.get("primary")!;
+    thigh.parent = pivot;
 
-    const rightThigh = leftThigh.clone("rightThigh")!;
-    rightThigh.position.x *= -1;
-    rightThigh.parent = this.root;
-
-    const leftShin = BABYLON.MeshBuilder.CreateCapsule("leftShin", {
-      height: this.definition.legLength * 0.42,
-      radius: 0.11,
+    const shin = BABYLON.MeshBuilder.CreateCapsule(`${name}Shin`, {
+      height: shinLen,
+      radius: radius * 0.85,
       tessellation: 10,
     }, scene);
-    leftShin.position = new BABYLON.Vector3(
-      -this.definition.shoulderWidth * 0.18,
-      pelvisY - this.definition.legLength * 0.62,
-      0
-    );
-    leftShin.material = this.materials.get("secondary")!;
-    leftShin.parent = this.root;
+    shin.position.y = -thighLen - shinLen * 0.5;
+    shin.material = this.materials.get("secondary")!;
+    shin.parent = pivot;
 
-    const rightShin = leftShin.clone("rightShin")!;
-    rightShin.position.x *= -1;
-    rightShin.parent = this.root;
-
-    const leftFoot = BABYLON.MeshBuilder.CreateBox("leftFoot", {
-      width: 0.18,
-      height: 0.10,
-      depth: 0.24,
+    const foot = BABYLON.MeshBuilder.CreateBox(`${name}Foot`, {
+      width: radius * 1.6,
+      height: 0.12,
+      depth: radius * 2.4,
     }, scene);
-    leftFoot.position = new BABYLON.Vector3(
-      -this.definition.shoulderWidth * 0.18,
-      pelvisY - this.definition.legLength + 0.05,
-      0.06
-    );
-    leftFoot.material = this.materials.get("secondary")!;
-    leftFoot.parent = this.root;
+    foot.position.y = -thighLen - shinLen - 0.05;
+    foot.position.z = radius * 0.6;
+    foot.material = this.materials.get("secondary")!;
+    foot.parent = pivot;
 
-    const rightFoot = leftFoot.clone("rightFoot")!;
-    rightFoot.position.x *= -1;
-    rightFoot.parent = this.root;
+    return pivot;
   }
 
   private buildHair(scene: BABYLON.Scene, headY: number): void {
@@ -203,23 +244,23 @@ export class HumanoidCharacter {
     const armorType = this.definition.armorType || "light";
     const matArmor = this.materials.get("secondary")!;
 
+    const totalLegLen = this.definition.height * 0.45;
+    const thighLen = totalLegLen * 0.5;
+    const shinLen = totalLegLen * 0.5;
+
     if (armorType === "light" || armorType === "heavy") {
       const leftShoulder = BABYLON.MeshBuilder.CreateBox("leftShoulderArmor", {
         width: 0.38,
         height: 0.30,
         depth: 0.40,
       }, scene);
-      leftShoulder.position = new BABYLON.Vector3(
-        -this.definition.shoulderWidth * 0.55,
-        this.definition.height * 0.63,
-        0
-      );
+      leftShoulder.position = new BABYLON.Vector3(-0.05, 0.0, 0);
       leftShoulder.material = matArmor;
-      leftShoulder.parent = this.root;
+      leftShoulder.parent = this.leftArmPivot;
 
       const rightShoulder = leftShoulder.clone("rightShoulderArmor")!;
-      rightShoulder.position.x *= -1;
-      rightShoulder.parent = this.root;
+      rightShoulder.position = new BABYLON.Vector3(0.05, 0.0, 0);
+      rightShoulder.parent = this.rightArmPivot;
     }
 
     if (armorType === "heavy" || armorType === "captain") {
@@ -228,17 +269,13 @@ export class HumanoidCharacter {
         height: 0.42,
         depth: 0.28,
       }, scene);
-      leftThighArmor.position = new BABYLON.Vector3(
-        -this.definition.shoulderWidth * 0.18,
-        this.definition.height * 0.35,
-        0.05
-      );
+      leftThighArmor.position = new BABYLON.Vector3(0, -thighLen * 0.5, 0.05);
       leftThighArmor.material = matArmor;
-      leftThighArmor.parent = this.root;
+      leftThighArmor.parent = this.leftLegPivot;
 
       const rightThighArmor = leftThighArmor.clone("rightThighArmor")!;
-      rightThighArmor.position.x *= -1;
-      rightThighArmor.parent = this.root;
+      rightThighArmor.position = new BABYLON.Vector3(0, -thighLen * 0.5, 0.05);
+      rightThighArmor.parent = this.rightLegPivot;
     }
 
     const leftBoot = BABYLON.MeshBuilder.CreateBox("leftBoot", {
@@ -246,17 +283,13 @@ export class HumanoidCharacter {
       height: 0.18,
       depth: 0.28,
     }, scene);
-    leftBoot.position = new BABYLON.Vector3(
-      -this.definition.shoulderWidth * 0.18,
-      this.definition.height * 0.05,
-      0.08
-    );
+    leftBoot.position = new BABYLON.Vector3(0, -(thighLen + shinLen) - 0.04, 0.08);
     leftBoot.material = matArmor;
-    leftBoot.parent = this.root;
+    leftBoot.parent = this.leftLegPivot;
 
     const rightBoot = leftBoot.clone("rightBoot")!;
-    rightBoot.position.x *= -1;
-    rightBoot.parent = this.root;
+    rightBoot.position = new BABYLON.Vector3(0, -(thighLen + shinLen) - 0.04, 0.08);
+    rightBoot.parent = this.rightLegPivot;
   }
 
   public getRoot(): BABYLON.TransformNode {

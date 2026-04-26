@@ -3,6 +3,14 @@ import { PlayerStats } from "./PlayerController";
 import { Weapon } from "./WeaponsSystem";
 import { ArmorUpgrade } from "./ArmorCapsuleSystem";
 import { ShopDefinition, ShopItem } from "./ShopSystem";
+import { BlockType } from "./BuildingSystem";
+
+const BLOCK_LABELS: Record<string, string> = {
+  metal_wall: "Wall", glass: "Glass", platform: "Platform", ramp: "Ramp",
+  door: "Door", light: "Light", cube: "Cube", sphere: "Sphere",
+  pyramid: "Pyramid", pillar: "Pillar", foundation: "Foundation",
+  fence: "Fence", neon_strip: "Neon",
+};
 
 interface GameUIProps {
   stats: PlayerStats;
@@ -34,6 +42,8 @@ interface GameUIProps {
   activeShop?: ShopDefinition | null;
   onShopBuy?: (itemId: string) => void;
   buildMode?: boolean;
+  hotbarBlocks?: BlockType[];
+  selectedBlock?: BlockType | null;
   username?: string | null;
   multiplayerConnected?: boolean;
   inRoom?: boolean;
@@ -90,6 +100,8 @@ export const GameUI: React.FC<GameUIProps> = ({
   activeShop = null,
   onShopBuy,
   buildMode = false,
+  hotbarBlocks = [],
+  selectedBlock = null,
   username = null,
   multiplayerConnected = false,
   inRoom = false,
@@ -357,6 +369,35 @@ export const GameUI: React.FC<GameUIProps> = ({
           ))}
         </div>
       </div>
+
+      {buildMode && hotbarBlocks && hotbarBlocks.length > 0 && (
+        <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2">
+          <div className="bg-black/85 border-2 border-emerald-400/70 rounded-lg px-3 py-2 shadow-lg shadow-emerald-500/30">
+            <div className="text-emerald-300 text-xs text-center mb-1.5 font-bold tracking-wider">
+              BUILD HOTBAR — Wheel/1-9 to switch · LMB Place · RMB Mine · R Rotate
+            </div>
+            <div className="flex gap-1.5">
+              {hotbarBlocks.map((bt, i) => {
+                const active = bt === selectedBlock;
+                const keyHint = i < 9 ? `${i + 1}` : i === 9 ? "0" : i === 10 ? "-" : "=";
+                return (
+                  <div
+                    key={bt}
+                    className={`min-w-[58px] px-1 py-1 text-center text-xs border rounded transition-all ${
+                      active
+                        ? "border-emerald-400 text-emerald-200 bg-emerald-500/30 scale-110 shadow shadow-emerald-400/50"
+                        : "border-gray-700 text-gray-400 bg-gray-900/60"
+                    }`}
+                  >
+                    <div className="text-[10px] opacity-70">[{keyHint}]</div>
+                    <div className="font-semibold">{BLOCK_LABELS[bt] || bt}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {capsuleOpen && (
         <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-auto">

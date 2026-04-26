@@ -17,12 +17,12 @@ export type AnimationState =
 
 export interface CharacterParts {
   root: BABYLON.TransformNode;
-  head: BABYLON.Mesh;
-  torso: BABYLON.Mesh;
-  leftArm: BABYLON.Mesh;
-  rightArm: BABYLON.Mesh;
-  leftLeg: BABYLON.Mesh;
-  rightLeg: BABYLON.Mesh;
+  head: BABYLON.TransformNode;
+  torso: BABYLON.TransformNode;
+  leftArm: BABYLON.TransformNode;
+  rightArm: BABYLON.TransformNode;
+  leftLeg: BABYLON.TransformNode;
+  rightLeg: BABYLON.TransformNode;
 }
 
 interface AnimationBlend {
@@ -52,6 +52,7 @@ interface FullPose {
 
 export class AnimationSystem {
   private parts: CharacterParts | null = null;
+  private ownsParts: boolean = false;
   private blend: AnimationBlend;
   private time: number = 0;
   private attackTimer: number = 0;
@@ -67,7 +68,13 @@ export class AnimationSystem {
     };
   }
 
+  attachToParts(parts: CharacterParts): void {
+    this.parts = parts;
+    this.ownsParts = false;
+  }
+
   createCharacterMesh(scene: BABYLON.Scene, parentMesh: BABYLON.Mesh): CharacterParts {
+    this.ownsParts = true;
     const root = new BABYLON.TransformNode("charRoot", scene);
     root.parent = parentMesh;
     root.position = BABYLON.Vector3.Zero();
@@ -190,10 +197,10 @@ export class AnimationSystem {
     this.applyBlendedPose(this.parts.rightLeg, currentPose.rightLeg, previousPose.rightLeg, t);
   }
 
-  private applyBlendedPose(mesh: BABYLON.Mesh, current: LimbPose, previous: LimbPose, t: number): void {
-    mesh.rotation.x = this.lerp(previous.rotationX, current.rotationX, t);
-    mesh.rotation.y = this.lerp(previous.rotationY, current.rotationY, t);
-    mesh.rotation.z = this.lerp(previous.rotationZ, current.rotationZ, t);
+  private applyBlendedPose(node: BABYLON.TransformNode, current: LimbPose, previous: LimbPose, t: number): void {
+    node.rotation.x = this.lerp(previous.rotationX, current.rotationX, t);
+    node.rotation.y = this.lerp(previous.rotationY, current.rotationY, t);
+    node.rotation.z = this.lerp(previous.rotationZ, current.rotationZ, t);
   }
 
   private lerp(a: number, b: number, t: number): number {
@@ -396,7 +403,7 @@ export class AnimationSystem {
   }
 
   dispose(): void {
-    if (this.parts) {
+    if (this.parts && this.ownsParts) {
       this.parts.head.dispose();
       this.parts.torso.dispose();
       this.parts.leftArm.dispose();
@@ -404,7 +411,8 @@ export class AnimationSystem {
       this.parts.leftLeg.dispose();
       this.parts.rightLeg.dispose();
       this.parts.root.dispose();
-      this.parts = null;
     }
+    this.parts = null;
+    this.ownsParts = false;
   }
 }

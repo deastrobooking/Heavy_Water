@@ -18,12 +18,14 @@ import { ArmorCapsuleSystem, ArmorUpgrade } from "./ArmorCapsuleSystem";
 import { ShopSystem, ShopDefinition } from "./ShopSystem";
 import { GardenSystem } from "./GardenSystem";
 import { MapSystem } from "./MapSystem";
-import { BuildingSystem } from "./BuildingSystem";
+import { BuildingSystem, BlockType } from "./BuildingSystem";
 import { MultiplayerSystem } from "./MultiplayerSystem";
+import { EffectsSystem } from "./EffectsSystem";
 import { EventBus, GameEvents } from "./EventBus";
 import { DamageType } from "./DamageSystem";
 import { GameUI } from "./GameUI";
 import { MainMenu } from "./MainMenu";
+import { CharacterEditor } from "./CharacterEditor";
 import AuthUI from "./AuthUI";
 
 type GamePhase = "auth" | "menu" | "playing" | "paused" | "gameover";
@@ -49,6 +51,7 @@ export const Game: React.FC = () => {
   const mapRef = useRef<MapSystem | null>(null);
   const buildingRef = useRef<BuildingSystem | null>(null);
   const multiplayerRef = useRef<MultiplayerSystem | null>(null);
+  const effectsRef = useRef<EffectsSystem | null>(null);
 
   const [gamePhase, setGamePhase] = useState<GamePhase>("auth");
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -60,6 +63,9 @@ export const Game: React.FC = () => {
   const [chatMessages, setChatMessages] = useState<{ username: string; message: string; time: number }[]>([]);
   const [lobbyRooms, setLobbyRooms] = useState<any[]>([]);
   const [showLobby, setShowLobby] = useState(false);
+  const [showCustomizer, setShowCustomizer] = useState(false);
+  const [selectedBlock, setSelectedBlock] = useState<BlockType | null>(null);
+  const [hotbarBlocks, setHotbarBlocks] = useState<BlockType[]>([]);
   const [stats, setStats] = useState<PlayerStats>({
     health: 100,
     maxHealth: 100,
@@ -301,6 +307,11 @@ export const Game: React.FC = () => {
 
         const buildingSystem = new BuildingSystem(scene, engine.getCamera(), inventory);
         buildingRef.current = buildingSystem;
+        setHotbarBlocks(buildingSystem.getHotbar());
+        setSelectedBlock(buildingSystem.getSelectedBlockType());
+
+        const effects = new EffectsSystem(scene);
+        effectsRef.current = effects;
 
         const multiplayer = new MultiplayerSystem(scene);
         multiplayerRef.current = multiplayer;
@@ -457,6 +468,7 @@ export const Game: React.FC = () => {
           capsuleSystem.update(dt, playerPos);
           shopSystem.update();
           buildingSystem.update(dt);
+          effects.update(dt);
           multiplayer.update(dt);
 
           mapSystem.updatePlayerPosition(playerPos);
@@ -480,6 +492,7 @@ export const Game: React.FC = () => {
           setMaxArmorEnergy(player.getMaxArmorEnergy());
           setHasFlightArmor(player.getHasFlightArmor());
           setBuildMode(buildingSystem.isBuildMode());
+          setSelectedBlock(buildingSystem.getSelectedBlockType());
 
           uiThrottleTimer += dt;
           if (uiThrottleTimer >= 0.5) {
@@ -642,6 +655,7 @@ export const Game: React.FC = () => {
 
   useEffect(() => {
     return () => {
+      if (playerRef.current) playerRef.current.dispose();
       if (combatSystemRef.current) combatSystemRef.current.dispose();
       if (specialWeaponsRef.current) specialWeaponsRef.current.dispose();
       if (beamSabreRef.current) beamSabreRef.current.dispose();
@@ -649,6 +663,7 @@ export const Game: React.FC = () => {
       if (capsuleRef.current) capsuleRef.current.dispose();
       if (shopRef.current) shopRef.current.dispose();
       if (buildingRef.current) buildingRef.current.dispose();
+      if (effectsRef.current) effectsRef.current.dispose();
       if (multiplayerRef.current) multiplayerRef.current.dispose();
       if (engineRef.current) engineRef.current.dispose();
       EventBus.getInstance().clear();
@@ -661,7 +676,13 @@ export const Game: React.FC = () => {
         <AuthUI onAuthenticated={handleAuthenticated} onPlayOffline={handlePlayOffline} />
       )}
 
-      {gamePhase === "menu" && <MainMenu onStart={handleStart} />}
+      {gamePhase === "menu" && (
+        <MainMenu onStart={handleStart} onCustomize={() => setShowCustomizer(true)} />
+      )}
+
+      {showCustomizer && (
+        <CharacterEditor onClose={() => setShowCustomizer(false)} />
+      )}
 
       <canvas
         ref={canvasRef}
@@ -704,6 +725,8 @@ export const Game: React.FC = () => {
           activeShop={activeShop}
           onShopBuy={handleShopBuy}
           buildMode={buildMode}
+          hotbarBlocks={hotbarBlocks}
+          selectedBlock={selectedBlock}
           username={currentUser?.username || null}
           multiplayerConnected={multiplayerConnected}
           inRoom={inRoom}
