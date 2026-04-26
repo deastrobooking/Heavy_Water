@@ -253,6 +253,12 @@ export const Game: React.FC = () => {
         const beamSabre = new BeamSabreSystem(scene, engine.getCamera());
         beamSabreRef.current = beamSabre;
 
+        const aimOrigin = () => player.getAimOrigin();
+        weapons.setAimOriginProvider(aimOrigin);
+        specialWeapons.setAimOriginProvider(aimOrigin);
+        combatSystem.setAimOriginProvider(aimOrigin);
+        beamSabre.setAimOriginProvider(aimOrigin);
+
         const inventory = new InventorySystem();
         inventoryRef.current = inventory;
 

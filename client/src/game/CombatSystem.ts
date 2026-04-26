@@ -25,6 +25,16 @@ export interface ComboChain {
 export class CombatSystem {
   private scene: BABYLON.Scene;
   private camera: BABYLON.FreeCamera;
+  private aimOriginProvider: (() => BABYLON.Vector3) | null = null;
+
+  setAimOriginProvider(fn: () => BABYLON.Vector3): void {
+    this.aimOriginProvider = fn;
+  }
+
+  private getAimOrigin(): BABYLON.Vector3 {
+    return this.aimOriginProvider ? this.aimOriginProvider() : this.camera.position;
+  }
+
   private isAttacking: boolean = false;
   private inputBuffered: boolean = false;
   private inputBufferTimer: number = 0;
@@ -151,7 +161,7 @@ export class CombatSystem {
 
   private performHitDetection(attack: AttackData): void {
     const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
-    const origin = this.camera.position.add(forward.scale(attack.hitOffset));
+    const origin = this.getAimOrigin().add(forward.scale(attack.hitOffset));
 
     const meshes = this.scene.meshes;
     for (const mesh of meshes) {
@@ -163,7 +173,7 @@ export class CombatSystem {
         const info: DamageInfo = {
           amount: attack.damage * this.damageMultiplier,
           hitPoint: mesh.position.clone(),
-          hitDirection: mesh.position.subtract(this.camera.position).normalize(),
+          hitDirection: mesh.position.subtract(this.getAimOrigin()).normalize(),
           damageType: attack.damageType,
           knockbackForce: attack.knockback,
         };

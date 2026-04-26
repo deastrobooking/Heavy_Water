@@ -36,6 +36,16 @@ const LEVEL_CONFIGS: Omit<BeamSabre, "isActive">[] = [
 export class BeamSabreSystem {
   private scene: BABYLON.Scene;
   private camera: BABYLON.FreeCamera;
+  private aimOriginProvider: (() => BABYLON.Vector3) | null = null;
+
+  setAimOriginProvider(fn: () => BABYLON.Vector3): void {
+    this.aimOriginProvider = fn;
+  }
+
+  private getAimOrigin(): BABYLON.Vector3 {
+    return this.aimOriginProvider ? this.aimOriginProvider() : this.camera.position;
+  }
+
   private sabreMesh: BABYLON.Mesh | null = null;
   private energyWaves: EnergyWave[] = [];
   private bus: EventBus;
@@ -99,7 +109,7 @@ export class BeamSabreSystem {
     const right = this.camera.getDirection(BABYLON.Vector3.Right());
     const up = this.camera.getDirection(BABYLON.Vector3.Up());
 
-    const pos = this.camera.position
+    const pos = this.getAimOrigin()
       .add(forward.scale(1.2))
       .add(right.scale(0.5))
       .add(up.scale(-0.3));
@@ -161,7 +171,7 @@ export class BeamSabreSystem {
 
   private performSlashHit(): void {
     const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
-    const origin = this.camera.position.add(forward.scale(2.5));
+    const origin = this.getAimOrigin().add(forward.scale(2.5));
     const hitRadius = 3.5;
 
     for (const mesh of this.scene.meshes) {
@@ -173,7 +183,7 @@ export class BeamSabreSystem {
         const info: DamageInfo = {
           amount: this.sabre.damage,
           hitPoint: mesh.position.clone(),
-          hitDirection: mesh.position.subtract(this.camera.position).normalize(),
+          hitDirection: mesh.position.subtract(this.getAimOrigin()).normalize(),
           damageType: DamageType.Melee,
           knockbackForce: 5,
         };
@@ -244,7 +254,7 @@ export class BeamSabreSystem {
       waveMesh.material = waveMat;
       waveMesh.isPickable = false;
 
-      const spawnPos = this.camera.position.add(forward.scale(2));
+      const spawnPos = this.getAimOrigin().add(forward.scale(2));
       waveMesh.position.copyFrom(spawnPos);
 
       const lookDir = forward.clone();

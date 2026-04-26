@@ -37,6 +37,15 @@ export class WeaponsSystem {
 
   private onAmmoChange: ((ammo: number, maxAmmo: number) => void) | null = null;
   private onWeaponChange: ((weapon: Weapon) => void) | null = null;
+  private aimOriginProvider: (() => BABYLON.Vector3) | null = null;
+
+  setAimOriginProvider(fn: () => BABYLON.Vector3): void {
+    this.aimOriginProvider = fn;
+  }
+
+  private getAimOrigin(): BABYLON.Vector3 {
+    return this.aimOriginProvider ? this.aimOriginProvider() : this.camera.position;
+  }
 
   constructor(scene: BABYLON.Scene, camera: BABYLON.FreeCamera) {
     this.scene = scene;
@@ -225,7 +234,7 @@ export class WeaponsSystem {
     material.diffuseColor = color;
     projectileMesh.material = material;
 
-    projectileMesh.position = this.camera.position.add(forward.scale(1));
+    projectileMesh.position = this.getAimOrigin().add(forward.scale(1));
 
     const projectile: Projectile = {
       mesh: projectileMesh,

@@ -42,6 +42,15 @@ export class SpecialWeaponsSystem {
   private activeProjectiles: ActiveProjectile[] = [];
   private activeDrones: ActiveDrone[] = [];
   private onSpecialWeaponChange: ((weapons: ReturnType<SpecialWeaponsSystem["getActiveSpecialWeapons"]>) => void) | null = null;
+  private aimOriginProvider: (() => BABYLON.Vector3) | null = null;
+
+  setAimOriginProvider(fn: () => BABYLON.Vector3): void {
+    this.aimOriginProvider = fn;
+  }
+
+  private getAimOrigin(): BABYLON.Vector3 {
+    return this.aimOriginProvider ? this.aimOriginProvider() : this.camera.position;
+  }
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(scene: BABYLON.Scene, camera: BABYLON.FreeCamera) {
@@ -120,7 +129,7 @@ export class SpecialWeaponsSystem {
     this.cooldownTimers.set(slot, weapon.cooldown);
 
     const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
-    const spawnPos = this.camera.position.add(forward.scale(2));
+    const spawnPos = this.getAimOrigin().add(forward.scale(2));
 
     switch (slot) {
       case 7: this.spawnHomingMissile(weapon, spawnPos, forward); break;

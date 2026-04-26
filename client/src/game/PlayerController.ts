@@ -425,7 +425,7 @@ export class PlayerController implements IDamageable {
 
     if (this.isFlying) {
       this.updateFlight(deltaTime);
-      this.updateCamera();
+      this.updateCamera(deltaTime);
       this.updateAnimations(deltaTime);
       return;
     }
@@ -439,7 +439,7 @@ export class PlayerController implements IDamageable {
     }
 
     this.updatePhysics(deltaTime);
-    this.updateCamera();
+    this.updateCamera(deltaTime);
     this.updateAnimations(deltaTime);
   }
 
@@ -656,11 +656,46 @@ export class PlayerController implements IDamageable {
     }
   }
 
-  private updateCamera(): void {
-    this.camera.position = new BABYLON.Vector3(
+  private updateCamera(dt: number = 1 / 60): void {
+    const headHeight = 1.7;
+    const cameraDistance = 6.5;
+    const cameraHeight = 2.2;
+
+    const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
+    const flatForward = new BABYLON.Vector3(forward.x, 0, forward.z);
+    if (flatForward.lengthSquared() < 0.0001) {
+      flatForward.set(0, 0, 1);
+    } else {
+      flatForward.normalize();
+    }
+
+    const target = new BABYLON.Vector3(
       this.meshRoot.position.x,
-      this.meshRoot.position.y + 1.5,
-      this.meshRoot.position.z
+      this.meshRoot.position.y + headHeight,
+      this.meshRoot.position.z,
+    );
+
+    const desired = target
+      .add(flatForward.scale(-cameraDistance))
+      .add(new BABYLON.Vector3(0, cameraHeight, 0));
+
+    desired.y = Math.max(desired.y, 0.6);
+    this.camera.position.copyFrom(desired);
+
+    if (this.meshRoot instanceof BABYLON.Mesh || this.meshRoot instanceof BABYLON.TransformNode) {
+      const targetYaw = Math.atan2(flatForward.x, flatForward.z);
+      const r = this.meshRoot.rotation;
+      const delta = ((targetYaw - r.y + Math.PI) % (Math.PI * 2)) - Math.PI;
+      const smooth = 1 - Math.exp(-12 * dt);
+      r.y += delta * smooth;
+    }
+  }
+
+  getAimOrigin(): BABYLON.Vector3 {
+    return new BABYLON.Vector3(
+      this.meshRoot.position.x,
+      this.meshRoot.position.y + 1.7,
+      this.meshRoot.position.z,
     );
   }
 

@@ -62,12 +62,12 @@ export class BabylonEngine {
     );
     camera.setTarget(new BABYLON.Vector3(300, 10, 100));
     camera.attachControl(this.canvas, true);
-    camera.speed = 0.5;
+    camera.speed = 0;
     camera.angularSensibility = 2000;
-    camera.keysUp = [87];
-    camera.keysDown = [83];
-    camera.keysLeft = [65];
-    camera.keysRight = [68];
+    camera.keysUp = [];
+    camera.keysDown = [];
+    camera.keysLeft = [];
+    camera.keysRight = [];
     camera.minZ = 0.1;
     camera.maxZ = 1000;
     return camera;

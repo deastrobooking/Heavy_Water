@@ -13,6 +13,8 @@ export class MapSystem {
   private mapCanvas: HTMLCanvasElement;
   private mapContext: CanvasRenderingContext2D;
   private mapContainer: HTMLDivElement;
+  private controlsPanel: HTMLDivElement;
+  private keyHandler: (e: KeyboardEvent) => void;
   private mapScale: number = 0.15;
   private worldCenter: BABYLON.Vector3 = new BABYLON.Vector3(600, 0, 600);
   private worldSize: number = 1200;
@@ -32,23 +34,108 @@ export class MapSystem {
     this.mapContainer.style.position = "absolute";
     this.mapContainer.style.top = "10px";
     this.mapContainer.style.right = "10px";
+    this.mapContainer.style.width = "260px";
     this.mapContainer.style.border = "2px solid rgba(0, 255, 255, 0.8)";
-    this.mapContainer.style.backgroundColor = "rgba(0, 0, 0, 0.7)";
+    this.mapContainer.style.backgroundColor = "rgba(0, 0, 0, 0.78)";
     this.mapContainer.style.borderRadius = "8px";
     this.mapContainer.style.overflow = "hidden";
     this.mapContainer.style.zIndex = "1000";
+    this.mapContainer.style.fontFamily = "monospace";
+    this.mapContainer.style.color = "rgba(220, 245, 255, 0.92)";
+    this.mapContainer.style.boxShadow = "0 0 16px rgba(0, 255, 255, 0.15)";
+
+    this.mapCanvas.style.display = "block";
     this.mapContainer.appendChild(this.mapCanvas);
 
+    this.controlsPanel = this.buildControlsPanel();
+    this.mapContainer.appendChild(this.controlsPanel);
+
     document.body.appendChild(this.mapContainer);
-    this.setupControls();
+    this.keyHandler = (e: KeyboardEvent) => {
+      if (e.code === "KeyM") this.toggleMap();
+    };
+    window.addEventListener("keydown", this.keyHandler);
   }
 
-  private setupControls(): void {
-    window.addEventListener("keydown", (e) => {
-      if (e.code === "KeyM") {
-        this.toggleMap();
+  private buildControlsPanel(): HTMLDivElement {
+    const panel = document.createElement("div");
+    panel.style.padding = "8px 10px 10px 10px";
+    panel.style.borderTop = "1px solid rgba(0, 255, 255, 0.35)";
+    panel.style.fontSize = "10px";
+    panel.style.lineHeight = "1.45";
+    panel.style.maxHeight = "260px";
+    panel.style.overflowY = "auto";
+
+    const title = document.createElement("div");
+    title.textContent = "CONTROLS";
+    title.style.color = "rgba(0, 255, 255, 0.95)";
+    title.style.fontWeight = "bold";
+    title.style.fontSize = "11px";
+    title.style.letterSpacing = "1px";
+    title.style.marginBottom = "6px";
+    panel.appendChild(title);
+
+    const sections: Array<[string, Array<[string, string]>]> = [
+      ["MOVEMENT", [
+        ["WASD", "Move"],
+        ["Shift", "Sprint"],
+        ["Space", "Jump (x2 dbl, x3 flight)"],
+        ["X", "Toggle Flight"],
+        ["Ctrl", "Descend (in flight)"],
+        ["Q", "Dodge / Dash"],
+      ]],
+      ["COMBAT", [
+        ["LMB", "Fire weapon"],
+        ["V", "Light melee"],
+        ["B", "Heavy melee"],
+        ["F", "Parry"],
+        ["R", "Reload / Rotate"],
+        ["1-6", "Primary weapons"],
+        ["7-0", "Special weapons"],
+        ["T", "Beam Sabre"],
+        ["E", "Interact"],
+      ]],
+      ["BUILD / WORLD", [
+        ["G", "Build mode (blocks)"],
+        ["P / Esc", "Plan mode (prefabs)"],
+        ["RMB", "Mine / Remove"],
+        ["[ ]", "Cycle prefabs"],
+        ["Wheel", "Cycle weapon/block"],
+        ["M", "Toggle this panel"],
+      ]],
+    ];
+
+    for (const [heading, rows] of sections) {
+      const h = document.createElement("div");
+      h.textContent = heading;
+      h.style.color = "rgba(255, 200, 0, 0.85)";
+      h.style.fontSize = "9px";
+      h.style.letterSpacing = "1.5px";
+      h.style.marginTop = "4px";
+      h.style.marginBottom = "2px";
+      panel.appendChild(h);
+
+      for (const [k, label] of rows) {
+        const row = document.createElement("div");
+        row.style.display = "flex";
+        row.style.justifyContent = "space-between";
+        row.style.gap = "8px";
+        const key = document.createElement("span");
+        key.textContent = k;
+        key.style.color = "rgba(0, 255, 255, 0.95)";
+        key.style.minWidth = "62px";
+        const val = document.createElement("span");
+        val.textContent = label;
+        val.style.color = "rgba(220, 220, 220, 0.85)";
+        val.style.textAlign = "right";
+        val.style.flex = "1";
+        row.appendChild(key);
+        row.appendChild(val);
+        panel.appendChild(row);
       }
-    });
+    }
+
+    return panel;
   }
 
   toggleMap(): void {
@@ -202,6 +289,7 @@ export class MapSystem {
   }
 
   dispose(): void {
+    window.removeEventListener("keydown", this.keyHandler);
     if (this.mapContainer.parentElement) {
       this.mapContainer.parentElement.removeChild(this.mapContainer);
     }
