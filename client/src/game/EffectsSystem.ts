@@ -17,6 +17,7 @@ export class EffectsSystem {
   private captureHandler: (data: any) => void;
   private levelUpHandler: (data: any) => void;
   private pickupHandler: (data: any) => void;
+  private hitImpactHandler: (data: any) => void;
 
   constructor(scene: BABYLON.Scene) {
     this.scene = scene;
@@ -34,11 +35,15 @@ export class EffectsSystem {
     this.pickupHandler = (data: { position: BABYLON.Vector3; color?: BABYLON.Color3 }) => {
       this.spawnPickup(data.position, data.color);
     };
+    this.hitImpactHandler = (data: { position: BABYLON.Vector3; color?: BABYLON.Color3; scale?: number }) => {
+      this.spawnHitImpact(data.position, data.color, data.scale);
+    };
 
     this.bus.on("effect:sparkle", this.sparkleHandler);
     this.bus.on("effect:capture", this.captureHandler);
     this.bus.on("effect:levelUp", this.levelUpHandler);
     this.bus.on("effect:pickup", this.pickupHandler);
+    this.bus.on("effect:hitImpact", this.hitImpactHandler);
 
     console.log("[EffectsSystem] Initialized");
   }
@@ -150,6 +155,82 @@ export class EffectsSystem {
     this.spawnSparkle(position, c, 8);
   }
 
+  spawnHitImpact(position: BABYLON.Vector3, color?: BABYLON.Color3, scale: number = 1): void {
+    const c = color || new BABYLON.Color3(1.0, 0.9, 0.3);
+
+    // 1) Expanding shock-ring (oriented to face camera)
+    const ring = BABYLON.MeshBuilder.CreateTorus(`hitRing_${Date.now()}`, { diameter: 0.6 * scale, thickness: 0.12 * scale, tessellation: 18 }, this.scene);
+    ring.position.copyFrom(position);
+    ring.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+    const ringMat = new BABYLON.StandardMaterial(`hitRingMat_${Date.now()}`, this.scene);
+    ringMat.emissiveColor = c;
+    ringMat.diffuseColor = c;
+    ringMat.disableLighting = true;
+    ringMat.alpha = 1;
+    ring.material = ringMat;
+
+    // 2) Flash sphere — bright ball at the hit
+    const flash = BABYLON.MeshBuilder.CreateSphere(`hitFlash_${Date.now()}`, { diameter: 0.45 * scale, segments: 8 }, this.scene);
+    flash.position.copyFrom(position);
+    const flashMat = new BABYLON.StandardMaterial(`hitFlashMat_${Date.now()}`, this.scene);
+    flashMat.emissiveColor = new BABYLON.Color3(1, 0.95, 0.85);
+    flashMat.diffuseColor = new BABYLON.Color3(1, 0.95, 0.85);
+    flashMat.disableLighting = true;
+    flashMat.alpha = 0.95;
+    flash.material = flashMat;
+
+    // 3) Radial spark shards
+    const shardCount = 8;
+    const shards: BABYLON.Mesh[] = [];
+    const shardVels: BABYLON.Vector3[] = [];
+    for (let i = 0; i < shardCount; i++) {
+      const s = BABYLON.MeshBuilder.CreateBox(`hitShard_${i}_${Date.now()}`, { width: 0.08 * scale, height: 0.08 * scale, depth: 0.35 * scale }, this.scene);
+      s.position.copyFrom(position);
+      const sm = new BABYLON.StandardMaterial(`hitShardMat_${i}`, this.scene);
+      sm.emissiveColor = c;
+      sm.diffuseColor = c;
+      sm.disableLighting = true;
+      s.material = sm;
+      shards.push(s);
+      const ang = (i / shardCount) * Math.PI * 2 + Math.random() * 0.4;
+      const elev = (Math.random() - 0.2) * 1.2;
+      shardVels.push(new BABYLON.Vector3(
+        Math.cos(ang) * (5 + Math.random() * 3),
+        elev * 3 + 1.5,
+        Math.sin(ang) * (5 + Math.random() * 3)
+      ));
+    }
+
+    this.active.push({
+      meshes: [ring, flash, ...shards],
+      elapsed: 0,
+      duration: 0.45,
+      update: (e, dt, t) => {
+        ring.scaling.setAll(1 + t * 5 * scale);
+        (ring.material as BABYLON.StandardMaterial).alpha = 1 - t;
+        flash.scaling.setAll(1 + t * 1.4);
+        (flash.material as BABYLON.StandardMaterial).alpha = (1 - t) * 0.95;
+        for (let i = 0; i < shards.length; i++) {
+          const s = shards[i];
+          const v = shardVels[i];
+          s.position.addInPlace(v.scale(dt));
+          v.y -= 12 * dt;
+          (s.material as BABYLON.StandardMaterial).alpha = 1 - t;
+          s.scaling.setAll(1 - t * 0.5);
+        }
+      },
+    });
+  }
+
+  private disposeEffect(e: ActiveEffect): void {
+    for (const m of e.meshes) {
+      const mat = m.material;
+      if (mat) mat.dispose();
+      m.dispose();
+    }
+    if (e.particles) for (const p of e.particles) p.dispose();
+  }
+
   update(dt: number): void {
     for (let i = this.active.length - 1; i >= 0; i--) {
       const e = this.active[i];
@@ -157,8 +238,7 @@ export class EffectsSystem {
       const t = Math.min(e.elapsed / e.duration, 1);
       if (e.update) e.update(e, dt, t);
       if (e.elapsed >= e.duration) {
-        for (const m of e.meshes) m.dispose();
-        if (e.particles) for (const p of e.particles) p.dispose();
+        this.disposeEffect(e);
         this.active.splice(i, 1);
       }
     }
@@ -169,10 +249,8 @@ export class EffectsSystem {
     this.bus.off("effect:capture", this.captureHandler);
     this.bus.off("effect:levelUp", this.levelUpHandler);
     this.bus.off("effect:pickup", this.pickupHandler);
-    for (const e of this.active) {
-      for (const m of e.meshes) m.dispose();
-      if (e.particles) for (const p of e.particles) p.dispose();
-    }
+    this.bus.off("effect:hitImpact", this.hitImpactHandler);
+    for (const e of this.active) this.disposeEffect(e);
     this.active = [];
   }
 }

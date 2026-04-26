@@ -204,71 +204,86 @@ export const GameUI: React.FC<GameUIProps> = ({
   const [chatInput, setChatInput] = React.useState("");
   return (
     <div className="fixed inset-0 pointer-events-none" style={{ fontFamily: "'Press Start 2P', monospace" }}>
-      <div className="absolute top-4 left-4 bg-black/80 border-2 border-cyan-400 p-4 rounded-lg">
-        <div className="text-cyan-400 text-xs mb-2">DETROIT 3026</div>
-
-        <div className="mb-2">
-          <div className="text-red-400 text-xs mb-1">HEALTH</div>
-          <div className="w-48 h-4 bg-gray-800 border border-red-500 rounded">
-            <div
-              className="h-full bg-gradient-to-r from-red-600 to-red-400 rounded transition-all"
-              style={{ width: `${(stats.health / stats.maxHealth) * 100}%` }}
-            />
-          </div>
-          <div className="text-red-400 text-xs mt-1">{Math.floor(stats.health)} / {stats.maxHealth}</div>
+      <div
+        className="absolute top-4 left-4 bg-black/85 border-[3px] border-cyan-400 p-5 rounded-xl"
+        style={{ boxShadow: "0 0 18px rgba(34,211,238,0.45), 0 4px 24px rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+      >
+        <div className="text-cyan-300 text-sm font-bold mb-3 tracking-widest" style={{ textShadow: "0 0 8px rgba(34,211,238,0.7)" }}>
+          DETROIT 3026
         </div>
 
-        <div className="mb-2">
-          <div className="text-blue-400 text-xs mb-1">ARMOR {armorDefense > 0 && <span className="text-blue-300">DEF:{armorDefense}</span>}</div>
-          <div className="w-48 h-3 bg-gray-800 border border-blue-500 rounded">
-            <div
-              className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded transition-all"
-              style={{ width: `${(stats.armor / stats.maxArmor) * 100}%` }}
-            />
+        <div className="mb-3">
+          <div className="flex items-baseline justify-between mb-1">
+            <div className="text-red-400 text-sm font-bold tracking-wider" style={{ textShadow: "0 0 6px rgba(248,113,113,0.6)" }}>HEALTH</div>
+            <div className="text-red-300 text-base font-bold tabular-nums" style={{ textShadow: "0 0 4px rgba(0,0,0,0.9)" }}>
+              {Math.floor(stats.health)}<span className="text-red-500/70 text-xs">/{stats.maxHealth}</span>
+            </div>
           </div>
-          <div className="text-blue-400 text-xs mt-1">{Math.floor(stats.armor)} / {stats.maxArmor}</div>
-        </div>
-
-        <div className="mb-2">
-          <div className="text-green-400 text-xs mb-1">STAMINA</div>
-          <div className="w-48 h-3 bg-gray-800 border border-green-500 rounded">
+          <div className="w-72 h-6 bg-gray-900 border-2 border-red-500 rounded-md overflow-hidden" style={{ boxShadow: "inset 0 0 6px rgba(0,0,0,0.7)" }}>
             <div
-              className="h-full bg-gradient-to-r from-green-600 to-green-400 rounded transition-all"
-              style={{ width: `${(stats.stamina / stats.maxStamina) * 100}%` }}
+              className="h-full bg-gradient-to-r from-red-700 via-red-500 to-red-300 transition-all"
+              style={{ width: `${(stats.health / stats.maxHealth) * 100}%`, boxShadow: "0 0 10px rgba(248,113,113,0.7)" }}
             />
           </div>
         </div>
 
-        <div className="mb-2">
-          <div className="text-yellow-400 text-xs mb-1">JETPACK</div>
-          <div className="w-48 h-3 bg-gray-800 border border-yellow-500 rounded">
+        <div className="mb-3">
+          <div className="flex items-baseline justify-between mb-1">
+            <div className="text-blue-400 text-sm font-bold tracking-wider" style={{ textShadow: "0 0 6px rgba(96,165,250,0.6)" }}>
+              ARMOR {armorDefense > 0 && <span className="text-blue-200 text-xs ml-1">DEF:{armorDefense}</span>}
+            </div>
+            <div className="text-blue-300 text-base font-bold tabular-nums" style={{ textShadow: "0 0 4px rgba(0,0,0,0.9)" }}>
+              {Math.floor(stats.armor)}<span className="text-blue-500/70 text-xs">/{stats.maxArmor}</span>
+            </div>
+          </div>
+          <div className="w-72 h-5 bg-gray-900 border-2 border-blue-500 rounded-md overflow-hidden" style={{ boxShadow: "inset 0 0 6px rgba(0,0,0,0.7)" }}>
             <div
-              className="h-full bg-gradient-to-r from-yellow-600 to-yellow-400 rounded transition-all"
-              style={{ width: `${(jetpackFuel / maxJetpackFuel) * 100}%` }}
+              className="h-full bg-gradient-to-r from-blue-700 via-blue-500 to-blue-300 transition-all"
+              style={{ width: `${(stats.armor / stats.maxArmor) * 100}%`, boxShadow: "0 0 10px rgba(96,165,250,0.7)" }}
+            />
+          </div>
+        </div>
+
+        <div className="mb-3">
+          <div className="text-green-400 text-xs font-bold tracking-wider mb-1">STAMINA</div>
+          <div className="w-72 h-4 bg-gray-900 border-2 border-green-500 rounded-md overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-green-700 via-green-500 to-green-300 transition-all"
+              style={{ width: `${(stats.stamina / stats.maxStamina) * 100}%`, boxShadow: "0 0 8px rgba(74,222,128,0.6)" }}
+            />
+          </div>
+        </div>
+
+        <div className="mb-3">
+          <div className="text-yellow-400 text-xs font-bold tracking-wider mb-1">JETPACK</div>
+          <div className="w-72 h-4 bg-gray-900 border-2 border-yellow-500 rounded-md overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-yellow-700 via-yellow-500 to-yellow-300 transition-all"
+              style={{ width: `${(jetpackFuel / maxJetpackFuel) * 100}%`, boxShadow: "0 0 8px rgba(250,204,21,0.6)" }}
             />
           </div>
         </div>
 
         {hasFlightArmor && (
-          <div className="mb-2">
-            <div className="text-fuchsia-400 text-xs mb-1">ARMOR ENERGY</div>
-            <div className="w-48 h-3 bg-gray-800 border border-fuchsia-500 rounded">
+          <div className="mb-3">
+            <div className="text-fuchsia-400 text-xs font-bold tracking-wider mb-1">ARMOR ENERGY</div>
+            <div className="w-72 h-4 bg-gray-900 border-2 border-fuchsia-500 rounded-md overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-fuchsia-600 to-fuchsia-400 rounded transition-all"
-                style={{ width: `${(armorEnergy / maxArmorEnergy) * 100}%` }}
+                className="h-full bg-gradient-to-r from-fuchsia-700 via-fuchsia-500 to-fuchsia-300 transition-all"
+                style={{ width: `${(armorEnergy / maxArmorEnergy) * 100}%`, boxShadow: "0 0 8px rgba(232,121,249,0.6)" }}
               />
             </div>
           </div>
         )}
 
-        <div className="flex gap-4 text-xs">
+        <div className="flex gap-5 text-sm font-bold pt-1 border-t-2 border-cyan-500/30">
           <div>
-            <span className="text-yellow-400">CREDITS:</span>
-            <span className="text-white ml-2">{stats.credits}</span>
+            <span className="text-yellow-400 tracking-wider">CREDITS</span>
+            <span className="text-white ml-2 tabular-nums" style={{ textShadow: "0 0 4px rgba(0,0,0,0.9)" }}>{stats.credits}</span>
           </div>
           <div>
-            <span className="text-purple-400">LVL:</span>
-            <span className="text-white ml-2">{stats.level}</span>
+            <span className="text-purple-400 tracking-wider">LVL</span>
+            <span className="text-white ml-2 tabular-nums" style={{ textShadow: "0 0 4px rgba(0,0,0,0.9)" }}>{stats.level}</span>
           </div>
         </div>
 

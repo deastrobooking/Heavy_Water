@@ -94,7 +94,9 @@ const WEAPON_PART_BY_ENEMY: Record<string, string[]> = {
   commander: ["pistol", "rifle", "shotgun", "rocket", "laser", "grenade"],
 };
 
-const HEALTH_DROP_CHANCE = 0.18;
+const HEALTH_DROP_CHANCE = 0.5;
+const HEALTH_DROP_CHANCE_TOUGH = 0.85; // hybrid / heavy / commander
+const HEALTH_KIT_AMOUNT = 35;
 
 export class PickupSystem {
   private scene: BABYLON.Scene;
@@ -147,8 +149,14 @@ export class PickupSystem {
       const amount = data.type === "commander" ? 2 + Math.floor(Math.random() * 2) : 1;
       drops.push({ type: "weapon_part", amount, weaponId: wid });
     }
-    if (Math.random() < HEALTH_DROP_CHANCE) {
-      drops.push({ type: "health_kit", amount: 25 });
+    const isTough = data.type === "heavy" || data.type === "hybrid" || data.type === "commander";
+    const healthChance = isTough ? HEALTH_DROP_CHANCE_TOUGH : HEALTH_DROP_CHANCE;
+    if (Math.random() < healthChance) {
+      drops.push({ type: "health_kit", amount: HEALTH_KIT_AMOUNT });
+      // Tough enemies get a chance for a SECOND kit
+      if (isTough && Math.random() < 0.5) {
+        drops.push({ type: "health_kit", amount: HEALTH_KIT_AMOUNT });
+      }
     }
     this.spawn(data.position, drops, 0.8);
   }

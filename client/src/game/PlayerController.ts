@@ -37,8 +37,8 @@ export class PlayerController implements IDamageable {
   private gravity: number = 0.02;
   private groundY: number = 1;
 
-  health: number = 100;
-  maxHealth: number = 100;
+  health: number = 250;
+  maxHealth: number = 250;
   isAlive: boolean = true;
   isInvulnerable: boolean = false;
   resistances: DamageResistance[] = [];
@@ -126,9 +126,9 @@ export class PlayerController implements IDamageable {
     this.bus = EventBus.getInstance();
 
     this.stats = {
-      health: 100,
-      maxHealth: 100,
-      armor: 50,
+      health: 250,
+      maxHealth: 250,
+      armor: 100,
       maxArmor: 100,
       stamina: 100,
       maxStamina: 100,

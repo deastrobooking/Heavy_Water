@@ -69,7 +69,7 @@ A MultiplayerSystem provides client-side WebSocket integration for real-time mul
 GamepadInput polls connected gamepads and synthesizes existing keyboard/mouse/pointer events, providing seamless controller integration without requiring game-specific branches.
 
 ### Effects & UI
-An EffectsSystem drives transient visual effects. The UI includes an AuthUI, a GameUI with HUD, shop interfaces, upgrade interfaces, a multiplayer lobby, and a contextual build hotbar. A MainMenu provides game start and character customization options. EnemyHealthBarSystem renders HTML overlays for active enemies.
+An EffectsSystem drives transient visual effects including a `spawnHitImpact(position, color, scale)` (also via `effect:hitImpact` event) — a billboarded shock-ring + bright flash sphere + radial spark shards that fires every time an enemy takes damage. Enemies also flash their entire mesh hierarchy red for 160ms and shake (xz jitter for 180ms) when hit so impacts feel weighty. Player base health is 250 / armor 100 (formerly 100 / 50) and tough enemies (heavy/hybrid/commander) drop health kits at 85% chance with a 50% chance for a second kit; basic enemies drop at 50%. The top-left HUD has been redesigned to be much more prominent — wider 288px bars, larger glowing text with drop-shadow, big numeric readouts for HEALTH/ARMOR shown to the right of each label, and a glowing cyan border with backdrop blur. The UI includes an AuthUI, a GameUI with HUD, shop interfaces, upgrade interfaces, a multiplayer lobby, and a contextual build hotbar. A MainMenu provides game start and character customization options. EnemyHealthBarSystem renders HTML overlays for active enemies.
 
 ## External Dependencies
 - **PostgreSQL**: Primary database with Drizzle ORM.

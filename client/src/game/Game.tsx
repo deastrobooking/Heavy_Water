@@ -105,9 +105,9 @@ export const Game: React.FC = () => {
   const [prefabHotbar, setPrefabHotbar] = useState<PrefabSummary[]>([]);
   const [selectedPrefabIndex, setSelectedPrefabIndex] = useState(0);
   const [stats, setStats] = useState<PlayerStats>({
-    health: 100,
-    maxHealth: 100,
-    armor: 50,
+    health: 250,
+    maxHealth: 250,
+    armor: 100,
     maxArmor: 100,
     stamina: 100,
     maxStamina: 100,
@@ -756,7 +756,7 @@ export const Game: React.FC = () => {
     initializingRef.current = false;
     EventBus.getInstance().clear();
     setStats({
-      health: 100, maxHealth: 100, armor: 50, maxArmor: 100,
+      health: 250, maxHealth: 250, armor: 100, maxArmor: 100,
       stamina: 100, maxStamina: 100, credits: 0, experience: 0, level: 1,
     });
     setWaveNumber(1);

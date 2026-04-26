@@ -72,6 +72,8 @@ export class EnemyUnit implements IDamageable {
   private fsm: StateMachine<EnemyAIState>;
   private attackTimer: number = 0;
   private stunTimer: number = 0;
+  private shakeTimer: number = 0;
+  private lastHitFxAt: number = 0;
   private idleTimer: number = 0;
   private patrolTarget: BABYLON.Vector3;
   private patrolOrigin: BABYLON.Vector3;
@@ -161,17 +163,27 @@ export class EnemyUnit implements IDamageable {
       this.dodgeCooldown = Math.max(0, this.dodgeCooldown - dt);
     }
 
+    let dmg = 0;
     switch (state) {
-      case "idle": return this.updateIdle(dt, playerPosition);
-      case "patrol": return this.updatePatrol(dt, playerPosition);
-      case "chase": return this.updateChase(dt, playerPosition);
-      case "attack": return this.updateAttack(dt, playerPosition);
-      case "stunned": return this.updateStunned(dt);
-      case "flying": return this.updateFlying(dt, playerPosition);
-      case "hovering": return this.updateHovering(dt, playerPosition);
-      case "dodging": return this.updateDodging(dt, playerPosition);
-      default: return 0;
+      case "idle": dmg = this.updateIdle(dt, playerPosition); break;
+      case "patrol": dmg = this.updatePatrol(dt, playerPosition); break;
+      case "chase": dmg = this.updateChase(dt, playerPosition); break;
+      case "attack": dmg = this.updateAttack(dt, playerPosition); break;
+      case "stunned": dmg = this.updateStunned(dt); break;
+      case "flying": dmg = this.updateFlying(dt, playerPosition); break;
+      case "hovering": dmg = this.updateHovering(dt, playerPosition); break;
+      case "dodging": dmg = this.updateDodging(dt, playerPosition); break;
     }
+
+    // Hit-shake jitter — applied AFTER FSM movement so it visibly displaces the mesh briefly.
+    if (this.shakeTimer > 0) {
+      this.shakeTimer = Math.max(0, this.shakeTimer - dt);
+      const intensity = 0.18 * (this.shakeTimer / 0.18);
+      this.mesh.position.x += (Math.random() - 0.5) * intensity;
+      this.mesh.position.z += (Math.random() - 0.5) * intensity;
+    }
+
+    return dmg;
   }
 
   private updateIdle(dt: number, playerPos: BABYLON.Vector3): number {
@@ -414,6 +426,21 @@ export class EnemyUnit implements IDamageable {
     this.health = Math.max(0, this.health - finalDamage);
 
     this.flashDamage();
+    this.shakeTimer = 0.18;
+
+    // Throttle hit-impact spawns per-enemy to ~80ms so rapid-fire weapons
+    // don't generate a runaway storm of effect meshes/materials.
+    const now = performance.now();
+    if (now - this.lastHitFxAt > 80) {
+      this.lastHitFxAt = now;
+      const impactPos = (info.hitPoint ? info.hitPoint.clone() : this.mesh.position.clone());
+      const impactScale = this.type === "commander" ? 1.6 : this.type === "heavy" || this.type === "hybrid" ? 1.25 : 1.0;
+      this.bus.emit("effect:hitImpact", {
+        position: impactPos,
+        color: new BABYLON.Color3(1.0, 0.85, 0.25),
+        scale: impactScale,
+      });
+    }
 
     this.bus.emit(GameEvents.ENEMY_DAMAGED, {
       enemy: this,
@@ -445,13 +472,28 @@ export class EnemyUnit implements IDamageable {
   }
 
   private flashDamage(): void {
-    const mat = this.mesh.material as BABYLON.StandardMaterial;
-    if (!mat) return;
-    const originalEmissive = mat.emissiveColor.clone();
-    mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+    // Tint the entire mesh hierarchy red briefly so it's obvious the robot was hit.
+    const mats: BABYLON.StandardMaterial[] = [];
+    const originals: BABYLON.Color3[] = [];
+
+    const collect = (n: BABYLON.AbstractMesh) => {
+      const m = n.material as BABYLON.StandardMaterial | null;
+      if (m && m.emissiveColor) {
+        mats.push(m);
+        originals.push(m.emissiveColor.clone());
+      }
+    };
+    collect(this.mesh);
+    for (const child of this.mesh.getChildMeshes()) collect(child as BABYLON.AbstractMesh);
+
+    const RED = new BABYLON.Color3(1.0, 0.12, 0.12);
+    for (const m of mats) m.emissiveColor = RED;
+
     setTimeout(() => {
-      if (mat) mat.emissiveColor = originalEmissive;
-    }, 100);
+      for (let i = 0; i < mats.length; i++) {
+        if (mats[i]) mats[i].emissiveColor = originals[i];
+      }
+    }, 160);
   }
 
   private die(): void {
