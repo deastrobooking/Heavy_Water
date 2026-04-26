@@ -247,6 +247,46 @@ export const GameUI: React.FC<GameUIProps> = ({
         )}
       </div>
 
+      <div
+        style={{
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          pointerEvents: "none",
+          width: 24,
+          height: 24,
+          zIndex: 30,
+        }}
+      >
+        <div style={{ position: "absolute", top: 11, left: 0, width: 24, height: 2, background: "rgba(0,255,255,0.85)", boxShadow: "0 0 4px rgba(0,255,255,0.9)" }} />
+        <div style={{ position: "absolute", top: 0, left: 11, width: 2, height: 24, background: "rgba(0,255,255,0.85)", boxShadow: "0 0 4px rgba(0,255,255,0.9)" }} />
+        <div style={{ position: "absolute", top: 10, left: 10, width: 4, height: 4, borderRadius: "50%", background: "rgba(255,255,255,0.95)", boxShadow: "0 0 4px rgba(0,255,255,1)" }} />
+      </div>
+
+      {buildMode && (
+        <div
+          style={{
+            position: "absolute",
+            top: "55%",
+            left: "50%",
+            transform: "translateX(-50%)",
+            pointerEvents: "none",
+            zIndex: 30,
+            background: "rgba(0,0,0,0.7)",
+            border: "1px solid rgba(255, 200, 0, 0.7)",
+            color: "#ffd866",
+            padding: "6px 12px",
+            borderRadius: 6,
+            fontSize: 11,
+            letterSpacing: 0.5,
+            whiteSpace: "nowrap",
+          }}
+        >
+          LMB: place • RMB: mine • R: rotate • 1-9 / 0 / - / =: select block
+        </div>
+      )}
+
       <div className="absolute top-4 right-4 bg-black/80 border-2 border-orange-400 p-4 rounded-lg">
         <div className="text-orange-400 text-xs mb-2">COMBAT STATUS</div>
         <div className="text-xs mb-2">

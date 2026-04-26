@@ -98,8 +98,11 @@ export class MapSystem {
       ]],
       ["BUILD / WORLD", [
         ["G", "Build mode (blocks)"],
-        ["P / Esc", "Plan mode (prefabs)"],
+        ["LMB", "Place block (in build)"],
         ["RMB", "Mine / Remove"],
+        ["R", "Rotate block / reload"],
+        ["1-9 0 - =", "Select block type"],
+        ["P / Esc", "Plan mode (prefabs)"],
         ["[ ]", "Cycle prefabs"],
         ["Wheel", "Cycle weapon/block"],
         ["M", "Toggle this panel"],

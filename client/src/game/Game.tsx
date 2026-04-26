@@ -6,6 +6,7 @@ import { CityGenerator } from "./CityGenerator";
 import { PlayerController, PlayerStats } from "./PlayerController";
 import { WeaponsSystem, Weapon } from "./WeaponsSystem";
 import { EnemySystem } from "./EnemySystem";
+import { EnemyHealthBarSystem } from "./EnemyHealthBarSystem";
 import { ChestSystem, Loot } from "./ChestSystem";
 import { CombatSystem } from "./CombatSystem";
 import { SpecialWeaponsSystem } from "./SpecialWeaponsSystem";
@@ -40,6 +41,7 @@ export const Game: React.FC = () => {
   const playerRef = useRef<PlayerController | null>(null);
   const weaponsRef = useRef<WeaponsSystem | null>(null);
   const enemySystemRef = useRef<EnemySystem | null>(null);
+  const enemyHealthBarsRef = useRef<EnemyHealthBarSystem | null>(null);
   const chestSystemRef = useRef<ChestSystem | null>(null);
   const combatSystemRef = useRef<CombatSystem | null>(null);
   const specialWeaponsRef = useRef<SpecialWeaponsSystem | null>(null);
@@ -413,6 +415,10 @@ export const Game: React.FC = () => {
         const enemySystem = new EnemySystem(scene);
         enemySystemRef.current = enemySystem;
 
+        const enemyHealthBars = new EnemyHealthBarSystem(scene, engine.getCamera());
+        enemyHealthBars.setEnemyProvider(() => enemySystem.getActiveEnemies());
+        enemyHealthBarsRef.current = enemyHealthBars;
+
         const chestSystem = new ChestSystem(scene);
         chestSystemRef.current = chestSystem;
         chestSystem.setOnLootCollected(handleLootCollected);
@@ -567,6 +573,8 @@ export const Game: React.FC = () => {
         }
         playerRef.current = null;
         weaponsRef.current = null;
+        if (enemyHealthBarsRef.current) { try { enemyHealthBarsRef.current.dispose(); } catch {} }
+        enemyHealthBarsRef.current = null;
         enemySystemRef.current = null;
         chestSystemRef.current = null;
         combatSystemRef.current = null;
@@ -710,6 +718,7 @@ export const Game: React.FC = () => {
       if (prefabRef.current) prefabRef.current.dispose();
       if (effectsRef.current) effectsRef.current.dispose();
       if (skyRef.current) skyRef.current.dispose();
+      if (enemyHealthBarsRef.current) enemyHealthBarsRef.current.dispose();
       if (multiplayerRef.current) multiplayerRef.current.dispose();
       if (engineRef.current) engineRef.current.dispose();
       EventBus.getInstance().clear();

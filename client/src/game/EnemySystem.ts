@@ -850,6 +850,10 @@ export class EnemySystem {
     return this.enemies.filter(e => e.isAlive).map(e => e.mesh);
   }
 
+  getActiveEnemies(): EnemyUnit[] {
+    return this.enemies.filter(e => e.isAlive);
+  }
+
   getEnemyCount(): number {
     return this.enemies.filter(e => e.isAlive).length;
   }

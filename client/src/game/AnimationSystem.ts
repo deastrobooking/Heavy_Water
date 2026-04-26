@@ -258,14 +258,14 @@ export class AnimationSystem {
   }
 
   private runningPose(speed: number): FullPose {
-    const legSwing = Math.sin(this.time * speed) * 0.7;
-    const armSwing = Math.sin(this.time * speed) * 0.5;
-    const bobble = Math.sin(this.time * speed * 2) * 0.04;
+    const legSwing = Math.sin(this.time * speed) * 0.4;
+    const armSwing = Math.sin(this.time * speed) * 0.28;
+    const bobble = Math.sin(this.time * speed * 2) * 0.022;
     return {
       head: { rotationX: bobble, rotationY: 0, rotationZ: 0 },
-      torso: { rotationX: 0.1, rotationY: Math.sin(this.time * speed) * 0.05, rotationZ: 0 },
-      leftArm: { rotationX: armSwing, rotationY: 0, rotationZ: 0.1 },
-      rightArm: { rotationX: -armSwing, rotationY: 0, rotationZ: -0.1 },
+      torso: { rotationX: 0.06, rotationY: Math.sin(this.time * speed) * 0.025, rotationZ: 0 },
+      leftArm: { rotationX: armSwing, rotationY: 0, rotationZ: 0.08 },
+      rightArm: { rotationX: -armSwing, rotationY: 0, rotationZ: -0.08 },
       leftLeg: { rotationX: -legSwing, rotationY: 0, rotationZ: 0 },
       rightLeg: { rotationX: legSwing, rotationY: 0, rotationZ: 0 },
     };
