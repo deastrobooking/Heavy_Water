@@ -35,6 +35,9 @@ The EnemySystem features a wave spawner for 6 distinct enemy types, including Co
 ### Environment & World
 A CityGenerator creates a massive 1200x1200 open world with a central city and four distinct biomes (Mountains, Jungle, Desert, Junkyard Robot City), featuring temples, villages, and sky cities.
 
+### Sky & Day/Night System
+SkySystem renders a custom-shader gradient skybox (zenith ↔ horizon blend, sun disc + halo, twinkling stars at night) and drives a full day/night cycle. Time of day flows through midnight → dawn → day → dusk palettes with smoothly interpolated sky, sun direction/intensity/color, ambient color, fog color, and scene clear color. Configurable seconds-per-day cycle (default 300s = 5 min real time), `setTimeOfDay(hours)`, pause/resume, and weather modes (`clear`/`overcast`/`storm`) that adjust fog density and overcast tint. Skybox follows the camera so the world feels infinite. The previous static `clearColor`/fog values in BabylonEngine are now driven each frame by SkySystem. To prevent shared materials from drifting brighter over time, `BabylonEngine.boostMaterialBrightness` now uses a WeakSet so each material is boosted at most once.
+
 ### Multiplayer
 A MultiplayerSystem provides client-side WebSocket integration for real-time multiplayer, supporting room management, position synchronization, chat, and enemy damage syncing for up to 4 players.
 

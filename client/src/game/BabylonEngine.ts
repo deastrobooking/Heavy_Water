@@ -13,6 +13,9 @@ export class BabylonEngine {
   private scene: BABYLON.Scene;
   private camera: BABYLON.FreeCamera;
   private outlinePostProcess: BABYLON.PostProcess | null = null;
+  private ambientLight: BABYLON.HemisphericLight | null = null;
+  private sunLight: BABYLON.DirectionalLight | null = null;
+  private boostedMats: WeakSet<BABYLON.StandardMaterial> = new WeakSet();
   private outlineConfig: OutlineConfig = {
     thickness: 1.0,
     color: new BABYLON.Color3(0, 0, 0),
@@ -79,6 +82,7 @@ export class BabylonEngine {
     ambientLight.intensity = 0.4;
     ambientLight.diffuse = new BABYLON.Color3(0.6, 0.7, 1.0);
     ambientLight.groundColor = new BABYLON.Color3(0.2, 0.1, 0.3);
+    this.ambientLight = ambientLight;
 
     const sunLight = new BABYLON.DirectionalLight(
       "sunLight",
@@ -87,6 +91,7 @@ export class BabylonEngine {
     );
     sunLight.intensity = 1.2;
     sunLight.diffuse = new BABYLON.Color3(1, 0.9, 0.7);
+    this.sunLight = sunLight;
 
     const neonGlow = new BABYLON.PointLight(
       "neonGlow",
@@ -113,7 +118,7 @@ export class BabylonEngine {
     defaultPipeline.bloomScale = 0.3;
 
     defaultPipeline.chromaticAberrationEnabled = true;
-    defaultPipeline.chromaticAberration.aberrationAmount = 8;
+    defaultPipeline.chromaticAberration.aberrationAmount = 1.5;
 
     defaultPipeline.fxaaEnabled = true;
     defaultPipeline.sharpenEnabled = true;
@@ -252,10 +257,20 @@ export class BabylonEngine {
     this.scene.onNewMeshAddedObservable.add((mesh) => {
       if (mesh.material && mesh.material instanceof BABYLON.StandardMaterial) {
         const mat = mesh.material as BABYLON.StandardMaterial;
+        if (this.boostedMats.has(mat)) return;
+        this.boostedMats.add(mat);
         mat.emissiveColor = mat.emissiveColor.add(new BABYLON.Color3(0.08, 0.08, 0.08));
         mat.specularPower = Math.max(mat.specularPower * 0.7, 8);
       }
     });
+  }
+
+  getSunLight(): BABYLON.DirectionalLight | null {
+    return this.sunLight;
+  }
+
+  getAmbientLight(): BABYLON.HemisphericLight | null {
+    return this.ambientLight;
   }
 
   setOutlineConfig(config: Partial<OutlineConfig>): void {

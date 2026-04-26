@@ -23,6 +23,7 @@ import { PrefabSystem, PrefabSummary } from "./PrefabSystem";
 import { LevelSerializer } from "./LevelSerializer";
 import { MultiplayerSystem } from "./MultiplayerSystem";
 import { EffectsSystem } from "./EffectsSystem";
+import { SkySystem } from "./SkySystem";
 import { EventBus, GameEvents } from "./EventBus";
 import { DamageType } from "./DamageSystem";
 import { GameUI } from "./GameUI";
@@ -57,6 +58,7 @@ export const Game: React.FC = () => {
   const loadInputRef = useRef<HTMLInputElement | null>(null);
   const multiplayerRef = useRef<MultiplayerSystem | null>(null);
   const effectsRef = useRef<EffectsSystem | null>(null);
+  const skyRef = useRef<SkySystem | null>(null);
 
   const [gamePhase, setGamePhase] = useState<GamePhase>("auth");
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -203,6 +205,14 @@ export const Game: React.FC = () => {
 
         const cityGenerator = new CityGenerator(scene);
         cityGenerator.generateCity();
+
+        const sky = new SkySystem(
+          scene,
+          engine.getSunLight(),
+          engine.getAmbientLight(),
+          engine.getCamera(),
+        );
+        skyRef.current = sky;
 
         const player = new PlayerController(scene, engine.getCamera());
         playerRef.current = player;
@@ -490,6 +500,7 @@ export const Game: React.FC = () => {
           shopSystem.update();
           buildingSystem.update(dt);
           effects.update(dt);
+          sky.update(dt);
           multiplayer.update(dt);
 
           mapSystem.updatePlayerPosition(playerPos);
@@ -692,6 +703,7 @@ export const Game: React.FC = () => {
       if (buildingRef.current) buildingRef.current.dispose();
       if (prefabRef.current) prefabRef.current.dispose();
       if (effectsRef.current) effectsRef.current.dispose();
+      if (skyRef.current) skyRef.current.dispose();
       if (multiplayerRef.current) multiplayerRef.current.dispose();
       if (engineRef.current) engineRef.current.dispose();
       EventBus.getInstance().clear();
