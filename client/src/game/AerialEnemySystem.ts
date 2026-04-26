@@ -10,7 +10,7 @@ interface AerialProjectile {
   lifetime: number;
 }
 
-class AerialUnit {
+export class AerialUnit {
   kind: AerialKind;
   hitbox: BABYLON.Mesh;
   visual: BABYLON.TransformNode;
@@ -18,6 +18,13 @@ class AerialUnit {
   maxHealth: number;
   speed: number;
   isAlive: boolean = true;
+  // Health-bar styling hints honored by EnemyHealthBarSystem
+  barWidth: number;
+  barHeight: number;
+  barColor: string;
+  barAccent: string;
+  barLabel: string;
+  barMaxDistance: number;
 
   // AI state
   private orbitAngle: number;
@@ -39,11 +46,23 @@ class AerialUnit {
       this.speed = 14;
       this.orbitRadius = 28 + Math.random() * 14;
       this.orbitAltitude = 22 + Math.random() * 10;
+      this.barWidth = 70;
+      this.barHeight = 8;
+      this.barColor = "linear-gradient(90deg, #ff8844 0%, #ffcc44 100%)";
+      this.barAccent = "rgba(255, 140, 60, 0.95)";
+      this.barLabel = "FIGHTER";
+      this.barMaxDistance = 160;
     } else {
       this.maxHealth = 480;
       this.speed = 2.6;
       this.orbitRadius = 60 + Math.random() * 25;
       this.orbitAltitude = 48 + Math.random() * 12;
+      this.barWidth = 140;
+      this.barHeight = 12;
+      this.barColor = "linear-gradient(90deg, #aa44ff 0%, #ff44ff 50%, #ff4488 100%)";
+      this.barAccent = "rgba(220, 80, 255, 0.95)";
+      this.barLabel = "BATTLESHIP";
+      this.barMaxDistance = 250;
     }
     this.health = this.maxHealth;
     this.orbitAngle = Math.random() * Math.PI * 2;
@@ -377,6 +396,8 @@ class AerialUnit {
 
   getMesh(): BABYLON.Mesh { return this.hitbox; }
   getPosition(): BABYLON.Vector3 { return this.hitbox.position; }
+  // EnemyLike compatibility for EnemyHealthBarSystem
+  get mesh(): BABYLON.Mesh { return this.hitbox; }
 
   dispose(): void {
     this.isAlive = false;
@@ -483,6 +504,10 @@ export class AerialEnemySystem {
   }
 
   getUnitCount(): number { return this.units.filter(u => u.isAlive).length; }
+
+  getActiveUnits(): AerialUnit[] {
+    return this.units.filter(u => u.isAlive);
+  }
 
   dispose(): void {
     for (const u of this.units) u.dispose();

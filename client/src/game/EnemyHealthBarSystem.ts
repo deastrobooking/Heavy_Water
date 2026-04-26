@@ -5,12 +5,20 @@ interface EnemyLike {
   maxHealth: number;
   isAlive: boolean;
   mesh: BABYLON.AbstractMesh;
+  // Optional styling hints (used for aerial battleships, etc.)
+  barWidth?: number;
+  barHeight?: number;
+  barColor?: string;
+  barAccent?: string;
+  barLabel?: string;
+  barMaxDistance?: number;
 }
 
 interface BarEntry {
   enemy: EnemyLike;
   container: HTMLDivElement;
   fill: HTMLDivElement;
+  label: HTMLDivElement | null;
   lastHealth: number;
 }
 
@@ -52,16 +60,21 @@ export class EnemyHealthBarSystem {
     let entry = this.bars.get(enemy);
     if (entry) return entry;
 
+    const w = enemy.barWidth ?? 60;
+    const h = enemy.barHeight ?? 8;
+    const accent = enemy.barAccent ?? "rgba(255, 80, 80, 0.85)";
+    const fillColor = enemy.barColor ?? "linear-gradient(90deg, #ff4444 0%, #ff8844 100%)";
+
     const container = document.createElement("div");
     Object.assign(container.style, {
       position: "absolute",
-      width: "60px",
-      height: "8px",
-      background: "rgba(0,0,0,0.7)",
-      border: "1px solid rgba(255, 80, 80, 0.85)",
+      width: `${w}px`,
+      height: `${h}px`,
+      background: "rgba(0,0,0,0.75)",
+      border: `1px solid ${accent}`,
       borderRadius: "2px",
       transform: "translate(-50%, -100%)",
-      boxShadow: "0 0 4px rgba(0,0,0,0.6)",
+      boxShadow: `0 0 6px ${accent}, 0 0 4px rgba(0,0,0,0.6)`,
       transition: "opacity 120ms linear",
     } as CSSStyleDeclaration);
 
@@ -69,14 +82,34 @@ export class EnemyHealthBarSystem {
     Object.assign(fill.style, {
       width: "100%",
       height: "100%",
-      background: "linear-gradient(90deg, #ff4444 0%, #ff8844 100%)",
+      background: fillColor,
       transition: "width 120ms linear",
     } as CSSStyleDeclaration);
     container.appendChild(fill);
 
+    let label: HTMLDivElement | null = null;
+    if (enemy.barLabel) {
+      label = document.createElement("div");
+      Object.assign(label.style, {
+        position: "absolute",
+        top: `-${Math.max(12, h + 4)}px`,
+        left: "50%",
+        transform: "translateX(-50%)",
+        fontFamily: "'Press Start 2P', monospace",
+        fontSize: "9px",
+        letterSpacing: "1px",
+        color: "#ffffff",
+        textShadow: `0 0 4px ${accent}, 0 1px 2px rgba(0,0,0,0.9)`,
+        whiteSpace: "nowrap",
+        pointerEvents: "none",
+      } as CSSStyleDeclaration);
+      label.textContent = enemy.barLabel;
+      container.appendChild(label);
+    }
+
     this.root.appendChild(container);
 
-    entry = { enemy, container, fill, lastHealth: enemy.health };
+    entry = { enemy, container, fill, label, lastHealth: enemy.health };
     this.bars.set(enemy, entry);
     return entry;
   }
@@ -107,7 +140,8 @@ export class EnemyHealthBarSystem {
       const dy = meshPos.y - camPos.y;
       const dz = meshPos.z - camPos.z;
       const distSq = dx * dx + dy * dy + dz * dz;
-      if (distSq > this.maxDistance * this.maxDistance) continue;
+      const perEnemyMax = enemy.barMaxDistance ?? this.maxDistance;
+      if (distSq > perEnemyMax * perEnemyMax) continue;
 
       const dot = dx * camForward.x + dy * camForward.y + dz * camForward.z;
       if (dot <= 0) continue;
@@ -135,7 +169,9 @@ export class EnemyHealthBarSystem {
         entry.lastHealth = enemy.health;
       }
 
-      const distFade = Math.min(1, 1 - (Math.sqrt(distSq) - 30) / 60);
+      const fadeStart = Math.min(perEnemyMax * 0.35, 30);
+      const fadeRange = Math.max(40, perEnemyMax - fadeStart);
+      const distFade = Math.min(1, 1 - (Math.sqrt(distSq) - fadeStart) / fadeRange);
       entry.container.style.opacity = `${Math.max(0.35, distFade)}`;
     }
 

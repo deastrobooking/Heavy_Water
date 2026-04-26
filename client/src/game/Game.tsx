@@ -487,7 +487,11 @@ export const Game: React.FC = () => {
         aerialEnemySystem.spawnBattleship(initialPos);
 
         const enemyHealthBars = new EnemyHealthBarSystem(scene, engine.getCamera());
-        enemyHealthBars.setEnemyProvider(() => enemySystem.getActiveEnemies());
+        enemyHealthBars.setEnemyProvider(() => {
+          const ground = enemySystem.getActiveEnemies() as any[];
+          const aerial = aerialEnemySystem.getActiveUnits() as any[];
+          return ground.concat(aerial);
+        });
         enemyHealthBarsRef.current = enemyHealthBars;
 
         const gamepad = new GamepadInput(engine.getCamera());

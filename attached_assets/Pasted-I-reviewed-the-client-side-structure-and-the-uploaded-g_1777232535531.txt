@@ -1,0 +1,487 @@
+I reviewed the client-side structure and the uploaded guide. Your architecture is strong: Babylon.js runtime, React/TypeScript UI, `Game.tsx` as orchestrator, EventBus, FSM, damage pipeline, city generation, robot systems, building/prefab systems, and UI overlays. 
+
+## Highest priority improvements
+
+### 1. Break up `Game.tsx`
+
+`Game.tsx` is doing too much right now. It handles:
+
+* system creation
+* render loop
+* input handling
+* multiplayer events
+* UI state syncing
+* cleanup
+* base/garden/lab/shop logic
+* vehicle logic
+* music logic
+
+Move these into smaller modules:
+
+```ts
+GameBootstrap.ts
+GameLoop.ts
+GameInputRouter.ts
+GameSystemRegistry.ts
+GameCleanup.ts
+GameUIStateSync.ts
+```
+
+This will make your game much easier to expand.
+
+---
+
+### 2. Create a `SystemRegistry`
+
+Instead of 30 separate refs in `Game.tsx`, create one registry:
+
+```ts
+export class GameSystemRegistry {
+  player?: PlayerController;
+  weapons?: WeaponsSystem;
+  enemies?: EnemySystem;
+  effects?: EffectsSystem;
+  building?: BuildingSystem;
+  prefabs?: PrefabSystem;
+  vehicles?: VehicleSystem;
+
+  disposeAll() {
+    Object.values(this).forEach((system: any) => {
+      if (system?.dispose) system.dispose();
+    });
+  }
+}
+```
+
+Then `Game.tsx` becomes cleaner:
+
+```ts
+const systemsRef = useRef(new GameSystemRegistry());
+```
+
+---
+
+### 3. Stop updating React state every frame
+
+Inside the render loop, this is expensive:
+
+```ts
+setStats(...)
+setEnemyCount(...)
+setJetpackFuel(...)
+setPlayerState(...)
+setBuildMode(...)
+```
+
+React should not update 60 times per second.
+
+Use a throttle:
+
+```ts
+let uiTimer = 0;
+
+uiTimer += dt;
+
+if (uiTimer >= 0.1) {
+  uiTimer = 0;
+  syncGameUIState();
+}
+```
+
+For low-frequency data like inventory, upgrades, companions, use `0.5s` or event-driven updates.
+
+---
+
+### 4. Improve EventBus typing
+
+Current EventBus uses `any[]`. Upgrade to typed events:
+
+```ts
+type GameEventMap = {
+  "player:damaged": { amount: number; remaining: number };
+  "enemy:killed": { credits: number; experience: number };
+  "ui:message": { text: string; duration: number };
+};
+
+class TypedEventBus {
+  on<K extends keyof GameEventMap>(
+    event: K,
+    callback: (payload: GameEventMap[K]) => void
+  ) {}
+
+  emit<K extends keyof GameEventMap>(
+    event: K,
+    payload: GameEventMap[K]
+  ) {}
+}
+```
+
+This will prevent bugs across systems.
+
+---
+
+### 5. Centralize input handling
+
+Right now input is spread across:
+
+* PlayerController
+* WeaponsSystem
+* SpecialWeaponsSystem
+* BuildingSystem
+* PrefabSystem
+* MapSystem
+* GardenSystem
+* Game.tsx
+* VehicleSystem
+
+Create:
+
+```ts
+InputManager.ts
+ActionMap.ts
+InputContext.ts
+```
+
+Example contexts:
+
+```ts
+type InputContext =
+  | "combat"
+  | "building"
+  | "prefab"
+  | "vehicle"
+  | "menu"
+  | "lab"
+  | "garden";
+```
+
+Then actions become clean:
+
+```ts
+input.on("fire", () => weapons.fire());
+input.on("interact", () => interactionSystem.use());
+input.on("toggleBuild", () => building.toggle());
+```
+
+---
+
+## Graphics and performance improvements
+
+### 6. Add a dedicated `GraphicsSystem`
+
+You already have `BabylonEngine`, `EffectsSystem`, `SkySystem`, and big procedural worlds. Add a real graphics manager:
+
+```ts
+GraphicsSystem.ts
+LightingSystem.ts
+MaterialLibrary.ts
+LODSystem.ts
+RenderBudgetSystem.ts
+```
+
+Main jobs:
+
+* quality presets
+* bloom
+* shadows
+* fog
+* tone mapping
+* render distance
+* mesh freezing
+* material caching
+* dynamic light limits
+
+---
+
+### 7. Optimize `CityGenerator.ts`
+
+`CityGenerator.ts` is very large and likely your biggest performance pressure.
+
+Split it:
+
+```ts
+CityGenerator.ts
+DowntownGenerator.ts
+IndustrialZoneGenerator.ts
+ResidentialGenerator.ts
+SkyCityGenerator.ts
+NatureGenerator.ts
+RoadGenerator.ts
+WaterGenerator.ts
+ShaderLibrary.ts
+```
+
+Also merge static meshes by material:
+
+```ts
+BABYLON.Mesh.MergeMeshes(buildingMeshes, true, true);
+```
+
+Then freeze:
+
+```ts
+mesh.freezeWorldMatrix();
+mesh.isPickable = false;
+```
+
+---
+
+### 8. Use render classes
+
+Every mesh should have a render role:
+
+```ts
+mesh.metadata = {
+  renderClass: "enemy"
+};
+```
+
+Use:
+
+```ts
+type RenderClass =
+  | "player"
+  | "enemy"
+  | "static"
+  | "projectile"
+  | "pickup"
+  | "building"
+  | "effect";
+```
+
+Then graphics rules become easier:
+
+```ts
+if (mesh.metadata.renderClass === "static") {
+  mesh.freezeWorldMatrix();
+}
+
+if (mesh.metadata.renderClass === "enemy") {
+  graphics.registerShadowCaster(mesh);
+}
+```
+
+---
+
+### 9. Pool effects and projectiles
+
+Weapons, special weapons, beam sabre, pickups, explosions, and damage numbers should use object pools.
+
+Avoid this during combat:
+
+```ts
+MeshBuilder.CreateSphere(...)
+mesh.dispose()
+```
+
+Use:
+
+```ts
+ProjectilePool
+ExplosionPool
+DamageNumberPool
+LightPool
+ParticlePool
+```
+
+This will reduce frame spikes.
+
+---
+
+## Robot and character system improvements
+
+### 10. Merge robot generation systems
+
+You now have:
+
+* RobotFactory
+* RobotDesigner
+* RobotPresets
+* RobotArmorSystem
+* RobotArmorParts
+* RobotArmorPartsExtra
+* HumanoidCharacter
+* HumanoidPresets
+* ArmorCapsuleSystem
+* ArmorMaterialFactory
+
+That is powerful, but it needs one shared data model.
+
+Create:
+
+```ts
+RobotSchema.ts
+RobotPartSchema.ts
+ArmorSlotSchema.ts
+RobotMaterialSchema.ts
+```
+
+Then all systems use the same structure.
+
+---
+
+### 11. Separate visual armor from gameplay armor
+
+Right now armor seems to mix:
+
+* visual mesh armor
+* defense stats
+* elemental effects
+* upgrade capsules
+
+Split:
+
+```ts
+ArmorStatsSystem.ts
+ArmorVisualSystem.ts
+ArmorUpgradeSystem.ts
+ArmorInventorySystem.ts
+```
+
+This makes it much easier to build Mega Man / Transformers style armor without breaking combat balance.
+
+---
+
+### 12. Add a robot LOD system
+
+For enemies and companions:
+
+```ts
+distance < 30: full robot
+distance < 80: simplified robot
+distance > 80: billboard or merged low-poly mesh
+```
+
+This is important once you have many robots.
+
+---
+
+## UI improvements
+
+### 13. Split `GameUI.tsx`
+
+`GameUI.tsx` is large. Break it into:
+
+```tsx
+HealthPanel.tsx
+WeaponPanel.tsx
+SpecialWeaponPanel.tsx
+CompanionPanel.tsx
+BuildModePanel.tsx
+PrefabPanel.tsx
+MapPanel.tsx
+MultiplayerPanel.tsx
+ResourcePanel.tsx
+MessageOverlay.tsx
+Crosshair.tsx
+```
+
+Then `GameUI.tsx` becomes composition only.
+
+---
+
+### 14. Add a real graphics menu
+
+Add:
+
+```tsx
+GraphicsMenu.tsx
+```
+
+Controls:
+
+* quality preset
+* bloom on/off
+* shadow quality
+* render distance
+* particles
+* outline thickness
+* fog density
+* resolution scale
+
+---
+
+## Code quality improvements
+
+### 15. Replace most `any`
+
+Found several `any` uses in:
+
+* Game.tsx
+* EventBus.ts
+* MultiplayerSystem.ts
+* PickupSystem.ts
+* RobotArmorSystem.ts
+* GameUI.tsx
+
+Priority replacements:
+
+```ts
+User
+LobbyRoom
+SpecialWeaponInfo
+MultiplayerMessage
+EventPayload
+PickupEvent
+```
+
+---
+
+### 16. Use one logger
+
+Replace scattered `console.log` with:
+
+```ts
+Logger.info("PlayerController", "Flight armor acquired");
+Logger.warn("GraphicsSystem", "Post-processing unavailable");
+Logger.error("Game", error);
+```
+
+Then disable logs in production.
+
+---
+
+### 17. Add lifecycle safety
+
+Every system should follow:
+
+```ts
+init()
+update(dt)
+dispose()
+```
+
+And every event listener should be removable.
+
+Good pattern:
+
+```ts
+private disposers: (() => void)[] = [];
+
+private listen() {
+  const onKey = (e: KeyboardEvent) => {};
+  window.addEventListener("keydown", onKey);
+  this.disposers.push(() => window.removeEventListener("keydown", onKey));
+}
+
+dispose() {
+  this.disposers.forEach(fn => fn());
+}
+```
+
+---
+
+## Recommended next refactor order
+
+1. Split `Game.tsx`
+2. Add `SystemRegistry`
+3. Add `InputManager`
+4. Add typed `EventBus`
+5. Add `GraphicsSystem`
+6. Split `CityGenerator`
+7. Pool projectiles/effects
+8. Split `GameUI`
+9. Normalize robot/armor schemas
+10. Add LOD/render budget system
+
+Big picture: your project is no longer just a game file set. It is becoming a custom engine layer on top of Babylon.js. The next major win is organization and performance architecture, not more features.
