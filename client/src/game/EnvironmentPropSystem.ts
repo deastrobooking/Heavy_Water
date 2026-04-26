@@ -123,6 +123,15 @@ interface ActiveProp {
   rattleDuration?: number;
   /** Rattle intensity scalar. */
   rattleAmp?: number;
+  /** Visible damage stage. 0 = pristine, 1 = damaged (<60% HP), 2 = heavily damaged (<30% HP). */
+  damageStage: number;
+  /** Per-prop material clones, keyed by the child mesh name they were applied to.
+   *  Materials in the system cache are shared between props, so we lazily clone
+   *  any material we want to recolor / dim for damage states. */
+  clonedMaterials?: Map<string, BABYLON.StandardMaterial>;
+  /** Decoration meshes added during damage transitions (cracks, scorch patches,
+   *  leaks, drip puddles) — disposed alongside the prop. */
+  damageDecorations?: BABYLON.Mesh[];
 }
 
 /** System-wide per-material flash state. Materials are shared from the
@@ -203,6 +212,15 @@ class PropDamageable implements IDamageable {
     const lowFrac = 0.3;
     if (this.health > 0 && this.health / this.maxHealth < lowFrac && previousHealth / this.maxHealth >= lowFrac) {
       this.system.armContinuousSmoke(prop);
+    }
+
+    // Visible damage state progression — 60% → stage 1, 30% → stage 2.
+    if (this.health > 0) {
+      const frac = this.health / this.maxHealth;
+      const targetStage = frac < 0.3 ? 2 : frac < 0.6 ? 1 : 0;
+      if (targetStage > prop.damageStage) {
+        this.system.applyDamageStage(prop, targetStage);
+      }
     }
 
     if (this.health <= 0) {
@@ -349,6 +367,7 @@ export class EnvironmentPropSystem {
       position: root.position.clone(),
       config: { ...config, topY },
       damageable,
+      damageStage: 0,
     };
     propRef = prop;
 
@@ -480,11 +499,369 @@ export class EnvironmentPropSystem {
 
   private disposeProp(prop: ActiveProp): void {
     if (prop.glow && !prop.glow.isDisposed()) prop.glow.dispose();
+    if (prop.damageDecorations) {
+      for (const d of prop.damageDecorations) {
+        if (!d.isDisposed()) d.dispose();
+      }
+      prop.damageDecorations = undefined;
+    }
+    if (prop.clonedMaterials) {
+      prop.clonedMaterials.forEach(m => { m.dispose(); });
+      prop.clonedMaterials = undefined;
+    }
     for (const child of prop.root.getChildMeshes()) {
       if (!child.isDisposed()) child.dispose();
     }
     if (!prop.hitbox.isDisposed()) prop.hitbox.dispose();
     if (!prop.root.isDisposed()) prop.root.dispose();
+  }
+
+  /** Public: advance a prop's visible damage stage to `target`, applying any
+   *  intermediate stages cumulatively. No-op if already at/past `target`. */
+  applyDamageStage(prop: ActiveProp, target: number): void {
+    while (prop.damageStage < target) {
+      prop.damageStage++;
+      this.applyDamageStageStep(prop, prop.damageStage);
+    }
+  }
+
+  private applyDamageStageStep(prop: ActiveProp, stage: number): void {
+    switch (prop.kind) {
+      case "crate": this.applyCrateDamage(prop, stage); break;
+      case "barrel": this.applyBarrelDamage(prop, stage); break;
+      case "canister": this.applyCanisterDamage(prop, stage); break;
+      case "container": this.applyContainerDamage(prop, stage); break;
+      case "holo_sign": this.applyHoloSignDamage(prop, stage); break;
+      case "open_container": this.applyOpenContainerDamage(prop, stage); break;
+    }
+  }
+
+  /** Find the first child mesh whose name starts with `prefix`. */
+  private findChild(prop: ActiveProp, prefix: string): BABYLON.Mesh | null {
+    for (const c of prop.root.getChildMeshes()) {
+      if (c.name.startsWith(prefix)) return c as BABYLON.Mesh;
+    }
+    return null;
+  }
+
+  /** Lazily clone the material on `mesh` so we can safely mutate it for this
+   *  prop without affecting other props sharing the cached material. */
+  private clonePropMaterial(prop: ActiveProp, mesh: BABYLON.Mesh): BABYLON.StandardMaterial | null {
+    const mat = mesh.material as BABYLON.StandardMaterial | null;
+    if (!mat) return null;
+    if (!prop.clonedMaterials) prop.clonedMaterials = new Map();
+    let cloned = prop.clonedMaterials.get(mesh.name);
+    if (cloned) return cloned;
+    cloned = mat.clone(`${mat.name}_dmg_${prop.id}`);
+    prop.clonedMaterials.set(mesh.name, cloned);
+    mesh.material = cloned;
+    return cloned;
+  }
+
+  private registerDecoration(prop: ActiveProp, mesh: BABYLON.Mesh): void {
+    if (!prop.damageDecorations) prop.damageDecorations = [];
+    prop.damageDecorations.push(mesh);
+    mesh.isPickable = false;
+  }
+
+  /** Build a small dark soot/scorch patch as a child of the prop root. */
+  private addScorchPatch(
+    prop: ActiveProp,
+    localPos: BABYLON.Vector3,
+    width: number,
+    depth: number,
+    rotY: number = 0,
+  ): BABYLON.Mesh {
+    const patch = BABYLON.MeshBuilder.CreateBox(
+      `propScorch_${prop.id}_${(prop.damageDecorations?.length ?? 0)}`,
+      { width, height: 0.04, depth },
+      this.scene,
+    );
+    patch.parent = prop.root;
+    patch.position.copyFrom(localPos);
+    patch.rotation.y = rotY;
+    const m = new BABYLON.StandardMaterial(`propScorchMat_${prop.id}_${(prop.damageDecorations?.length ?? 0)}`, this.scene);
+    m.diffuseColor = new BABYLON.Color3(0.04, 0.03, 0.02);
+    m.emissiveColor = new BABYLON.Color3(0.0, 0.0, 0.0);
+    m.specularColor = new BABYLON.Color3(0, 0, 0);
+    patch.material = m;
+    this.registerDecoration(prop, patch);
+    if (!prop.clonedMaterials) prop.clonedMaterials = new Map();
+    prop.clonedMaterials.set(patch.name, m);
+    return patch;
+  }
+
+  /** Build a dark crack line stripe (very thin box) on a face of the prop. */
+  private addCrack(
+    prop: ActiveProp,
+    localPos: BABYLON.Vector3,
+    length: number,
+    rotZ: number,
+    rotY: number = 0,
+  ): BABYLON.Mesh {
+    const crack = BABYLON.MeshBuilder.CreateBox(
+      `propCrack_${prop.id}_${(prop.damageDecorations?.length ?? 0)}`,
+      { width: length, height: 0.06, depth: 0.04 },
+      this.scene,
+    );
+    crack.parent = prop.root;
+    crack.position.copyFrom(localPos);
+    crack.rotation.y = rotY;
+    crack.rotation.z = rotZ;
+    const m = new BABYLON.StandardMaterial(`propCrackMat_${prop.id}_${(prop.damageDecorations?.length ?? 0)}`, this.scene);
+    m.diffuseColor = new BABYLON.Color3(0.02, 0.02, 0.03);
+    m.emissiveColor = new BABYLON.Color3(0, 0, 0);
+    m.specularColor = new BABYLON.Color3(0, 0, 0);
+    crack.material = m;
+    this.registerDecoration(prop, crack);
+    if (!prop.clonedMaterials) prop.clonedMaterials = new Map();
+    prop.clonedMaterials.set(crack.name, m);
+    return crack;
+  }
+
+  /** Build a glowing leak drip (and optional puddle) for canister damage. */
+  private addLeak(
+    prop: ActiveProp,
+    color: BABYLON.Color3,
+    height: number,
+    withPuddle: boolean,
+  ): void {
+    const drip = BABYLON.MeshBuilder.CreateCylinder(
+      `propLeak_${prop.id}_${(prop.damageDecorations?.length ?? 0)}`,
+      { height, diameter: 0.12, tessellation: 8 },
+      this.scene,
+    );
+    drip.parent = prop.root;
+    drip.position.set((Math.random() - 0.5) * 0.25, height / 2 + 0.04, 0.36);
+    const m = new BABYLON.StandardMaterial(
+      `propLeakMat_${prop.id}_${(prop.damageDecorations?.length ?? 0)}`,
+      this.scene,
+    );
+    m.diffuseColor = color.scale(0.4);
+    m.emissiveColor = color;
+    m.alpha = 0.85;
+    drip.material = m;
+    this.registerDecoration(prop, drip);
+    if (!prop.clonedMaterials) prop.clonedMaterials = new Map();
+    prop.clonedMaterials.set(drip.name, m);
+
+    if (withPuddle) {
+      const puddle = BABYLON.MeshBuilder.CreateCylinder(
+        `propPuddle_${prop.id}_${(prop.damageDecorations?.length ?? 0)}`,
+        { height: 0.02, diameter: 0.85, tessellation: 16 },
+        this.scene,
+      );
+      puddle.parent = prop.root;
+      puddle.position.set(0, 0.025, 0.55);
+      const pm = new BABYLON.StandardMaterial(
+        `propPuddleMat_${prop.id}_${(prop.damageDecorations?.length ?? 0)}`,
+        this.scene,
+      );
+      pm.diffuseColor = color.scale(0.4);
+      pm.emissiveColor = color.scale(0.7);
+      pm.alpha = 0.75;
+      puddle.material = pm;
+      this.registerDecoration(prop, puddle);
+      prop.clonedMaterials.set(puddle.name, pm);
+    }
+  }
+
+  // --- Per-kind damage stage handlers ---
+
+  private applyCrateDamage(prop: ActiveProp, stage: number): void {
+    const body = this.findChild(prop, `propCrateBody_`);
+    const seam = this.findChild(prop, `propCrateSeam_`);
+    if (stage === 1) {
+      // Darken & desaturate body, dim glow seam, add a couple of crack lines.
+      if (body) {
+        const m = this.clonePropMaterial(prop, body);
+        if (m) {
+          m.diffuseColor = new BABYLON.Color3(0.13, 0.15, 0.18);
+          m.emissiveColor = new BABYLON.Color3(0.03, 0.03, 0.04);
+        }
+      }
+      if (seam) {
+        const m = this.clonePropMaterial(prop, seam);
+        if (m) m.emissiveColor = new BABYLON.Color3(0.08, 0.4, 0.45);
+      }
+      this.addCrack(prop, new BABYLON.Vector3(0.0, 0.85, 0.76), 0.9, 0.5);
+      this.addCrack(prop, new BABYLON.Vector3(-0.3, 0.55, 0.76), 0.6, -0.6);
+    } else if (stage === 2) {
+      // Heavy charring + dead seam glow + scorch patch on top.
+      if (body) {
+        const m = this.clonePropMaterial(prop, body);
+        if (m) {
+          m.diffuseColor = new BABYLON.Color3(0.07, 0.07, 0.08);
+          m.emissiveColor = new BABYLON.Color3(0.0, 0.0, 0.0);
+        }
+      }
+      if (seam) {
+        const m = this.clonePropMaterial(prop, seam);
+        if (m) m.emissiveColor = new BABYLON.Color3(0.0, 0.0, 0.0);
+      }
+      this.addScorchPatch(prop, new BABYLON.Vector3(0.2, 1.42, 0.0), 1.1, 0.9);
+      this.addCrack(prop, new BABYLON.Vector3(0.4, 0.7, 0.76), 1.2, 0.9);
+    }
+  }
+
+  private applyBarrelDamage(prop: ActiveProp, stage: number): void {
+    const body = this.findChild(prop, `propBarrelBody_`);
+    const band = this.findChild(prop, `propBarrelBand_`);
+    if (stage === 1) {
+      // Charred red → burnt brown; dim hazard band.
+      if (body) {
+        const m = this.clonePropMaterial(prop, body);
+        if (m) {
+          m.diffuseColor = new BABYLON.Color3(0.32, 0.12, 0.08);
+          m.emissiveColor = new BABYLON.Color3(0.08, 0.02, 0.01);
+        }
+      }
+      if (band) {
+        const m = this.clonePropMaterial(prop, band);
+        if (m) m.emissiveColor = new BABYLON.Color3(0.4, 0.32, 0.04);
+      }
+      // A vertical scorch streak up one side
+      const streak = this.addScorchPatch(prop, new BABYLON.Vector3(0.48, 0.7, 0.0), 0.18, 0.9);
+      streak.rotation.z = Math.PI / 2;
+    } else if (stage === 2) {
+      // Heavily charred — body almost black, hazard band dead.
+      if (body) {
+        const m = this.clonePropMaterial(prop, body);
+        if (m) {
+          m.diffuseColor = new BABYLON.Color3(0.1, 0.05, 0.04);
+          m.emissiveColor = new BABYLON.Color3(0.02, 0.005, 0.0);
+        }
+      }
+      if (band) {
+        const m = this.clonePropMaterial(prop, band);
+        if (m) m.emissiveColor = new BABYLON.Color3(0.05, 0.04, 0.0);
+      }
+      // Scorch on the lid + extra streak
+      this.addScorchPatch(prop, new BABYLON.Vector3(0.0, 1.43, 0.0), 0.95, 0.95);
+      const streak2 = this.addScorchPatch(prop, new BABYLON.Vector3(-0.48, 0.5, 0.0), 0.25, 1.1);
+      streak2.rotation.z = Math.PI / 2;
+    }
+  }
+
+  private applyCanisterDamage(prop: ActiveProp, stage: number): void {
+    const body = this.findChild(prop, `propCanisterBody_`);
+    const win = this.findChild(prop, `propCanisterWin_`);
+    const leakColor = new BABYLON.Color3(0.3, 1.0, 0.55);
+    if (stage === 1) {
+      // Dim window glow; small leak drip starts.
+      if (win) {
+        const m = this.clonePropMaterial(prop, win);
+        if (m) m.emissiveColor = new BABYLON.Color3(0.15, 0.5, 0.27);
+      }
+      if (body) {
+        const m = this.clonePropMaterial(prop, body);
+        if (m) m.diffuseColor = new BABYLON.Color3(0.09, 0.16, 0.24);
+      }
+      this.addLeak(prop, leakColor, 0.35, false);
+    } else if (stage === 2) {
+      // Window dead, body charred, larger leak with puddle below.
+      if (win) {
+        const m = this.clonePropMaterial(prop, win);
+        if (m) m.emissiveColor = new BABYLON.Color3(0.04, 0.1, 0.06);
+      }
+      if (body) {
+        const m = this.clonePropMaterial(prop, body);
+        if (m) {
+          m.diffuseColor = new BABYLON.Color3(0.06, 0.08, 0.1);
+          m.emissiveColor = new BABYLON.Color3(0.0, 0.01, 0.01);
+        }
+      }
+      this.addLeak(prop, leakColor, 0.7, true);
+      this.addScorchPatch(prop, new BABYLON.Vector3(0.0, 1.34, 0.0), 0.6, 0.6);
+    }
+  }
+
+  private applyContainerDamage(prop: ActiveProp, stage: number): void {
+    const body = this.findChild(prop, `propContainerBody_`);
+    const door = this.findChild(prop, `propContainerDoor_`);
+    const light = this.findChild(prop, `propContainerLight_`);
+    if (stage === 1) {
+      // Dent/darken body; status light flickers warning red.
+      if (body) {
+        const m = this.clonePropMaterial(prop, body);
+        if (m) {
+          m.diffuseColor = new BABYLON.Color3(0.13, 0.2, 0.1);
+          m.emissiveColor = new BABYLON.Color3(0.03, 0.04, 0.02);
+        }
+      }
+      if (light) {
+        const m = this.clonePropMaterial(prop, light);
+        if (m) m.emissiveColor = new BABYLON.Color3(1.0, 0.1, 0.05);
+      }
+      // Cracked panel marks across door
+      this.addCrack(prop, new BABYLON.Vector3(0.0, 1.3, 0.86), 1.0, 0.4);
+      this.addCrack(prop, new BABYLON.Vector3(-0.2, 0.6, 0.86), 0.7, -0.5);
+    } else if (stage === 2) {
+      // Status light dies, heavy charring + scorch marks.
+      if (body) {
+        const m = this.clonePropMaterial(prop, body);
+        if (m) {
+          m.diffuseColor = new BABYLON.Color3(0.06, 0.09, 0.05);
+          m.emissiveColor = new BABYLON.Color3(0.0, 0.0, 0.0);
+        }
+      }
+      if (door) {
+        const m = this.clonePropMaterial(prop, door);
+        if (m) m.diffuseColor = new BABYLON.Color3(0.06, 0.06, 0.06);
+      }
+      if (light) {
+        const m = this.clonePropMaterial(prop, light);
+        if (m) m.emissiveColor = new BABYLON.Color3(0.0, 0.0, 0.0);
+      }
+      this.addScorchPatch(prop, new BABYLON.Vector3(-0.8, 1.4, 0.86), 1.2, 0.9);
+      this.addScorchPatch(prop, new BABYLON.Vector3(1.0, 0.6, 0.86), 0.9, 0.7);
+    }
+  }
+
+  private applyHoloSignDamage(prop: ActiveProp, stage: number): void {
+    // Holo plate flicker color is driven by the per-frame tick() which reads
+    // `prop.damageStage` directly — we don't need to mutate emissive here.
+    // Plate material is already per-prop (`propHoloGlow_<id>`), so no clone.
+    // Find the plate (skip the "cap_" sub-emitter).
+    let plate: BABYLON.Mesh | null = null;
+    for (const c of prop.root.getChildMeshes()) {
+      if (c.name.startsWith("propHoloEmissive_") && !c.name.startsWith("propHoloEmissive_cap_")) {
+        plate = c as BABYLON.Mesh;
+        break;
+      }
+    }
+    if (stage === 2) {
+      // Plate visibly broken — tilt it and add a scorched halo on the post.
+      if (plate) plate.rotation.z = -0.35;
+      this.addScorchPatch(prop, new BABYLON.Vector3(0.0, 0.45, 0.12), 0.18, 0.18);
+    }
+  }
+
+  private applyOpenContainerDamage(prop: ActiveProp, stage: number): void {
+    if (stage === 1) {
+      // Darken walls + add a crack across the back wall.
+      for (const name of [`propOpenLeft_`, `propOpenRight_`, `propOpenFront_`, `propOpenBack_`]) {
+        const c = this.findChild(prop, name);
+        if (c) {
+          const m = this.clonePropMaterial(prop, c);
+          if (m) m.diffuseColor = new BABYLON.Color3(0.16, 0.13, 0.1);
+        }
+      }
+      this.addCrack(prop, new BABYLON.Vector3(0.0, 0.55, -0.65), 1.4, 0.25);
+    } else if (stage === 2) {
+      for (const name of [`propOpenLeft_`, `propOpenRight_`, `propOpenFront_`, `propOpenBack_`]) {
+        const c = this.findChild(prop, name);
+        if (c) {
+          const m = this.clonePropMaterial(prop, c);
+          if (m) {
+            m.diffuseColor = new BABYLON.Color3(0.07, 0.06, 0.05);
+            m.emissiveColor = new BABYLON.Color3(0.0, 0.0, 0.0);
+          }
+        }
+      }
+      this.addScorchPatch(prop, new BABYLON.Vector3(0.6, 0.86, -0.65), 0.6, 0.5);
+      this.addScorchPatch(prop, new BABYLON.Vector3(-1.18, 0.7, 0.0), 0.5, 0.6, Math.PI / 2);
+    }
   }
 
   private tick(): void {
@@ -582,14 +959,30 @@ export class EnvironmentPropSystem {
           if (mat) mat.emissiveColor = new BABYLON.Color3(0.2 + pulse * 0.4, 0.9, 0.4);
         }
       }
-      // Holo signs gently pulse
+      // Holo signs gently pulse — damaged ones flicker glitchy red.
       if (p.kind === "holo_sign") {
-        const pulse = 0.6 + Math.sin(performance.now() * 0.003 + p.id) * 0.3;
+        const t = performance.now();
+        let pulse: number;
+        let baseR: number, baseG: number, baseB: number;
+        if (p.damageStage >= 2) {
+          // Heavily damaged: stuttery on/off flicker, mostly dim.
+          const blip = Math.sin(t * 0.025 + p.id) > 0.4 ? 1 : 0.08;
+          pulse = blip * (Math.random() < 0.85 ? 1 : 0.15);
+          baseR = 1.0; baseG = 0.18; baseB = 0.28;
+        } else if (p.damageStage === 1) {
+          // Damaged: nervous flicker with occasional drop-outs.
+          pulse = 0.55 + Math.sin(t * 0.012 + p.id) * 0.4;
+          if (Math.random() < 0.05) pulse = 0.08;
+          baseR = 1.0; baseG = 0.25; baseB = 0.4;
+        } else {
+          pulse = 0.6 + Math.sin(t * 0.003 + p.id) * 0.3;
+          baseR = 0.1; baseG = 0.85; baseB = 1.0;
+        }
         for (const child of p.root.getChildMeshes()) {
           if (child.name.startsWith("propHoloEmissive_")) {
             const mat = child.material as BABYLON.StandardMaterial | null;
             if (mat) {
-              mat.emissiveColor = new BABYLON.Color3(0.1 * pulse, 0.85 * pulse, 1.0 * pulse);
+              mat.emissiveColor = new BABYLON.Color3(baseR * pulse, baseG * pulse, baseB * pulse);
             }
           }
         }
