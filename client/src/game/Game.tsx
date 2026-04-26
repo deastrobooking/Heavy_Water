@@ -6,6 +6,7 @@ import { CityGenerator } from "./CityGenerator";
 import { PlayerController, PlayerStats } from "./PlayerController";
 import { WeaponsSystem, Weapon } from "./WeaponsSystem";
 import { EnemySystem } from "./EnemySystem";
+import { AerialEnemySystem } from "./AerialEnemySystem";
 import { EnemyHealthBarSystem } from "./EnemyHealthBarSystem";
 import { GamepadInput } from "./GamepadInput";
 import { ChestSystem, Loot } from "./ChestSystem";
@@ -51,6 +52,7 @@ export const Game: React.FC = () => {
   const playerRef = useRef<PlayerController | null>(null);
   const weaponsRef = useRef<WeaponsSystem | null>(null);
   const enemySystemRef = useRef<EnemySystem | null>(null);
+  const aerialEnemyRef = useRef<AerialEnemySystem | null>(null);
   const enemyHealthBarsRef = useRef<EnemyHealthBarSystem | null>(null);
   const gamepadRef = useRef<GamepadInput | null>(null);
   const chestSystemRef = useRef<ChestSystem | null>(null);
@@ -476,6 +478,14 @@ export const Game: React.FC = () => {
         const enemySystem = new EnemySystem(scene);
         enemySystemRef.current = enemySystem;
 
+        const aerialEnemySystem = new AerialEnemySystem(scene);
+        aerialEnemyRef.current = aerialEnemySystem;
+        // Seed initial sky combat
+        const initialPos = player.getPosition();
+        aerialEnemySystem.spawnFighter(initialPos);
+        aerialEnemySystem.spawnFighter(initialPos);
+        aerialEnemySystem.spawnBattleship(initialPos);
+
         const enemyHealthBars = new EnemyHealthBarSystem(scene, engine.getCamera());
         enemyHealthBars.setEnemyProvider(() => enemySystem.getActiveEnemies());
         enemyHealthBarsRef.current = enemyHealthBars;
@@ -561,17 +571,23 @@ export const Game: React.FC = () => {
 
           combatSystem.update(dt);
 
-          const enemyMeshes = enemySystem.getEnemyMeshes();
+          const groundEnemyMeshes = enemySystem.getEnemyMeshes();
+          const aerialMeshes = aerialEnemySystem.getMeshes();
+          const enemyMeshes = groundEnemyMeshes.concat(aerialMeshes);
           const hits = weapons.update(enemyMeshes);
 
           for (const hit of hits) {
             const modifiedDamage = armorSystem.getModifiedOutgoingDamage(hit.damage);
-            enemySystem.damageEnemy(hit.hitEnemy, modifiedDamage);
+            if (!aerialEnemySystem.damageEnemy(hit.hitEnemy, modifiedDamage)) {
+              enemySystem.damageEnemy(hit.hitEnemy, modifiedDamage);
+            }
           }
 
           const specialHits = specialWeapons.update(dt, enemyMeshes, playerPos);
           for (const hit of specialHits) {
-            enemySystem.damageEnemy(hit.hitEnemy, hit.damage);
+            if (!aerialEnemySystem.damageEnemy(hit.hitEnemy, hit.damage)) {
+              enemySystem.damageEnemy(hit.hitEnemy, hit.damage);
+            }
           }
 
           beamSabre.update(dt, enemyMeshes);
@@ -581,7 +597,10 @@ export const Game: React.FC = () => {
             player.heal(companionResult.healed);
           }
           for (const hit of companionResult.attackHits) {
-            enemySystem.damageEnemy(hit.mesh as BABYLON.Mesh, hit.damage);
+            const m = hit.mesh as BABYLON.Mesh;
+            if (!aerialEnemySystem.damageEnemy(m, hit.damage)) {
+              enemySystem.damageEnemy(m, hit.damage);
+            }
           }
 
           const enemyResult = enemySystem.update(playerPos, deltaTime);
@@ -589,6 +608,13 @@ export const Game: React.FC = () => {
             const reducedDamage = armorSystem.calculateDamageReduction(enemyResult.damage, DamageType.Melee);
             player.takeDamageSimple(reducedDamage);
             showMessage(`-${Math.floor(reducedDamage)} DAMAGE!`, 500);
+          }
+
+          const aerialResult = aerialEnemySystem.update(dt, playerPos);
+          if (aerialResult.damage > 0) {
+            const reducedAerial = armorSystem.calculateDamageReduction(aerialResult.damage, DamageType.Plasma);
+            player.takeDamageSimple(reducedAerial);
+            showMessage(`-${Math.floor(reducedAerial)} AIR STRIKE!`, 600);
           }
 
           chestSystem.update(playerPos);
@@ -689,6 +715,8 @@ export const Game: React.FC = () => {
         if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} }
         gamepadRef.current = null;
         enemySystemRef.current = null;
+        if (aerialEnemyRef.current) { try { aerialEnemyRef.current.dispose(); } catch {} }
+        aerialEnemyRef.current = null;
         chestSystemRef.current = null;
         combatSystemRef.current = null;
         specialWeaponsRef.current = null;
@@ -1103,6 +1131,7 @@ export const Game: React.FC = () => {
       if (effectsRef.current) effectsRef.current.dispose();
       if (skyRef.current) skyRef.current.dispose();
       if (enemyHealthBarsRef.current) enemyHealthBarsRef.current.dispose();
+      if (aerialEnemyRef.current) aerialEnemyRef.current.dispose();
       if (gamepadRef.current) gamepadRef.current.dispose();
       if (multiplayerRef.current) multiplayerRef.current.dispose();
       if (engineRef.current) engineRef.current.dispose();

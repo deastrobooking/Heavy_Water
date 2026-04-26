@@ -1,0 +1,339 @@
+import * as BABYLON from "@babylonjs/core";
+import "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline";
+
+export type GraphicsQuality = "low" | "medium" | "high" | "ultra";
+
+export interface GraphicsSettings {
+  quality: GraphicsQuality;
+  resolutionScale: number;
+  shadows: boolean;
+  bloom: boolean;
+  bloomWeight: number;
+  bloomThreshold: number;
+  fxaa: boolean;
+  imageProcessing: boolean;
+  contrast: number;
+  exposure: number;
+  fog: boolean;
+  fogDensity: number;
+  ssao: boolean;
+  particles: boolean;
+  maxDynamicLights: number;
+  hardwareScalingLevel: number;
+}
+
+export const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
+  low: {
+    quality: "low",
+    resolutionScale: 0.75,
+    shadows: false,
+    bloom: false,
+    bloomWeight: 0,
+    bloomThreshold: 1,
+    fxaa: true,
+    imageProcessing: true,
+    contrast: 1.05,
+    exposure: 0.9,
+    fog: true,
+    fogDensity: 0.002,
+    ssao: false,
+    particles: false,
+    maxDynamicLights: 8,
+    hardwareScalingLevel: 1.5,
+  },
+  medium: {
+    quality: "medium",
+    resolutionScale: 1,
+    shadows: true,
+    bloom: true,
+    bloomWeight: 0.18,
+    bloomThreshold: 0.72,
+    fxaa: true,
+    imageProcessing: true,
+    contrast: 1.15,
+    exposure: 1.0,
+    fog: true,
+    fogDensity: 0.0016,
+    ssao: false,
+    particles: true,
+    maxDynamicLights: 16,
+    hardwareScalingLevel: 1,
+  },
+  high: {
+    quality: "high",
+    resolutionScale: 1,
+    shadows: true,
+    bloom: true,
+    bloomWeight: 0.28,
+    bloomThreshold: 0.55,
+    fxaa: true,
+    imageProcessing: true,
+    contrast: 1.25,
+    exposure: 1.05,
+    fog: true,
+    fogDensity: 0.0012,
+    ssao: true,
+    particles: true,
+    maxDynamicLights: 32,
+    hardwareScalingLevel: 1,
+  },
+  ultra: {
+    quality: "ultra",
+    resolutionScale: 1,
+    shadows: true,
+    bloom: true,
+    bloomWeight: 0.4,
+    bloomThreshold: 0.45,
+    fxaa: true,
+    imageProcessing: true,
+    contrast: 1.35,
+    exposure: 1.08,
+    fog: true,
+    fogDensity: 0.001,
+    ssao: true,
+    particles: true,
+    maxDynamicLights: 48,
+    hardwareScalingLevel: 0.85,
+  },
+};
+
+export class DetroitGraphicsSystem {
+  private engine: BABYLON.Engine;
+  private scene: BABYLON.Scene;
+  private camera: BABYLON.Camera;
+  private pipeline?: BABYLON.DefaultRenderingPipeline;
+  private shadowGenerator?: BABYLON.ShadowGenerator;
+  private sunLight?: BABYLON.DirectionalLight;
+  private dynamicLights: BABYLON.Light[] = [];
+  private settings: GraphicsSettings;
+
+  constructor(engine: BABYLON.Engine, scene: BABYLON.Scene, camera: BABYLON.Camera) {
+    this.engine = engine;
+    this.scene = scene;
+    this.camera = camera;
+    this.settings = { ...GRAPHICS_PRESETS.high };
+    this.findSceneLights();
+    this.createPipeline();
+    this.applySettings(this.settings);
+  }
+
+  applyPreset(quality: GraphicsQuality): void {
+    this.applySettings({ ...GRAPHICS_PRESETS[quality] });
+  }
+
+  applySettings(settings: GraphicsSettings): void {
+    this.settings = { ...settings };
+
+    this.engine.setHardwareScalingLevel(settings.hardwareScalingLevel);
+    this.scene.skipPointerMovePicking = true;
+    this.scene.autoClear = true;
+    this.scene.autoClearDepthAndStencil = true;
+
+    this.applyPipelineSettings();
+    this.applyFogSettings();
+    this.applyShadowSettings();
+    this.applyDynamicLightBudget();
+  }
+
+  getSettings(): GraphicsSettings {
+    return { ...this.settings };
+  }
+
+  registerDynamicLight(light: BABYLON.Light): void {
+    this.dynamicLights.push(light);
+    this.applyDynamicLightBudget();
+  }
+
+  registerShadowCaster(mesh: BABYLON.AbstractMesh): void {
+    if (!this.shadowGenerator || !this.settings.shadows) return;
+    this.shadowGenerator.addShadowCaster(mesh, true);
+  }
+
+  registerShadowReceivers(meshes: BABYLON.AbstractMesh[]): void {
+    meshes.forEach((mesh) => {
+      mesh.receiveShadows = this.settings.shadows;
+    });
+  }
+
+  optimizeStaticWorldMeshes(rootMeshes: BABYLON.AbstractMesh[]): void {
+    for (const mesh of rootMeshes) {
+      if (!mesh.material) continue;
+      mesh.freezeWorldMatrix();
+      mesh.doNotSyncBoundingInfo = false;
+      mesh.isPickable = false;
+    }
+
+    this.scene.freezeActiveMeshes();
+  }
+
+  unfreezeForBuilderMode(): void {
+    this.scene.unfreezeActiveMeshes();
+  }
+
+  enableGlowFor(mesh: BABYLON.Mesh, glowLayer?: BABYLON.GlowLayer): BABYLON.GlowLayer {
+    const glow = glowLayer ?? new BABYLON.GlowLayer("detroit_glow", this.scene);
+    glow.intensity = this.settings.bloom ? 0.55 : 0.25;
+    glow.addIncludedOnlyMesh(mesh);
+    return glow;
+  }
+
+  update(dt: number): void {
+    this.updateAdaptiveResolution(dt);
+  }
+
+  dispose(): void {
+    this.pipeline?.dispose();
+    this.shadowGenerator?.dispose();
+  }
+
+  private findSceneLights(): void {
+    this.sunLight = this.scene.lights.find((l): l is BABYLON.DirectionalLight => l instanceof BABYLON.DirectionalLight);
+    this.dynamicLights = this.scene.lights.filter((l) => !(l instanceof BABYLON.HemisphericLight));
+  }
+
+  private createPipeline(): void {
+    this.pipeline = new BABYLON.DefaultRenderingPipeline(
+      "detroit_default_pipeline",
+      true,
+      this.scene,
+      [this.camera],
+    );
+  }
+
+  private applyPipelineSettings(): void {
+    if (!this.pipeline) return;
+
+    this.pipeline.fxaaEnabled = this.settings.fxaa;
+    this.pipeline.bloomEnabled = this.settings.bloom;
+    this.pipeline.bloomWeight = this.settings.bloomWeight;
+    this.pipeline.bloomThreshold = this.settings.bloomThreshold;
+    this.pipeline.bloomKernel = this.settings.quality === "ultra" ? 96 : this.settings.quality === "high" ? 64 : 32;
+
+    this.pipeline.imageProcessingEnabled = this.settings.imageProcessing;
+    this.pipeline.imageProcessing.contrast = this.settings.contrast;
+    this.pipeline.imageProcessing.exposure = this.settings.exposure;
+    this.pipeline.imageProcessing.toneMappingEnabled = true;
+    this.pipeline.imageProcessing.toneMappingType = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
+  }
+
+  private applyFogSettings(): void {
+    if (!this.settings.fog) {
+      this.scene.fogMode = BABYLON.Scene.FOGMODE_NONE;
+      return;
+    }
+
+    this.scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
+    this.scene.fogDensity = this.settings.fogDensity;
+    this.scene.fogColor = new BABYLON.Color3(0.018, 0.022, 0.055);
+  }
+
+  private applyShadowSettings(): void {
+    if (!this.sunLight || !this.settings.shadows) {
+      this.scene.meshes.forEach((mesh) => (mesh.receiveShadows = false));
+      return;
+    }
+
+    if (!this.shadowGenerator) {
+      const mapSize = this.settings.quality === "ultra" ? 4096 : this.settings.quality === "high" ? 2048 : 1024;
+      this.shadowGenerator = new BABYLON.ShadowGenerator(mapSize, this.sunLight);
+      this.shadowGenerator.usePercentageCloserFiltering = true;
+      this.shadowGenerator.filteringQuality = BABYLON.ShadowGenerator.QUALITY_HIGH;
+      this.shadowGenerator.bias = 0.00008;
+      this.shadowGenerator.normalBias = 0.02;
+    }
+
+    this.scene.meshes.forEach((mesh) => {
+      if (mesh.name.includes("ground") || mesh.name.includes("floor") || mesh.name.includes("road") || mesh.name.includes("rooftop")) {
+        mesh.receiveShadows = true;
+      }
+    });
+  }
+
+  private applyDynamicLightBudget(): void {
+    const budget = this.settings.maxDynamicLights;
+    this.dynamicLights.forEach((light, index) => {
+      light.setEnabled(index < budget);
+    });
+  }
+
+  private updateAdaptiveResolution(_dt: number): void {
+    const fps = this.engine.getFps();
+
+    if (this.settings.quality === "low" || this.settings.quality === "medium") return;
+
+    if (fps > 0 && fps < 45) {
+      this.engine.setHardwareScalingLevel(Math.min(1.4, this.engine.getHardwareScalingLevel() + 0.01));
+    } else if (fps > 58) {
+      this.engine.setHardwareScalingLevel(Math.max(this.settings.hardwareScalingLevel, this.engine.getHardwareScalingLevel() - 0.005));
+    }
+  }
+}
+
+export function createPBRRobotMaterial(
+  scene: BABYLON.Scene,
+  name: string,
+  color: BABYLON.Color3,
+  options?: {
+    metallic?: number;
+    roughness?: number;
+    emissive?: BABYLON.Color3;
+    clearCoat?: boolean;
+  },
+): BABYLON.PBRMaterial {
+  const mat = new BABYLON.PBRMaterial(name, scene);
+  mat.albedoColor = color;
+  mat.metallic = options?.metallic ?? 0.75;
+  mat.roughness = options?.roughness ?? 0.32;
+
+  if (options?.emissive) {
+    mat.emissiveColor = options.emissive;
+  }
+
+  if (options?.clearCoat) {
+    mat.clearCoat.isEnabled = true;
+    mat.clearCoat.intensity = 0.55;
+    mat.clearCoat.roughness = 0.18;
+  }
+
+  return mat;
+}
+
+export function tagMeshForRenderClass(mesh: BABYLON.AbstractMesh, renderClass: "static" | "dynamic" | "enemy" | "player" | "projectile" | "pickup"): void {
+  mesh.metadata = {
+    ...(mesh.metadata ?? {}),
+    renderClass,
+  };
+
+  if (renderClass === "projectile" || renderClass === "pickup") {
+    mesh.alwaysSelectAsActiveMesh = true;
+  }
+}
+
+export function mergeStaticMeshesByMaterial(scene: BABYLON.Scene, meshes: BABYLON.Mesh[], name: string): BABYLON.Mesh[] {
+  const groups = new Map<string, BABYLON.Mesh[]>();
+
+  for (const mesh of meshes) {
+    const key = mesh.material?.name ?? "no_material";
+    const group = groups.get(key) ?? [];
+    group.push(mesh);
+    groups.set(key, group);
+  }
+
+  const merged: BABYLON.Mesh[] = [];
+  groups.forEach((group, key) => {
+    if (group.length === 1) {
+      merged.push(group[0]);
+      return;
+    }
+
+    const result = BABYLON.Mesh.MergeMeshes(group, true, true, undefined, false, true);
+    if (result) {
+      result.name = `${name}_${key}`;
+      result.freezeWorldMatrix();
+      result.isPickable = false;
+      merged.push(result);
+    }
+  });
+
+  return merged;
+}

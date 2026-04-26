@@ -74,7 +74,7 @@ export default function AuthUI({ onAuthenticated, onPlayOffline }: AuthUIProps) 
           marginBottom: 4,
           textShadow: "0 0 20px rgba(0,255,255,0.5)",
           letterSpacing: 4,
-        }}>DETROIT 3026</h1>
+        }}>HEAVY WATER</h1>
         <p style={{
           textAlign: "center",
           color: "#ff6600",

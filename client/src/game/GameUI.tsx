@@ -209,7 +209,7 @@ export const GameUI: React.FC<GameUIProps> = ({
         style={{ boxShadow: "0 0 18px rgba(34,211,238,0.45), 0 4px 24px rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
       >
         <div className="text-cyan-300 text-sm font-bold mb-3 tracking-widest" style={{ textShadow: "0 0 8px rgba(34,211,238,0.7)" }}>
-          DETROIT 3026
+          HEAVY WATER
         </div>
 
         <div className="mb-3">

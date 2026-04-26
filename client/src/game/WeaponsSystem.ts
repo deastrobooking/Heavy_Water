@@ -305,7 +305,8 @@ export class WeaponsSystem {
 
       for (const enemy of enemies) {
         const distance = BABYLON.Vector3.Distance(projectile.mesh.position, enemy.position);
-        if (distance < 1.5) {
+        const hitRadius = (enemy.metadata && typeof enemy.metadata.hitRadius === "number") ? enemy.metadata.hitRadius : 1.5;
+        if (distance < hitRadius) {
           if (projectile.isExplosive) {
             this.createExplosion(projectile.mesh.position, projectile.explosionRadius);
             for (const e of enemies) {

@@ -83,6 +83,18 @@ const ENEMY_DROP_TABLE: Record<string, PickupSpawnRequest[]> = {
     { type: "circuit_board", amount: 3 },
     { type: "nano_fiber", amount: 2 },
   ],
+  aerial_fighter: [
+    { type: "gear", amount: 3 },
+    { type: "scrap_metal", amount: 4 },
+    { type: "energy_core", amount: 1 },
+  ],
+  aerial_battleship: [
+    { type: "gear", amount: 18 },
+    { type: "scrap_metal", amount: 12 },
+    { type: "energy_core", amount: 4 },
+    { type: "circuit_board", amount: 4 },
+    { type: "nano_fiber", amount: 3 },
+  ],
 };
 
 const WEAPON_PART_BY_ENEMY: Record<string, string[]> = {

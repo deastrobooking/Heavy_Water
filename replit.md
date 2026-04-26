@@ -1,7 +1,7 @@
-# Detroit 3026: The First Attack
+# Heavy Water
 
 ## Overview
-Detroit 3026 is a 3D futuristic sci-fi action game built with Babylon.js. Set in Detroit in the year 3026, it features anime-style cell-shaded graphics, immersive combat, DBZ-style flight, open-world biomes, and an explorable cityscape. The game's core objective is to defend Detroit from an invasion of insane hybrid organoids (AI fused with human and tardigrade DNA). The project aims to deliver a rich, engaging experience with deep exploration, dynamic combat, and robust progression systems, including character customization, crafting, and base building.
+Heavy Water is a 3D futuristic sci-fi action game built with Babylon.js. Set in a far-future Detroit, it features anime-style cell-shaded graphics, immersive ground & aerial combat, DBZ-style flight, open-world biomes, and an explorable cityscape. The game's core objective is to defend the city from an invasion of insane hybrid organoids (AI fused with human and tardigrade DNA) — both ground swarms and now hostile sky forces (battleships and small fighters). The project aims to deliver a rich, engaging experience with deep exploration, dynamic combat, and robust progression systems, including character customization, crafting, and base building.
 
 ## User Preferences
 - Design choice: Anime retro 80's sci-fi cell-shaded graphics style
@@ -55,6 +55,9 @@ A ShopSystem manages 5 shop locations with dynamic pricing. The GardenSystem and
 
 ### Enemy Systems & Robot Generation
 The EnemySystem features a wave spawner for distinct enemy types, including Commanders with advanced AI. The Robot Shape Engine is a data-driven system for generating all robots (enemies, allies, pets) with extensive parametric descriptors and reusable themes.
+
+### Aerial Enemies (Battleships + Fighters)
+**AerialEnemySystem.ts** spawns hostile air units that patrol above the player. Two kinds: `fighter` (small primitive-built delta wedge: body box + canopy sphere + 2 angled wing boxes + tail fin + engine glow spheres; HP 70, speed 14, orbits player at altitude 22-32m and fires periodic plasma tracers) and `battleship` (massive 22m-long hull box + bow + bridge tower + 4 turret domes/barrels + underside lights + 3 rear engine glows; HP 480, speed 2.6, drifts at altitude 48-60m and lobs heavier slower plasma down at the player). Each unit is wrapped in an invisible BABYLON capsule hitbox whose `metadata.hitRadius` is read by the patched `WeaponsSystem.update` proximity check (so big battleships are actually hittable from range). Hits flash the entire mesh hierarchy red for 160ms, shake the hitbox xz for 180ms, and emit `effect:hitImpact` (throttled 80ms). Aerial fire is hit-scan with a tracer cylinder that lives 120ms; ~70% accuracy. Death plays a big hitImpact + emits `ENEMY_KILLED` with type `aerial_fighter` / `aerial_battleship` (PickupSystem drop tables added for both: fighters drop 3 gear / 4 scrap / 1 energy core; battleships drop 18 gear / 12 scrap / 4 energy core / 4 circuit board / 3 nano fiber). The wreck falls and despawns after 1.5s. `Game.tsx` instantiates the system, seeds 2 fighters + 1 battleship at start, merges aerial hitboxes into the array passed to `weapons.update`, routes hits to the correct system by trying aerial first, applies aerial damage to the player as `DamageType.Plasma` with an `-N AIR STRIKE!` toast, and disposes on cleanup.
 
 ### Environment & World
 A CityGenerator creates a massive 1200x1200 open world with a central city and four distinct biomes.
