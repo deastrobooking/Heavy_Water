@@ -200,13 +200,13 @@ export class WeaponsSystem {
 
   private fire(): void {
     const weapon = this.weapons.get(this.currentWeapon);
-    if (!weapon || weapon.ammo <= 0) return;
+    if (!weapon) return;
 
     const now = Date.now();
     if (now - this.lastFireTime < weapon.fireRate) return;
 
     this.lastFireTime = now;
-    weapon.ammo--;
+    weapon.ammo = weapon.maxAmmo;
 
     if (this.currentWeapon === "shotgun") {
       for (let i = 0; i < 8; i++) {

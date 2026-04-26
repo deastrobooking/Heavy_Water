@@ -1,7 +1,7 @@
 # Detroit 3026: The First Attack
 
 ## Overview
-Detroit 3026 is a 3D futuristic sci-fi action game built with Babylon.js, set in Detroit in the year 3026. The game features anime-style cell-shaded graphics, immersive combat, DBZ-style flight, open-world biomes, and an explorable cityscape. The core objective is to defend Detroit from an invasion of insane hybrid organoids (AI fused with human and tardigrade DNA). The project aims to deliver a rich, engaging experience with deep exploration, dynamic combat, and robust progression systems, including character customization, crafting, and base building.
+Detroit 3026 is a 3D futuristic sci-fi action game built with Babylon.js. Set in Detroit in the year 3026, it features anime-style cell-shaded graphics, immersive combat, DBZ-style flight, open-world biomes, and an explorable cityscape. The game's core objective is to defend Detroit from an invasion of insane hybrid organoids (AI fused with human and tardigrade DNA). The project aims to deliver a rich, engaging experience with deep exploration, dynamic combat, and robust progression systems, including character customization, crafting, and base building.
 
 ## User Preferences
 - Design choice: Anime retro 80's sci-fi cell-shaded graphics style
@@ -12,64 +12,58 @@ Detroit 3026 is a 3D futuristic sci-fi action game built with Babylon.js, set in
 ## System Architecture
 
 ### Core Systems
-The game uses an EventBus for decoupled communication and a generic StateMachine for managing entity behaviors. A unified DamageSystem handles all combat calculations.
+The game uses an EventBus for decoupled communication and a generic StateMachine for managing entity behaviors. A unified DamageSystem handles all combat calculations. The game utilizes Babylon.js v8.x for WebGL rendering, with a cell-shaded anime aesthetic, ink outlines, bloom, chromatic aberration, and FXAA. The frontend is built with React, TypeScript, and Vite.
 
 ### Player Systems
-The PlayerController manages a humanoid character with extensive state machines for movement, combat, and a triple-jump flight system with free flight mode. The camera supports both first-person (default) and third-person modes, toggled at runtime with the **C** key (also exposed via `setCameraMode` / `toggleCameraMode`). In first-person, the camera sits at the player's head height with a small forward eye offset; in third-person it orbits 6.5 units behind the player at 2.2 units of vertical lift. In both modes the body smoothly rotates to face the camera direction (frame-rate independent exponential damping at rate 12) so movement always reads forward on-screen. The procedural walking animation uses dampened amplitudes (legSwing 0.4, armSwing 0.28, head bob 0.022) so the character moves with a calmer, less exaggerated stride. PlayerController exposes `getAimOrigin()` (head-height world position), which all weapon/combat systems use as the projectile/melee spawn origin via a `setAimOriginProvider(fn)` hook — this keeps shots originating from the player rather than from the camera (which sits behind the player in third-person). BabylonEngine's FreeCamera has its built-in WASD bindings cleared (keysUp/Down/Left/Right empty, speed 0) so it does not contend with PlayerController's movement input. The HumanoidCharacter system allows for procedural generation of character meshes, modular body parts, clothing, and customizable colors. The AnimationSystem provides procedural, multi-part character animations with smooth blending. A CharacterEditor, accessible from the main menu, allows players to customize body parameters, modular armor (from a data-driven registry of parametric parts), and colors, with changes persisting via local storage.
+The PlayerController manages a humanoid character with extensive state machines for movement, combat, and a triple-jump flight system with free flight mode. The camera supports both first-person and third-person modes. The HumanoidCharacter system allows for procedural generation, modular body parts, clothing, and customizable colors. The AnimationSystem provides procedural, multi-part character animations with smooth blending. A CharacterEditor allows players to customize their character.
 
 ### Robot Armor System
-The ArmorMaterialFactory produces reusable material types for consistent aesthetics. The RobotArmorParts system defines a data-driven registry of parametric armor parts, and the RobotArmorSystem equips these parts to humanoid rigs, handling mirroring and clean disposal. Player armor customization is integrated with this system.
+The ArmorMaterialFactory produces reusable material types. The RobotArmorParts system defines a data-driven registry of parametric armor parts, and the RobotArmorSystem equips these to humanoid rigs, handling mirroring and disposal.
 
 ### Combat, Inventory & Crafting
-Combat involves light and heavy melee combo chains with input buffering. An InventorySystem provides a 24-slot grid. The CraftingSystem supports recipe-based crafting for weapons, armor, and base components.
+Combat features light and heavy melee combo chains with input buffering. An InventorySystem provides a 24-slot grid. The CraftingSystem supports recipe-based crafting for weapons, armor, and base components. All ranged weapons have unlimited ammo.
+
+### Vehicles (ATV + Space Fighter)
+A parametric vehicle pipeline, similar to the robot pipeline, allows for defining and generating ATVs and space fighters with customizable styles and parts. VehicleFactory builds primitive-only meshes, and VehicleSystem manages vehicle instances and physics for both ground and aerial vehicles.
 
 ### Loot Drops & Pickups
-PickupSystem (`PickupSystem.ts`) spawns physical glowing world meshes when enemies die. Drops include `gear` (universal upgrade currency), `weapon_part_*` (per-weapon upgrade currency keyed to weapon type), `scrap_metal`, `energy_core`, `circuit_board`, `nano_fiber`, `bio_essence`, and `health_kit`. Pickups magnetize toward the player within ~6 units and collect within ~1.5 units, emitting `PICKUP_COLLECTED` events. Drop tables vary by enemy type (drone/grunt/sniper/hybrid/commander) with weapon-part chance scaled by tier (35%/60%/100%). Items go directly into InventorySystem.
+The PickupSystem spawns physical glowing world meshes when enemies die, which magnetize towards the player and emit `PICKUP_COLLECTED` events upon collection. Drop tables vary by enemy type.
 
-### Weapon & Companion Upgrades (TAB Menu)
-WeaponsSystem implements per-weapon level 1→5 progression with `getUpgradeInfo`, `getAllUpgradeInfo`, and `upgradeWeapon(type)`. Each level boosts damage, fire rate, reduces spread, and from level 3+ adds impact (knockback / explosion radius). Upgrade cost is `gears + weapon_part_<type>` scaling per level. CompanionSystem mirrors this with `getUpgradeInfo`, `getAllUpgradeInfo`, and `upgradeCompanion(id, spendFn)` boosting maxHealth/damage/speed for `gears + energy_cores`. The in-game UpgradeMenu (`UpgradeMenu.tsx`, opened with **TAB**) shows resource counts, both tabs (Weapons / Helper Robots), live cost preview, and per-row upgrade buttons. Pressing TAB toggles the modal and releases pointer lock; ESC also closes.
+### Weapon & Companion Upgrades
+The WeaponsSystem implements per-weapon level progression, boosting damage, fire rate, and impact. The CompanionSystem manages companion upgrades for health, damage, and speed. An in-game UpgradeMenu provides an interface for these upgrades.
 
 ### Base Structures (Lab + Garden)
-BaseSystem (`BaseSystem.ts`) tracks player-placed base structures (`lab`, `garden`) with levels 1→3. Lab level controls companion roster cap [3,5,8] and unlocks robot blueprint tiers; Garden level controls capture roster cap [3,6,10] and capture-bonus chance [0,0.15,0.3]. Lab/Garden are placed via two new prefabs in PrefabSystem (`base_lab`, `base_garden`) tagged with `baseStructureKind`. PrefabSystem has `setOnPlacedCallback` / `setOnRemovedCallback` hooks; Game.tsx wires placements into BaseSystem.registerStructure and re-syncs companion cap on placement/removal. Walking within 6 units of a Lab or Garden and pressing **E** opens its UI (LabUI / GardenCaptureUI). Upgrade cost is gears + scrap + energy_cores scaling per next-level tier.
+The BaseSystem tracks player-placed base structures (lab, garden) with multiple levels. Lab level controls companion roster cap and unlocks robot blueprints; Garden level controls capture roster cap and capture bonus chance. These structures have interactive UIs.
 
 ### Lab UI (Build Robots)
-LabUI (`LabUI.tsx`) shows ten robot blueprints across three Lab tiers (Scout/Brute/Medic/SparkPup at tier 1; Jet/Tank/Guardian at tier 2; Optimus/Apex/Mega at tier 3) — each blueprint declares preset name, type (ally/pet), description, and cost in gears+scrap+cores+circuits. BUILD spends resources, calls `CompanionSystem.addCompanion(presetName, playerPos, { allowDuplicate: true })`, and emits an `effect:sparkle`. The Lab can be upgraded inline from the same modal when affordable. Roster size is capped by the current Lab level via BaseSystem.getLabCompanionCap.
+The LabUI displays robot blueprints across different tiers. Players can build companions by spending resources.
 
 ### Bio Creature Capture & Garden UI
-BioCreatureSystem (`BioCreatureSystem.ts`) defines 5 wandering bio-robotic species (RoboFox, CrystalBeetle, HoverSerpent, NeonOwl, VoltFrog) using RobotDescriptor + RobotFactory styling. `spawnInitialCreatures()` seeds 8 spawn spots around the world. Pressing **H** while standing within range fires `attemptCaptureNearest()` — a capture orb arcs to the target, plays a capture beam, rolls a chance modified by Garden capture bonus, and on success adds the creature to the captured roster (capped by Garden level via setHooks). GardenCaptureUI (`GardenCaptureUI.tsx`, opened with **E** at a Garden) lists captured creatures with stats and a DEPLOY button that maps species → companion preset (robofox→ScoutCompanion, crystalbeetle→TankTitan, hoverserpent→JetWarden, neonowl→InsectoidStalker, voltfrog→SparkPup) and adds them via CompanionSystem.
-
-### Build HUD Labels
-The build hotbar in GameUI now displays the actively-selected block name, material cost (e.g. "2 scrap_metal"), and HP in a banner above the slot row, sourced from `BuildingSystem.getBlockDefinitions()[selected]`.
+The BioCreatureSystem defines wandering bio-robotic species. Players can attempt to capture these creatures, which are then managed by the GardenCaptureUI and can be deployed as companions.
 
 ### Building & Prefab Systems
-The BuildingSystem offers Minecraft-style mining and building with 19 block types, grid-snapped placement, and a live GridMaterial overlay. The PrefabSystem allows players to place pre-designed structures (e.g., watchtowers, houses, city blocks) using the same material factory as the armor system, also with grid-snapped placement. Both systems are serialized by the LevelSerializer for saving and loading.
+The BuildingSystem offers Minecraft-style mining and building with various block types and grid-snapped placement. The PrefabSystem allows placing pre-designed structures, both serialized by the LevelSerializer.
 
 ### Commerce & Companion Systems
-A ShopSystem manages 5 shop locations with dynamic pricing. The GardenSystem and CompanionSystem manage digital companions, including healing and combat types, with leveling and bonding mechanics. A MapSystem provides a real-time minimap.
+A ShopSystem manages 5 shop locations with dynamic pricing. The GardenSystem and CompanionSystem manage digital companions with leveling and bonding mechanics. A MapSystem provides a real-time minimap.
 
 ### Enemy Systems & Robot Generation
-The EnemySystem features a wave spawner for 6 distinct enemy types, including Commanders with advanced AI and flight. The Robot Shape Engine (RobotDesigner/Factory) is a data-driven system for generating all robots (enemies, allies, pets) with extensive parametric descriptors for visual styles, including new features like arm cannons, rounded boots, wheels, and engine blocks. Reusable themes (e.g., transformer, mega-man, hybrid) allow for quick styling.
+The EnemySystem features a wave spawner for distinct enemy types, including Commanders with advanced AI. The Robot Shape Engine is a data-driven system for generating all robots (enemies, allies, pets) with extensive parametric descriptors and reusable themes.
 
 ### Environment & World
-A CityGenerator creates a massive 1200x1200 open world with a central city and four distinct biomes (Mountains, Jungle, Desert, Junkyard Robot City), featuring temples, villages, and sky cities.
+A CityGenerator creates a massive 1200x1200 open world with a central city and four distinct biomes.
 
 ### Sky & Day/Night System
-SkySystem renders a custom-shader gradient skybox (zenith ↔ horizon blend, sun disc + halo, twinkling stars at night) and drives a full day/night cycle. Time of day flows through midnight → dawn → day → dusk palettes with smoothly interpolated sky, sun direction/intensity/color, ambient color, fog color, and scene clear color. Configurable seconds-per-day cycle (default 300s = 5 min real time), `setTimeOfDay(hours)`, pause/resume, and weather modes (`clear`/`overcast`/`storm`) that adjust fog density and overcast tint. Skybox follows the camera so the world feels infinite. The previous static `clearColor`/fog values in BabylonEngine are now driven each frame by SkySystem. To prevent shared materials from drifting brighter over time, `BabylonEngine.boostMaterialBrightness` now uses a WeakSet so each material is boosted at most once.
+The SkySystem renders a custom-shader gradient skybox and drives a full day/night cycle, smoothly interpolating sky, sun direction/intensity/color, ambient color, fog color, and scene clear color. It also supports weather modes.
 
 ### Multiplayer
 A MultiplayerSystem provides client-side WebSocket integration for real-time multiplayer, supporting room management, position synchronization, chat, and enemy damage syncing for up to 4 players.
 
 ### Controller Support (Gamepad)
-GamepadInput polls `navigator.getGamepads()` every requestAnimationFrame and synthesizes the existing keyboard / mouse / pointer events the rest of the game already listens for, so no consumer code needs gamepad-specific branches. Digital buttons map to KeyboardEvents on `window` using the `code` strings PlayerController and other systems already key on (Space/jump, KeyF/parry, KeyV/light melee, KeyB/heavy, KeyQ/dodge, KeyR/reload-rotate, KeyM/map, KeyG/build, KeyC/camera toggle, KeyX/flight, KeyT/sabre, KeyE/interact, KeyP/plan, ShiftLeft/sprint via LS click). Triggers fire MouseEvent + PointerEvent pairs (RT → button 0 / fire, LT → button 2 / mine) so both WeaponsSystem (window mousedown) and BuildingSystem/PrefabSystem (window pointerdown) react. The right stick mutates `camera.rotation.x/y` directly with a 0.22 deadzone, dt-scaled sensitivity, and a ±1.4 rad pitch clamp; the left stick is converted to WASD past the deadzone. On disconnect or dispose, `releaseAll()` synthesizes the matching keyup/mouseup/pointerup events so no input can stay phantom-pressed. A connection toast ("CONTROLLER CONNECTED: …") is surfaced via the existing message HUD. Wired in `Game.tsx` and disposed alongside the other systems.
+GamepadInput polls connected gamepads and synthesizes existing keyboard/mouse/pointer events, providing seamless controller integration without requiring game-specific branches.
 
 ### Effects & UI
-An EffectsSystem drives transient visual effects (sparkles, captures, level-ups). The UI includes an AuthUI, a GameUI with HUD, shop interfaces, upgrade interfaces, a multiplayer lobby, and a contextual build hotbar. A MainMenu provides game start and character customization options. GameUI also draws a permanent center crosshair (cyan cross + white dot) for aiming, and renders an in-screen build hint ("LMB place • RMB mine • R rotate • 1-9/0/-/= select block") whenever build mode is active.
-
-### Enemy Health Bars
-EnemyHealthBarSystem renders an HTML overlay per live enemy. Each frame it pulls active enemies from `EnemySystem.getActiveEnemies()`, projects each enemy's head position into screen space via `Vector3.Project` using the active camera, and positions a small red gradient bar above the enemy. Bars cull when the enemy is behind the camera, beyond ~90 units, off-screen, or dead/disposed, and fade with distance. Wired in `Game.tsx` and disposed alongside other systems.
-
-### Technical Details
-The game uses Babylon.js v8.x for WebGL rendering, with a cell-shaded anime aesthetic, ink outlines, bloom, chromatic aberration, and FXAA. The frontend is built with React, TypeScript, and Vite, while the backend uses Express.js. The architecture is event-driven with FSM-based entity states.
+An EffectsSystem drives transient visual effects. The UI includes an AuthUI, a GameUI with HUD, shop interfaces, upgrade interfaces, a multiplayer lobby, and a contextual build hotbar. A MainMenu provides game start and character customization options. EnemyHealthBarSystem renders HTML overlays for active enemies.
 
 ## External Dependencies
 - **PostgreSQL**: Primary database with Drizzle ORM.

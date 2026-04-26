@@ -437,6 +437,12 @@ export class PlayerController implements IDamageable {
 
     if (!this.isAlive) return;
 
+    if (this.mountedVehiclePos) {
+      this.meshRoot.position.copyFrom(this.mountedVehiclePos);
+      this.updateCamera(deltaTime);
+      return;
+    }
+
     this.stateMachine.update(deltaTime);
     this.updateTimers(deltaTime);
     this.updateStamina(deltaTime);
@@ -718,6 +724,47 @@ export class PlayerController implements IDamageable {
       const smooth = 1 - Math.exp(-12 * dt);
       r.y += delta * smooth;
     }
+  }
+
+  private mountedVehiclePos: BABYLON.Vector3 | null = null;
+  private mountedVehicleRoot: BABYLON.TransformNode | null = null;
+  private hiddenForVehicle: BABYLON.AbstractMesh[] = [];
+
+  setMounted(vehicleRoot: BABYLON.TransformNode | null): void {
+    if (vehicleRoot) {
+      this.mountedVehicleRoot = vehicleRoot;
+      this.mountedVehiclePos = vehicleRoot.position;
+      this.velocity.setAll(0);
+      this.isFlying = false;
+      this.isDodging = false;
+      this.stateMachine.changeState("idle");
+      if (this.humanoid) {
+        const root = this.humanoid.getRoot();
+        this.hiddenForVehicle = root.getChildMeshes();
+        for (const m of this.hiddenForVehicle) m.isVisible = false;
+      }
+    } else {
+      this.mountedVehicleRoot = null;
+      this.mountedVehiclePos = null;
+      for (const m of this.hiddenForVehicle) m.isVisible = true;
+      this.hiddenForVehicle = [];
+    }
+  }
+
+  isMounted(): boolean {
+    return this.mountedVehicleRoot !== null;
+  }
+
+  setPosition(pos: BABYLON.Vector3): void {
+    this.meshRoot.position.copyFrom(pos);
+  }
+
+  getCameraYaw(): number {
+    return this.camera.rotation.y;
+  }
+
+  getCameraPitch(): number {
+    return this.camera.rotation.x;
   }
 
   getAimOrigin(): BABYLON.Vector3 {

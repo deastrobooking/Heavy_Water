@@ -25,6 +25,7 @@ import { PrefabSystem, PrefabSummary } from "./PrefabSystem";
 import { PickupSystem } from "./PickupSystem";
 import { BaseSystem, BaseStructure } from "./BaseSystem";
 import { BioCreatureSystem, CapturedCreature } from "./BioCreatureSystem";
+import { VehicleSystem } from "./VehicleSystem";
 import { WeaponUpgradeInfo } from "./WeaponsSystem";
 import { CompanionUpgradeInfo } from "./CompanionSystem";
 import { LabBlueprint } from "./LabUI";
@@ -67,6 +68,7 @@ export const Game: React.FC = () => {
   const pickupRef = useRef<PickupSystem | null>(null);
   const baseRef = useRef<BaseSystem | null>(null);
   const bioRef = useRef<BioCreatureSystem | null>(null);
+  const vehicleRef = useRef<VehicleSystem | null>(null);
   const levelSerializerRef = useRef<LevelSerializer | null>(null);
   const loadInputRef = useRef<HTMLInputElement | null>(null);
   const multiplayerRef = useRef<MultiplayerSystem | null>(null);
@@ -487,6 +489,23 @@ export const Game: React.FC = () => {
         chestSystem.setOnLootCollected(handleLootCollected);
         chestSystem.spawnChests(30);
 
+        const vehicleSystem = new VehicleSystem(
+          scene,
+          () => player.getCameraYaw(),
+          () => player.getCameraPitch(),
+        );
+        vehicleSystem.setGroundHeightFn((_x, _z) => 0);
+        vehicleRef.current = vehicleSystem;
+        vehicleSystem.spawnPreset("RaiderATV", new BABYLON.Vector3(-6, 0.6, -10));
+        vehicleSystem.spawnPreset("CometFighter", new BABYLON.Vector3(8, 1.2, -10));
+
+        bus.on(GameEvents.PLAYER_DIED, () => {
+          if (vehicleSystem.getActive()) {
+            vehicleSystem.exit();
+            player.setMounted(null);
+          }
+        });
+
         for (let i = 0; i < 5; i++) {
           enemySystem.spawnEnemy(player.getPosition());
         }
@@ -534,6 +553,7 @@ export const Game: React.FC = () => {
           lastTime = now;
           const dt = deltaTime / 1000;
 
+          vehicleSystem.update(dt);
           player.update(dt);
           const playerPos = player.getPosition();
 
@@ -962,8 +982,27 @@ export const Game: React.FC = () => {
           if (!ok) showMessage("NO CREATURE IN RANGE", 1200);
         }
       } else if (e.code === "KeyE") {
-        if (!baseRef.current || !playerRef.current) return;
+        if (!playerRef.current) return;
         const pos = playerRef.current.getPosition();
+        // Priority: exit vehicle > enter vehicle > base structures
+        if (vehicleRef.current?.getActive()) {
+          const v = vehicleRef.current.exit();
+          if (v) {
+            playerRef.current.setMounted(null);
+            const dropPos = v.position.add(new BABYLON.Vector3(2.5, 1, 0));
+            playerRef.current.setPosition(dropPos);
+            showMessage(`EXITED ${v.descriptor.name.toUpperCase()}`, 1500);
+          }
+          return;
+        }
+        const nearVehicle = vehicleRef.current?.getNearest(pos, 5.5) ?? null;
+        if (nearVehicle) {
+          vehicleRef.current?.enter(nearVehicle);
+          playerRef.current.setMounted(nearVehicle.meshes.root);
+          showMessage(`ENTERED ${nearVehicle.descriptor.name.toUpperCase()}`, 1500);
+          return;
+        }
+        if (!baseRef.current) return;
         const lab = baseRef.current.getNearestStructure(pos, "lab", 6);
         const garden = baseRef.current.getNearestStructure(pos, "garden", 6);
         if (lab) {
@@ -985,6 +1024,33 @@ export const Game: React.FC = () => {
     return () => window.removeEventListener("keydown", onKey);
   }, [gamePhase, upgradeMenuOpen, labOpen, gardenOpen, showMessage]);
 
+  useEffect(() => {
+    if (gamePhase !== "playing") return;
+    const codeToInput: Record<string, keyof import("./VehicleSystem").VehicleInputState> = {
+      KeyW: "forward",
+      KeyS: "back",
+      KeyA: "left",
+      KeyD: "right",
+      Space: "up",
+      ControlLeft: "down",
+      ShiftLeft: "boost",
+    };
+    const setKey = (code: string, down: boolean) => {
+      if (!vehicleRef.current?.getActive()) return;
+      const k = codeToInput[code];
+      if (!k) return;
+      vehicleRef.current.setInput({ [k]: down } as any);
+    };
+    const onDown = (e: KeyboardEvent) => setKey(e.code, true);
+    const onUp = (e: KeyboardEvent) => setKey(e.code, false);
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    return () => {
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+    };
+  }, [gamePhase]);
+
   const labLevel = labStructure ? (baseRef.current?.getStructures().find(s => s.id === labStructure.id)?.level ?? labStructure.level) : 0;
   const labRawCost = labStructure ? baseRef.current?.getUpgradeCost(labStructure.id) ?? null : null;
   const labUpgradeCost = labRawCost ? { gears: labRawCost.gears, cores: labRawCost.energyCores, circuits: labRawCost.scrap } : null;
@@ -997,6 +1063,10 @@ export const Game: React.FC = () => {
 
   useEffect(() => {
     return () => {
+      if (vehicleRef.current?.getActive() && playerRef.current) {
+        vehicleRef.current.exit();
+        playerRef.current.setMounted(null);
+      }
       if (playerRef.current) playerRef.current.dispose();
       if (combatSystemRef.current) combatSystemRef.current.dispose();
       if (specialWeaponsRef.current) specialWeaponsRef.current.dispose();
@@ -1008,6 +1078,7 @@ export const Game: React.FC = () => {
       if (prefabRef.current) prefabRef.current.dispose();
       if (pickupRef.current) pickupRef.current.dispose();
       if (bioRef.current) bioRef.current.dispose();
+      if (vehicleRef.current) vehicleRef.current.dispose();
       if (baseRef.current) baseRef.current.dispose();
       if (effectsRef.current) effectsRef.current.dispose();
       if (skyRef.current) skyRef.current.dispose();
