@@ -18,6 +18,7 @@ export class EffectsSystem {
   private levelUpHandler: (data: any) => void;
   private pickupHandler: (data: any) => void;
   private hitImpactHandler: (data: any) => void;
+  private smokePuffHandler: (data: any) => void;
 
   constructor(scene: BABYLON.Scene) {
     this.scene = scene;
@@ -38,12 +39,16 @@ export class EffectsSystem {
     this.hitImpactHandler = (data: { position: BABYLON.Vector3; color?: BABYLON.Color3; scale?: number }) => {
       this.spawnHitImpact(data.position, data.color, data.scale);
     };
+    this.smokePuffHandler = (data: { position: BABYLON.Vector3; color?: BABYLON.Color3; scale?: number; rise?: number; duration?: number }) => {
+      this.spawnSmokePuff(data.position, data.color, data.scale, data.rise, data.duration);
+    };
 
     this.bus.on("effect:sparkle", this.sparkleHandler);
     this.bus.on("effect:capture", this.captureHandler);
     this.bus.on("effect:levelUp", this.levelUpHandler);
     this.bus.on("effect:pickup", this.pickupHandler);
     this.bus.on("effect:hitImpact", this.hitImpactHandler);
+    this.bus.on("effect:smokePuff", this.smokePuffHandler);
 
     console.log("[EffectsSystem] Initialized");
   }
@@ -222,6 +227,55 @@ export class EffectsSystem {
     });
   }
 
+  spawnSmokePuff(
+    position: BABYLON.Vector3,
+    color?: BABYLON.Color3,
+    scale: number = 1,
+    rise: number = 1.4,
+    duration: number = 0.85,
+  ): void {
+    const c = color || new BABYLON.Color3(0.32, 0.32, 0.36);
+    const puffCount = 3;
+    const puffs: BABYLON.Mesh[] = [];
+    const vels: BABYLON.Vector3[] = [];
+    const stamp = Date.now();
+    for (let i = 0; i < puffCount; i++) {
+      const p = BABYLON.MeshBuilder.CreateSphere(`smoke_${i}_${stamp}_${Math.floor(Math.random() * 1e6)}`, { diameter: 0.45 * scale, segments: 6 }, this.scene);
+      p.position.copyFrom(position);
+      p.position.x += (Math.random() - 0.5) * 0.35 * scale;
+      p.position.y += (Math.random() - 0.2) * 0.2 * scale;
+      p.position.z += (Math.random() - 0.5) * 0.35 * scale;
+      const mat = new BABYLON.StandardMaterial(`smokeMat_${i}_${stamp}`, this.scene);
+      mat.emissiveColor = c.scale(0.55);
+      mat.diffuseColor = c;
+      mat.disableLighting = true;
+      mat.alpha = 0.65;
+      p.material = mat;
+      p.isPickable = false;
+      puffs.push(p);
+      vels.push(new BABYLON.Vector3(
+        (Math.random() - 0.5) * 0.9,
+        rise * (0.7 + Math.random() * 0.6),
+        (Math.random() - 0.5) * 0.9,
+      ));
+    }
+    this.active.push({
+      meshes: puffs,
+      elapsed: 0,
+      duration,
+      update: (e, dt, t) => {
+        for (let i = 0; i < puffs.length; i++) {
+          puffs[i].position.addInPlace(vels[i].scale(dt));
+          vels[i].y += 0.4 * dt; // slight buoyancy
+          vels[i].x *= 1 - dt * 1.5;
+          vels[i].z *= 1 - dt * 1.5;
+          puffs[i].scaling.setAll(1 + t * 1.8 * scale);
+          (puffs[i].material as BABYLON.StandardMaterial).alpha = 0.65 * (1 - t);
+        }
+      },
+    });
+  }
+
   private disposeEffect(e: ActiveEffect): void {
     for (const m of e.meshes) {
       const mat = m.material;
@@ -250,6 +304,7 @@ export class EffectsSystem {
     this.bus.off("effect:levelUp", this.levelUpHandler);
     this.bus.off("effect:pickup", this.pickupHandler);
     this.bus.off("effect:hitImpact", this.hitImpactHandler);
+    this.bus.off("effect:smokePuff", this.smokePuffHandler);
     for (const e of this.active) this.disposeEffect(e);
     this.active = [];
   }

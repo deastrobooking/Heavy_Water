@@ -105,6 +105,9 @@ interface ActiveProp {
   kind: PropKind;
   root: BABYLON.Mesh;
   hitbox: BABYLON.Mesh;
+  /** Canonical world position used by gameplay queries — does NOT jitter
+   *  with the rattle/shake animation. The visual `root.position` may be
+   *  offset slightly during a shake but is restored back to this anchor. */
   position: BABYLON.Vector3;
   config: PropConfig;
   damageable: PropDamageable;
@@ -112,6 +115,29 @@ interface ActiveProp {
   alreadyLooted?: boolean;
   /** For open container "ready to collect" pulse */
   glow?: BABYLON.Mesh | null;
+  /** Performance.now() timestamp for next continuous smoke puff (low-HP). */
+  nextSmokeAt?: number;
+  /** Performance.now() timestamp until which the prop should rattle (loot/hit shake). */
+  rattleUntil?: number;
+  /** Total rattle duration (seconds) for the active rattle. */
+  rattleDuration?: number;
+  /** Rattle intensity scalar. */
+  rattleAmp?: number;
+}
+
+/** System-wide per-material flash state. Materials are shared from the
+ *  material cache, so flash state MUST be tracked at material scope —
+ *  otherwise concurrent hits on different props that share a material
+ *  race each other's restore timers. */
+interface MaterialFlashState {
+  /** Emissive color to restore to. Refreshed each time a new flash starts
+   *  while no other flash is in flight, so external code that mutates the
+   *  emissive between flashes is respected. */
+  original: BABYLON.Color3;
+  /** Monotonic counter — only the latest flash gets to restore. */
+  token: number;
+  /** How many flash timers are currently armed against this material. */
+  inFlight: number;
 }
 
 /** Metadata stamped onto prop hitbox meshes — typed so callers can
@@ -145,15 +171,39 @@ class PropDamageable implements IDamageable {
     }
     const prop = this.getProp();
     const finalDamage = Math.max(1, info.amount);
+    const previousHealth = this.health;
     this.health = Math.max(0, this.health - finalDamage);
 
-    EventBus.getInstance().emit("effect:hitImpact", {
-      position: info.hitPoint ? info.hitPoint.clone() : prop.position.clone(),
-      color: new BABYLON.Color3(1.0, 0.7, 0.2),
-      scale: 0.9,
+    const hitPos = info.hitPoint ? info.hitPoint.clone() : prop.position.clone();
+    const bus = EventBus.getInstance();
+
+    bus.emit("effect:hitImpact", {
+      position: hitPos,
+      color: new BABYLON.Color3(1.0, 0.95, 0.55),
+      scale: 0.85,
     });
 
+    // Small smoke/spark puff at the hit point so even glancing hits read.
+    if (this.health > 0) {
+      bus.emit("effect:smokePuff", {
+        position: hitPos,
+        color: new BABYLON.Color3(0.4, 0.4, 0.42),
+        scale: 0.55,
+        rise: 1.1,
+        duration: 0.55,
+      });
+    }
+
     this.system.flashProp(prop);
+    // Tiny impact shake — different from the big "loot rattle" but reuses the
+    // same kinematic offset path in tick().
+    this.system.shakeProp(prop, 0.18, 0.045);
+
+    // If the hit just dropped us under 30%, kick continuous smoke immediately.
+    const lowFrac = 0.3;
+    if (this.health > 0 && this.health / this.maxHealth < lowFrac && previousHealth / this.maxHealth >= lowFrac) {
+      this.system.armContinuousSmoke(prop);
+    }
 
     if (this.health <= 0) {
       this.isAlive = false;
@@ -190,6 +240,8 @@ export class EnvironmentPropSystem {
   private playerPos: BABYLON.Vector3 = BABYLON.Vector3.Zero();
   private observer: BABYLON.Observer<BABYLON.Scene> | null = null;
   private materials: Map<string, BABYLON.StandardMaterial> = new Map();
+  /** Per-material flash bookkeeping (see MaterialFlashState). */
+  private materialFlashState: Map<number, MaterialFlashState> = new Map();
 
   constructor(scene: BABYLON.Scene) {
     this.scene = scene;
@@ -292,7 +344,9 @@ export class EnvironmentPropSystem {
       kind,
       root,
       hitbox,
-      position: root.position,
+      // Anchor is a clone — we'll restore root.position to this each frame
+      // so any rattle/shake offset doesn't leak into gameplay-facing position.
+      position: root.position.clone(),
       config: { ...config, topY },
       damageable,
     };
@@ -347,17 +401,64 @@ export class EnvironmentPropSystem {
     });
   }
 
-  /** Public: brief red flash over the prop's primary mesh. */
+  /** Public: brief white/yellow emissive flash over the prop's primary mesh.
+   *
+   *  Flash bookkeeping is keyed by material `uniqueId` (not by prop) because
+   *  the material cache shares one material instance across many props. If we
+   *  tracked per-prop, a second prop's flash starting mid-flash on the first
+   *  prop would either (a) capture the already-brightened color as "original"
+   *  or (b) get its restore overridden by the first prop's earlier timer. */
   flashProp(prop: ActiveProp): void {
+    const flash = new BABYLON.Color3(1.0, 0.95, 0.55);
+    const dur = 110;
     for (const child of prop.root.getChildMeshes()) {
       const m = child.material as BABYLON.StandardMaterial | null;
       if (!m || !m.emissiveColor) continue;
-      const orig = m.emissiveColor.clone();
-      m.emissiveColor = new BABYLON.Color3(1.0, 0.25, 0.1);
+      const key = m.uniqueId;
+      let state = this.materialFlashState.get(key);
+      if (!state) {
+        state = { original: m.emissiveColor.clone(), token: 0, inFlight: 0 };
+        this.materialFlashState.set(key, state);
+      } else if (state.inFlight === 0) {
+        // No flash currently active — refresh the baseline so any external
+        // emissive change since the last flash (e.g. container glow state)
+        // becomes the new restore target.
+        state.original.copyFrom(m.emissiveColor);
+      }
+      state.token += 1;
+      state.inFlight += 1;
+      const myToken = state.token;
+      m.emissiveColor = flash;
       setTimeout(() => {
-        if (m && !m.isDisposed()) m.emissiveColor = orig;
-      }, 110);
+        const current = this.materialFlashState.get(key);
+        if (!current) return;
+        current.inFlight = Math.max(0, current.inFlight - 1);
+        if (!m || m.isDisposed()) return;
+        // Only the latest flash gets to restore — earlier timers no-op.
+        if (current.token === myToken) {
+          m.emissiveColor = current.original;
+        }
+      }, dur);
     }
+  }
+
+  /** Public: schedule a brief kinematic shake of the prop's root mesh. */
+  shakeProp(prop: ActiveProp, durationSec: number, amplitude: number): void {
+    const now = performance.now();
+    const endAt = now + durationSec * 1000;
+    // Layer with any in-flight rattle: keep the larger amplitude and the later end.
+    if (!prop.rattleUntil || endAt > prop.rattleUntil) {
+      prop.rattleUntil = endAt;
+      prop.rattleDuration = durationSec;
+    }
+    if (!prop.rattleAmp || amplitude > prop.rattleAmp) {
+      prop.rattleAmp = amplitude;
+    }
+  }
+
+  /** Public: arm continuous low-HP smoke for a prop. */
+  armContinuousSmoke(prop: ActiveProp): void {
+    prop.nextSmokeAt = performance.now();
   }
 
   /** Internal: a prop just died — drop loot via the bus + dispose meshes. */
@@ -390,11 +491,63 @@ export class EnvironmentPropSystem {
     if (this.props.length === 0) return;
     const ppos = this.playerPos;
     const lootRangeSq = 2.6 * 2.6;
+    const now = performance.now();
     for (let i = this.props.length - 1; i >= 0; i--) {
       const p = this.props[i];
       if (!p.damageable.isAlive) {
         this.props.splice(i, 1);
         continue;
+      }
+
+      // ---- Rattle / impact-shake (kinematic, never persists into anchor) ----
+      if (p.rattleUntil && p.rattleUntil > now && p.rattleDuration && p.rattleAmp) {
+        const remaining = (p.rattleUntil - now) / 1000;
+        const t = Math.max(0, Math.min(1, remaining / p.rattleDuration));
+        // Decay the offset over the rattle's life so it eases out.
+        const amp = p.rattleAmp * t;
+        // Use simple time-based oscillators per axis for a busy "rattle" feel.
+        const osc = now * 0.06 + p.id;
+        const ox = Math.sin(osc * 1.7) * amp;
+        const oy = Math.sin(osc * 2.3 + 1.3) * amp * 0.6;
+        const oz = Math.cos(osc * 1.9 + 0.7) * amp;
+        p.root.position.set(p.position.x + ox, p.position.y + oy, p.position.z + oz);
+        // Tiny rotational jitter for open containers (feels more "loot-pop"-y)
+        if (p.kind === "open_container") {
+          p.root.rotation.z = Math.sin(osc * 2.1) * amp * 0.18;
+        }
+      } else if (p.rattleUntil) {
+        // Just ended — restore anchor position/rotation cleanly.
+        p.root.position.copyFrom(p.position);
+        if (p.kind === "open_container") p.root.rotation.z = 0;
+        p.rattleUntil = undefined;
+        p.rattleDuration = undefined;
+        p.rattleAmp = undefined;
+      }
+
+      // ---- Continuous low-HP smoke (heavily damaged props < 30%) ----
+      const hpFrac = p.damageable.health / p.damageable.maxHealth;
+      if (hpFrac < 0.3) {
+        if (p.nextSmokeAt === undefined) p.nextSmokeAt = now;
+        if (now >= p.nextSmokeAt) {
+          // Puff from somewhere on the prop's upper half.
+          const offX = (Math.random() - 0.5) * p.config.contactRadius * 0.7;
+          const offZ = (Math.random() - 0.5) * p.config.contactRadius * 0.7;
+          const offY = p.config.topY * (0.55 + Math.random() * 0.4);
+          this.bus.emit("effect:smokePuff", {
+            position: new BABYLON.Vector3(p.position.x + offX, p.position.y + offY, p.position.z + offZ),
+            color: hpFrac < 0.15
+              ? new BABYLON.Color3(0.22, 0.22, 0.24)
+              : new BABYLON.Color3(0.38, 0.36, 0.36),
+            scale: 0.7 + (1 - hpFrac) * 0.35,
+            rise: 1.6,
+            duration: 1.1,
+          });
+          // Tighter cadence as health drops.
+          const interval = 320 + hpFrac * 700;
+          p.nextSmokeAt = now + interval;
+        }
+      } else {
+        p.nextSmokeAt = undefined;
       }
       // Open container: when the player (on foot or in vehicle) walks/drives up,
       // spawn loot at their feet with zero spread so PickupSystem's magnet/collect
@@ -416,6 +569,8 @@ export class EnvironmentPropSystem {
             color: new BABYLON.Color3(0.3, 1.0, 0.5),
             scale: 1.2,
           });
+          // Visible "rattle" so the player feels the loot pop.
+          this.shakeProp(p, 0.42, 0.09);
           if (p.glow) {
             const mat = p.glow.material as BABYLON.StandardMaterial | null;
             if (mat) mat.emissiveColor = new BABYLON.Color3(0.15, 0.6, 1.0);
@@ -771,6 +926,7 @@ export class EnvironmentPropSystem {
     this.props = [];
     this.materials.forEach(m => { if (!m.isDisposed()) m.dispose(); });
     this.materials.clear();
+    this.materialFlashState.clear();
     console.log("[EnvironmentPropSystem] Disposed");
   }
 }
