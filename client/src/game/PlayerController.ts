@@ -5,6 +5,7 @@ import { DamageInfo, DamageResult, DamageResistance, IDamageable, DamageType } f
 import { AnimationSystem, AnimationState } from "./AnimationSystem";
 import { HumanoidCharacter } from "./HumanoidCharacter";
 import { HUMANOID_PRESETS } from "./HumanoidPresets";
+import { equipArmorSet, deserializeArmorSet, EquippedArmor, ArmorSetSerialized } from "./RobotArmorSystem";
 
 export type PlayerState = "idle" | "moving" | "sprinting" | "dodging" | "attacking" | "stunned" | "dead" | "jetpack" | "flying" | "hovering";
 
@@ -25,6 +26,7 @@ export class PlayerController implements IDamageable {
   private camera: BABYLON.FreeCamera;
   private mesh: BABYLON.Mesh;
   private humanoid?: HumanoidCharacter;
+  private equippedArmor?: EquippedArmor;
   private meshRoot!: BABYLON.TransformNode | BABYLON.Mesh;
   private velocity: BABYLON.Vector3 = BABYLON.Vector3.Zero();
   private isGrounded: boolean = true;
@@ -170,7 +172,8 @@ export class PlayerController implements IDamageable {
   }
 
   private createPlayerMesh(): BABYLON.Mesh {
-    let humanoidDef = HUMANOID_PRESETS.PlayerDefault;
+    let humanoidDef = { ...HUMANOID_PRESETS.PlayerDefault };
+    let armorSetSerialized: ArmorSetSerialized | null = null;
     try {
       const raw = typeof localStorage !== "undefined"
         ? localStorage.getItem("detroit3026_character_v1")
@@ -194,15 +197,32 @@ export class PlayerController implements IDamageable {
             hair: BABYLON.Color3.FromArray(saved.colors.hair),
           } : humanoidDef.colors,
         };
+        if (saved.armorSet) armorSetSerialized = saved.armorSet as ArmorSetSerialized;
         console.log("[PlayerController] Loaded saved character");
       }
     } catch (e) {
       console.warn("[PlayerController] Could not load saved character:", e);
     }
+
+    if (armorSetSerialized) {
+      humanoidDef = { ...humanoidDef, hasArmor: false };
+    }
+
     this.humanoid = new HumanoidCharacter(this.scene, humanoidDef);
     const root = this.humanoid.getRoot();
     root.position = new BABYLON.Vector3(0, 1, -15);
     this.meshRoot = root;
+
+    if (armorSetSerialized) {
+      const setCfg = deserializeArmorSet(armorSetSerialized);
+      this.equippedArmor = equipArmorSet(this.scene, this.humanoid.getAnimatableLimbs(), setCfg, {
+        bodyHeight: humanoidDef.height,
+        shoulderWidth: humanoidDef.shoulderWidth,
+        armLength: humanoidDef.armLength,
+        legLength: humanoidDef.legLength,
+      });
+      console.log("[PlayerController] Equipped robot armor set");
+    }
 
     const capsule = BABYLON.MeshBuilder.CreateCapsule(
       "player",
@@ -278,6 +298,9 @@ export class PlayerController implements IDamageable {
     }
     if (this.animationSystem) {
       this.animationSystem.dispose();
+    }
+    if (this.equippedArmor) {
+      this.equippedArmor.dispose();
     }
     if (this.humanoid) {
       this.humanoid.dispose();
