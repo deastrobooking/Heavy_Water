@@ -191,6 +191,7 @@ class PropDamageable implements IDamageable {
       color: new BABYLON.Color3(1.0, 0.95, 0.55),
       scale: 0.85,
     });
+    bus.emit("sound:propHit", { kind: prop.kind, propId: prop.id });
 
     // Small smoke/spark puff at the hit point so even glancing hits read.
     if (this.health > 0) {
@@ -494,6 +495,7 @@ export class EnvironmentPropSystem {
       color: new BABYLON.Color3(1.0, 0.55, 0.15),
       scale: 1.8,
     });
+    this.bus.emit("sound:propBreak", { kind: prop.kind, propId: prop.id });
     this.disposeProp(prop);
   }
 

@@ -36,6 +36,7 @@ import { LabBlueprint } from "./LabUI";
 import { LevelSerializer } from "./LevelSerializer";
 import { MultiplayerSystem } from "./MultiplayerSystem";
 import { EffectsSystem } from "./EffectsSystem";
+import { PropAudioSystem } from "./PropAudioSystem";
 import { SkySystem } from "./SkySystem";
 import { MiningSystem } from "./MiningSystem";
 import { EnemyBaseSystem } from "./EnemyBaseSystem";
@@ -83,6 +84,7 @@ export const Game: React.FC = () => {
   const loadInputRef = useRef<HTMLInputElement | null>(null);
   const multiplayerRef = useRef<MultiplayerSystem | null>(null);
   const effectsRef = useRef<EffectsSystem | null>(null);
+  const propAudioRef = useRef<PropAudioSystem | null>(null);
   const skyRef = useRef<SkySystem | null>(null);
   const miningRef = useRef<MiningSystem | null>(null);
   const enemyBaseRef = useRef<EnemyBaseSystem | null>(null);
@@ -425,6 +427,9 @@ export const Game: React.FC = () => {
 
         const effects = new EffectsSystem(scene);
         effectsRef.current = effects;
+
+        const propAudio = new PropAudioSystem();
+        propAudioRef.current = propAudio;
 
         const multiplayer = new MultiplayerSystem(scene);
         multiplayerRef.current = multiplayer;
@@ -1402,6 +1407,7 @@ export const Game: React.FC = () => {
       if (autosaveTimerRef.current !== null) window.clearInterval(autosaveTimerRef.current);
       if (respawnTimeoutRef.current !== null) window.clearTimeout(respawnTimeoutRef.current);
       if (effectsRef.current) effectsRef.current.dispose();
+      if (propAudioRef.current) propAudioRef.current.dispose();
       if (skyRef.current) skyRef.current.dispose();
       if (enemyHealthBarsRef.current) enemyHealthBarsRef.current.dispose();
       if (aerialEnemyRef.current) aerialEnemyRef.current.dispose();
