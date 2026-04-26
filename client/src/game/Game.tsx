@@ -19,6 +19,7 @@ import { ShopSystem, ShopDefinition } from "./ShopSystem";
 import { GardenSystem } from "./GardenSystem";
 import { MapSystem } from "./MapSystem";
 import { BuildingSystem, BlockType } from "./BuildingSystem";
+import { PrefabSystem, PrefabSummary } from "./PrefabSystem";
 import { MultiplayerSystem } from "./MultiplayerSystem";
 import { EffectsSystem } from "./EffectsSystem";
 import { EventBus, GameEvents } from "./EventBus";
@@ -50,6 +51,7 @@ export const Game: React.FC = () => {
   const gardenRef = useRef<GardenSystem | null>(null);
   const mapRef = useRef<MapSystem | null>(null);
   const buildingRef = useRef<BuildingSystem | null>(null);
+  const prefabRef = useRef<PrefabSystem | null>(null);
   const multiplayerRef = useRef<MultiplayerSystem | null>(null);
   const effectsRef = useRef<EffectsSystem | null>(null);
 
@@ -66,6 +68,9 @@ export const Game: React.FC = () => {
   const [showCustomizer, setShowCustomizer] = useState(false);
   const [selectedBlock, setSelectedBlock] = useState<BlockType | null>(null);
   const [hotbarBlocks, setHotbarBlocks] = useState<BlockType[]>([]);
+  const [planMode, setPlanMode] = useState(false);
+  const [prefabHotbar, setPrefabHotbar] = useState<PrefabSummary[]>([]);
+  const [selectedPrefabIndex, setSelectedPrefabIndex] = useState(0);
   const [stats, setStats] = useState<PlayerStats>({
     health: 100,
     maxHealth: 100,
@@ -310,6 +315,17 @@ export const Game: React.FC = () => {
         setHotbarBlocks(buildingSystem.getHotbar());
         setSelectedBlock(buildingSystem.getSelectedBlockType());
 
+        const prefabSystem = new PrefabSystem(scene, engine.getCamera(), inventory);
+        prefabRef.current = prefabSystem;
+        setPrefabHotbar(prefabSystem.getHotbar());
+
+        bus.on("building:modeChanged", (on: boolean) => {
+          if (on && prefabRef.current?.isPlanMode()) prefabRef.current.togglePlanMode();
+        });
+        bus.on("prefab:modeChanged", (on: boolean) => {
+          if (on && buildingRef.current?.isBuildMode()) buildingRef.current.toggleBuildMode();
+        });
+
         const effects = new EffectsSystem(scene);
         effectsRef.current = effects;
 
@@ -493,6 +509,8 @@ export const Game: React.FC = () => {
           setHasFlightArmor(player.getHasFlightArmor());
           setBuildMode(buildingSystem.isBuildMode());
           setSelectedBlock(buildingSystem.getSelectedBlockType());
+          setPlanMode(prefabSystem.isPlanMode());
+          setSelectedPrefabIndex(prefabSystem.getSelectedIndex());
 
           uiThrottleTimer += dt;
           if (uiThrottleTimer >= 0.5) {
@@ -540,7 +558,10 @@ export const Game: React.FC = () => {
         shopRef.current = null;
         gardenRef.current = null;
         mapRef.current = null;
+        if (buildingRef.current) { try { buildingRef.current.dispose(); } catch {} }
         buildingRef.current = null;
+        if (prefabRef.current) { try { prefabRef.current.dispose(); } catch {} }
+        prefabRef.current = null;
         multiplayerRef.current = null;
         initializingRef.current = false;
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -564,6 +585,7 @@ export const Game: React.FC = () => {
     if (gardenRef.current) gardenRef.current.dispose();
     if (mapRef.current) mapRef.current.dispose();
     if (buildingRef.current) buildingRef.current.dispose();
+    if (prefabRef.current) prefabRef.current.dispose();
     if (multiplayerRef.current) multiplayerRef.current.dispose();
     if (engineRef.current) {
       engineRef.current.dispose();
@@ -663,6 +685,7 @@ export const Game: React.FC = () => {
       if (capsuleRef.current) capsuleRef.current.dispose();
       if (shopRef.current) shopRef.current.dispose();
       if (buildingRef.current) buildingRef.current.dispose();
+      if (prefabRef.current) prefabRef.current.dispose();
       if (effectsRef.current) effectsRef.current.dispose();
       if (multiplayerRef.current) multiplayerRef.current.dispose();
       if (engineRef.current) engineRef.current.dispose();
@@ -727,6 +750,9 @@ export const Game: React.FC = () => {
           buildMode={buildMode}
           hotbarBlocks={hotbarBlocks}
           selectedBlock={selectedBlock}
+          planMode={planMode}
+          prefabHotbar={prefabHotbar}
+          selectedPrefabIndex={selectedPrefabIndex}
           username={currentUser?.username || null}
           multiplayerConnected={multiplayerConnected}
           inRoom={inRoom}

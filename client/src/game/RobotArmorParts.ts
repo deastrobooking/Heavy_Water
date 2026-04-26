@@ -645,17 +645,26 @@ export const BACK_PARTS: ArmorPartDefinition[] = [
   },
 ];
 
+import {
+  HELMET_PARTS_EXTRA,
+  CHEST_PARTS_EXTRA,
+  SHOULDER_PARTS_EXTRA,
+  WEAPON_PARTS_EXTRA,
+  LEG_PARTS_EXTRA,
+  BACK_PARTS_EXTRA,
+} from "./RobotArmorPartsExtra";
+
 export const ARMOR_PART_REGISTRY: Record<ArmorSlot, ArmorPartDefinition[]> = {
-  helmet: HELMET_PARTS,
-  chest: CHEST_PARTS,
-  back: BACK_PARTS,
-  leftShoulder: SHOULDER_PARTS,
-  rightShoulder: SHOULDER_PARTS,
+  helmet: [...HELMET_PARTS, ...HELMET_PARTS_EXTRA],
+  chest: [...CHEST_PARTS, ...CHEST_PARTS_EXTRA],
+  back: [...BACK_PARTS, ...BACK_PARTS_EXTRA],
+  leftShoulder: [...SHOULDER_PARTS, ...SHOULDER_PARTS_EXTRA],
+  rightShoulder: [...SHOULDER_PARTS, ...SHOULDER_PARTS_EXTRA],
   leftArm: ARM_PARTS,
   rightArm: ARM_PARTS,
-  leftWeapon: WEAPON_PARTS,
-  rightWeapon: WEAPON_PARTS,
-  legs: LEG_PARTS,
+  leftWeapon: [...WEAPON_PARTS, ...WEAPON_PARTS_EXTRA],
+  rightWeapon: [...WEAPON_PARTS, ...WEAPON_PARTS_EXTRA],
+  legs: [...LEG_PARTS, ...LEG_PARTS_EXTRA],
 };
 
 export function findPart(slot: ArmorSlot, id: string): ArmorPartDefinition | null {

@@ -4,6 +4,7 @@ import { Weapon } from "./WeaponsSystem";
 import { ArmorUpgrade } from "./ArmorCapsuleSystem";
 import { ShopDefinition, ShopItem } from "./ShopSystem";
 import { BlockType } from "./BuildingSystem";
+import { PrefabSummary } from "./PrefabSystem";
 
 const BLOCK_LABELS: Record<string, string> = {
   metal_wall: "Wall", glass: "Glass", platform: "Platform", ramp: "Ramp",
@@ -42,6 +43,9 @@ interface GameUIProps {
   activeShop?: ShopDefinition | null;
   onShopBuy?: (itemId: string) => void;
   buildMode?: boolean;
+  planMode?: boolean;
+  prefabHotbar?: PrefabSummary[];
+  selectedPrefabIndex?: number;
   hotbarBlocks?: BlockType[];
   selectedBlock?: BlockType | null;
   username?: string | null;
@@ -100,6 +104,9 @@ export const GameUI: React.FC<GameUIProps> = ({
   activeShop = null,
   onShopBuy,
   buildMode = false,
+  planMode = false,
+  prefabHotbar = [],
+  selectedPrefabIndex = 0,
   hotbarBlocks = [],
   selectedBlock = null,
   username = null,
@@ -369,6 +376,41 @@ export const GameUI: React.FC<GameUIProps> = ({
           ))}
         </div>
       </div>
+
+      {planMode && prefabHotbar && prefabHotbar.length > 0 && (
+        <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2">
+          <div className="bg-black/85 border-2 border-fuchsia-400/70 rounded-lg px-3 py-2 shadow-lg shadow-fuchsia-500/30 max-w-[90vw]">
+            <div className="text-fuchsia-300 text-xs text-center mb-1.5 font-bold tracking-wider">
+              PLAN MODE — Wheel/[ ] cycles · LMB Place · RMB Remove · R Rotate · P Exit
+            </div>
+            <div className="flex gap-1.5 overflow-x-auto">
+              {prefabHotbar.map((p, i) => {
+                const active = i === selectedPrefabIndex;
+                const catColor =
+                  p.category === "Defense" ? "text-red-300" :
+                  p.category === "Housing" ? "text-emerald-300" :
+                  p.category === "Industry" ? "text-cyan-300" : "text-amber-300";
+                return (
+                  <div
+                    key={p.id}
+                    className={`min-w-[88px] px-1.5 py-1 text-center text-xs border rounded transition-all flex-shrink-0 ${
+                      active
+                        ? "border-fuchsia-400 text-white bg-fuchsia-500/30 scale-110 shadow shadow-fuchsia-400/50"
+                        : "border-gray-700 text-gray-400 bg-gray-900/60"
+                    }`}
+                  >
+                    <div className={`text-[9px] opacity-80 ${catColor}`}>{p.category.toUpperCase()}</div>
+                    <div className="font-semibold text-[11px] leading-tight">{p.name}</div>
+                    <div className="text-[8px] opacity-60 mt-0.5">
+                      {p.cost.map(c => `${c.quantity}×${c.materialId.split("_")[0]}`).join(" ")}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {buildMode && hotbarBlocks && hotbarBlocks.length > 0 && (
         <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2">
