@@ -1,6 +1,6 @@
 import * as BABYLON from "@babylonjs/core";
 
-interface EnemyLike {
+export interface EnemyLike {
   health: number;
   maxHealth: number;
   isAlive: boolean;

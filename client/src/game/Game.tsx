@@ -7,7 +7,7 @@ import { PlayerController, PlayerStats } from "./PlayerController";
 import { WeaponsSystem, Weapon } from "./WeaponsSystem";
 import { EnemySystem } from "./EnemySystem";
 import { AerialEnemySystem } from "./AerialEnemySystem";
-import { EnemyHealthBarSystem } from "./EnemyHealthBarSystem";
+import { EnemyHealthBarSystem, EnemyLike } from "./EnemyHealthBarSystem";
 import { GamepadInput } from "./GamepadInput";
 import { ChestSystem, Loot } from "./ChestSystem";
 import { CombatSystem } from "./CombatSystem";
@@ -488,8 +488,8 @@ export const Game: React.FC = () => {
 
         const enemyHealthBars = new EnemyHealthBarSystem(scene, engine.getCamera());
         enemyHealthBars.setEnemyProvider(() => {
-          const ground = enemySystem.getActiveEnemies() as any[];
-          const aerial = aerialEnemySystem.getActiveUnits() as any[];
+          const ground: EnemyLike[] = enemySystem.getActiveEnemies();
+          const aerial: EnemyLike[] = aerialEnemySystem.getActiveUnits();
           return ground.concat(aerial);
         });
         enemyHealthBarsRef.current = enemyHealthBars;
