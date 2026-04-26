@@ -142,4 +142,14 @@ export const ITEM_DEFINITIONS: Record<string, ItemDefinition> = {
   shield_booster: { id: "shield_booster", name: "Shield Booster", type: ItemType.Consumable, rarity: ItemRarity.Rare, maxStack: 5, value: 100, description: "Temporarily doubles armor", stats: { armorBoost: 2, duration: 30 } },
   damage_amp: { id: "damage_amp", name: "Damage Amplifier", type: ItemType.Consumable, rarity: ItemRarity.Rare, maxStack: 5, value: 120, description: "Increases damage 50% for 20s", stats: { damageMultiplier: 1.5, duration: 20 } },
   xp_chip: { id: "xp_chip", name: "XP Chip", type: ItemType.Material, rarity: ItemRarity.Uncommon, maxStack: 50, value: 15, description: "Grants bonus experience", stats: { xpAmount: 25 } },
+
+  gear: { id: "gear", name: "Gear", type: ItemType.Material, rarity: ItemRarity.Common, maxStack: 999, value: 8, description: "Universal upgrade currency salvaged from machines" },
+  bio_essence: { id: "bio_essence", name: "Bio Essence", type: ItemType.Material, rarity: ItemRarity.Uncommon, maxStack: 99, value: 30, description: "Glowing organic residue, used to capture bio-creatures" },
+
+  weapon_part_pistol: { id: "weapon_part_pistol", name: "Pistol Part", type: ItemType.Material, rarity: ItemRarity.Uncommon, maxStack: 99, value: 18, description: "Salvaged plasma pistol component" },
+  weapon_part_rifle: { id: "weapon_part_rifle", name: "Rifle Part", type: ItemType.Material, rarity: ItemRarity.Uncommon, maxStack: 99, value: 22, description: "Salvaged pulse rifle component" },
+  weapon_part_shotgun: { id: "weapon_part_shotgun", name: "Shotgun Part", type: ItemType.Material, rarity: ItemRarity.Uncommon, maxStack: 99, value: 22, description: "Salvaged scatter blaster component" },
+  weapon_part_rocket: { id: "weapon_part_rocket", name: "Rocket Part", type: ItemType.Material, rarity: ItemRarity.Rare, maxStack: 50, value: 35, description: "Salvaged nova launcher component" },
+  weapon_part_laser: { id: "weapon_part_laser", name: "Laser Part", type: ItemType.Material, rarity: ItemRarity.Rare, maxStack: 50, value: 35, description: "Salvaged photon beam component" },
+  weapon_part_grenade: { id: "weapon_part_grenade", name: "Grenade Part", type: ItemType.Material, rarity: ItemRarity.Rare, maxStack: 50, value: 32, description: "Salvaged fusion grenade component" },
 };

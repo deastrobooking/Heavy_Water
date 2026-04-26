@@ -1,10 +1,15 @@
 import React from "react";
 import { PlayerStats } from "./PlayerController";
-import { Weapon } from "./WeaponsSystem";
+import { Weapon, WeaponUpgradeInfo } from "./WeaponsSystem";
 import { ArmorUpgrade } from "./ArmorCapsuleSystem";
 import { ShopDefinition, ShopItem } from "./ShopSystem";
-import { BlockType } from "./BuildingSystem";
+import { BlockType, BlockDefinition } from "./BuildingSystem";
 import { PrefabSummary } from "./PrefabSystem";
+import { CompanionUpgradeInfo } from "./CompanionSystem";
+import { CapturedCreature } from "./BioCreatureSystem";
+import { UpgradeMenu } from "./UpgradeMenu";
+import { LabUI, LabBlueprint } from "./LabUI";
+import { GardenCaptureUI } from "./GardenCaptureUI";
 
 const BLOCK_LABELS: Record<string, string> = {
   metal_wall: "Wall", glass: "Glass", platform: "Platform", ramp: "Ramp",
@@ -49,6 +54,37 @@ interface GameUIProps {
   selectedPrefabIndex?: number;
   hotbarBlocks?: BlockType[];
   selectedBlock?: BlockType | null;
+  selectedBlockDef?: BlockDefinition | null;
+  upgradeMenuOpen?: boolean;
+  upgradeMenuWeapons?: WeaponUpgradeInfo[];
+  upgradeMenuCompanions?: CompanionUpgradeInfo[];
+  upgradeMenuResources?: { gears: number; scrap: number; cores: number; circuits: number; nanofiber: number };
+  upgradeMenuPartCounts?: Record<string, number>;
+  onUpgradeMenuClose?: () => void;
+  onUpgradeWeapon?: (type: string) => void;
+  onUpgradeCompanion?: (id: string) => void;
+  labOpen?: boolean;
+  labLevel?: number;
+  labBlueprints?: LabBlueprint[];
+  labResources?: { gears: number; scrap: number; cores: number; circuits: number };
+  labCapacityUsed?: number;
+  labCapacityMax?: number;
+  labUpgradeCost?: { gears: number; cores: number; circuits: number } | null;
+  labCanUpgrade?: boolean;
+  onLabBuild?: (presetName: string) => void;
+  onLabUpgrade?: () => void;
+  onLabClose?: () => void;
+  gardenOpen?: boolean;
+  gardenLevel?: number;
+  gardenCaptureBonus?: number;
+  gardenCapacityMax?: number;
+  gardenCaptured?: CapturedCreature[];
+  bioEssenceCount?: number;
+  gardenUpgradeCost?: { gears: number; nano: number; cores: number } | null;
+  gardenCanUpgrade?: boolean;
+  onGardenDeploy?: (id: string) => void;
+  onGardenUpgrade?: () => void;
+  onGardenClose?: () => void;
   onSaveLevel?: () => void;
   onLoadLevel?: () => void;
   onClearLevel?: () => void;
@@ -113,6 +149,37 @@ export const GameUI: React.FC<GameUIProps> = ({
   selectedPrefabIndex = 0,
   hotbarBlocks = [],
   selectedBlock = null,
+  selectedBlockDef = null,
+  upgradeMenuOpen = false,
+  upgradeMenuWeapons = [],
+  upgradeMenuCompanions = [],
+  upgradeMenuResources = { gears: 0, scrap: 0, cores: 0, circuits: 0, nanofiber: 0 },
+  upgradeMenuPartCounts = {},
+  onUpgradeMenuClose,
+  onUpgradeWeapon,
+  onUpgradeCompanion,
+  labOpen = false,
+  labLevel = 1,
+  labBlueprints = [],
+  labResources = { gears: 0, scrap: 0, cores: 0, circuits: 0 },
+  labCapacityUsed = 0,
+  labCapacityMax = 3,
+  labUpgradeCost = null,
+  labCanUpgrade = false,
+  onLabBuild,
+  onLabUpgrade,
+  onLabClose,
+  gardenOpen = false,
+  gardenLevel = 1,
+  gardenCaptureBonus = 0,
+  gardenCapacityMax = 3,
+  gardenCaptured = [],
+  bioEssenceCount = 0,
+  gardenUpgradeCost = null,
+  gardenCanUpgrade = false,
+  onGardenDeploy,
+  onGardenUpgrade,
+  onGardenClose,
   onSaveLevel,
   onLoadLevel,
   onClearLevel,
@@ -501,6 +568,17 @@ export const GameUI: React.FC<GameUIProps> = ({
             <div className="text-emerald-300 text-xs text-center mb-1.5 font-bold tracking-wider">
               BUILD HOTBAR — Wheel/1-9 to switch · LMB Place · RMB Mine · R Rotate · GRID-SNAP ON
             </div>
+            {selectedBlockDef && (
+              <div className="text-center mb-1.5 px-2 py-1 bg-emerald-950/60 border border-emerald-700 rounded">
+                <span className="text-emerald-200 font-bold text-sm tracking-wider">
+                  {selectedBlockDef.name.toUpperCase()}
+                </span>
+                <span className="text-zinc-300 text-[11px] ml-2">
+                  — {selectedBlockDef.materialCost.map(c => `${c.quantity} ${c.materialId.replace(/_/g, " ")}`).join(", ")}
+                </span>
+                <span className="text-amber-300 text-[11px] ml-2">· {selectedBlockDef.health} HP</span>
+              </div>
+            )}
             <div className="flex gap-1.5 overflow-x-auto pb-1">
               {hotbarBlocks.map((bt, i) => {
                 const active = bt === selectedBlock;
@@ -523,6 +601,47 @@ export const GameUI: React.FC<GameUIProps> = ({
           </div>
         </div>
       )}
+
+      <UpgradeMenu
+        open={upgradeMenuOpen}
+        weapons={upgradeMenuWeapons}
+        companions={upgradeMenuCompanions}
+        resources={upgradeMenuResources}
+        partCounts={upgradeMenuPartCounts}
+        onUpgradeWeapon={(t) => onUpgradeWeapon?.(t)}
+        onUpgradeCompanion={(id) => onUpgradeCompanion?.(id)}
+        onClose={() => onUpgradeMenuClose?.()}
+      />
+
+      <LabUI
+        open={labOpen}
+        level={labLevel}
+        maxLevel={3}
+        blueprints={labBlueprints}
+        resources={labResources}
+        capacityUsed={labCapacityUsed}
+        capacityMax={labCapacityMax}
+        upgradeCost={labUpgradeCost}
+        canUpgrade={labCanUpgrade}
+        onBuild={(p) => onLabBuild?.(p)}
+        onUpgradeLab={() => onLabUpgrade?.()}
+        onClose={() => onLabClose?.()}
+      />
+
+      <GardenCaptureUI
+        open={gardenOpen}
+        level={gardenLevel}
+        maxLevel={3}
+        captureBonus={gardenCaptureBonus}
+        capacityMax={gardenCapacityMax}
+        captured={gardenCaptured}
+        bioEssenceCount={bioEssenceCount}
+        upgradeCost={gardenUpgradeCost}
+        canUpgradeGarden={gardenCanUpgrade}
+        onDeploy={(id) => onGardenDeploy?.(id)}
+        onUpgradeGarden={() => onGardenUpgrade?.()}
+        onClose={() => onGardenClose?.()}
+      />
 
       {capsuleOpen && (
         <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-auto">

@@ -1,4 +1,6 @@
 import * as BABYLON from "@babylonjs/core";
+import { EventBus, GameEvents } from "./EventBus";
+import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
 
 export type WeaponType = "pistol" | "rifle" | "shotgun" | "rocket" | "laser" | "grenade";
 
@@ -13,6 +15,69 @@ export interface Weapon {
   projectileSpeed: number;
   spread: number;
   isAutomatic: boolean;
+  level: number;
+  baseDamage: number;
+  baseFireRate: number;
+  baseSpread: number;
+  baseExplosionRadius: number;
+  explosionRadiusBonus: number;
+  knockbackBonus: number;
+}
+
+export const MAX_WEAPON_LEVEL = 5;
+
+export interface WeaponUpgradeCost {
+  gears: number;
+  parts: number;
+  partItemId: string;
+}
+
+export interface WeaponUpgradeInfo {
+  type: WeaponType;
+  name: string;
+  level: number;
+  maxLevel: number;
+  damage: number;
+  fireRate: number;
+  spread: number;
+  explosionRadius: number;
+  knockback: number;
+  nextDamage?: number;
+  nextFireRate?: number;
+  nextSpread?: number;
+  nextExplosionRadius?: number;
+  nextKnockback?: number;
+  cost: WeaponUpgradeCost | null;
+  affordable: boolean;
+}
+
+const WEAPON_PART_ID: Record<WeaponType, string> = {
+  pistol: "weapon_part_pistol",
+  rifle: "weapon_part_rifle",
+  shotgun: "weapon_part_shotgun",
+  rocket: "weapon_part_rocket",
+  laser: "weapon_part_laser",
+  grenade: "weapon_part_grenade",
+};
+
+function levelStats(base: { damage: number; fireRate: number; spread: number; explosionRadius: number }, level: number) {
+  const lvl = Math.max(1, Math.min(MAX_WEAPON_LEVEL, level));
+  const tier = lvl - 1;
+  const damage = base.damage * (1 + 0.22 * tier);
+  const fireRate = base.fireRate * Math.pow(0.88, tier);
+  const spread = Math.max(0, base.spread * Math.pow(0.85, tier));
+  const explosionBonus = lvl >= 3 ? base.explosionRadius * 0.15 * (lvl - 2) : 0;
+  const knockback = lvl >= 3 ? 1 + 0.25 * (lvl - 2) : 0;
+  return { damage, fireRate, spread, explosionBonus, knockback };
+}
+
+function upgradeCostFor(type: WeaponType, nextLevel: number): WeaponUpgradeCost {
+  const tier = Math.max(2, nextLevel) - 1;
+  return {
+    gears: 6 * tier,
+    parts: 2 * tier,
+    partItemId: WEAPON_PART_ID[type],
+  };
 }
 
 export interface Projectile {
@@ -34,10 +99,16 @@ export class WeaponsSystem {
   private projectiles: Projectile[] = [];
   private lastFireTime: number = 0;
   private isFiring: boolean = false;
+  private inventory: InventorySystem | null = null;
+  private bus: EventBus = EventBus.getInstance();
 
   private onAmmoChange: ((ammo: number, maxAmmo: number) => void) | null = null;
   private onWeaponChange: ((weapon: Weapon) => void) | null = null;
   private aimOriginProvider: (() => BABYLON.Vector3) | null = null;
+
+  setInventory(inv: InventorySystem): void {
+    this.inventory = inv;
+  }
 
   setAimOriginProvider(fn: () => BABYLON.Vector3): void {
     this.aimOriginProvider = fn;
@@ -55,83 +126,45 @@ export class WeaponsSystem {
   }
 
   private initializeWeapons(): void {
-    this.weapons.set("pistol", {
-      type: "pistol",
-      name: "Plasma Pistol",
-      damage: 15,
-      fireRate: 300,
-      ammo: 50,
-      maxAmmo: 50,
-      range: 100,
-      projectileSpeed: 2,
-      spread: 0.02,
-      isAutomatic: false,
-    });
+    const define = (
+      type: WeaponType,
+      name: string,
+      damage: number,
+      fireRate: number,
+      ammo: number,
+      range: number,
+      projectileSpeed: number,
+      spread: number,
+      isAutomatic: boolean,
+      explosionRadius: number = 0,
+    ) => {
+      this.weapons.set(type, {
+        type,
+        name,
+        damage,
+        fireRate,
+        ammo,
+        maxAmmo: ammo,
+        range,
+        projectileSpeed,
+        spread,
+        isAutomatic,
+        level: 1,
+        baseDamage: damage,
+        baseFireRate: fireRate,
+        baseSpread: spread,
+        baseExplosionRadius: explosionRadius,
+        explosionRadiusBonus: 0,
+        knockbackBonus: 0,
+      });
+    };
 
-    this.weapons.set("rifle", {
-      type: "rifle",
-      name: "Pulse Rifle",
-      damage: 25,
-      fireRate: 100,
-      ammo: 120,
-      maxAmmo: 120,
-      range: 150,
-      projectileSpeed: 3,
-      spread: 0.03,
-      isAutomatic: true,
-    });
-
-    this.weapons.set("shotgun", {
-      type: "shotgun",
-      name: "Scatter Blaster",
-      damage: 8,
-      fireRate: 800,
-      ammo: 24,
-      maxAmmo: 24,
-      range: 30,
-      projectileSpeed: 2.5,
-      spread: 0.15,
-      isAutomatic: false,
-    });
-
-    this.weapons.set("rocket", {
-      type: "rocket",
-      name: "Nova Launcher",
-      damage: 100,
-      fireRate: 1500,
-      ammo: 8,
-      maxAmmo: 8,
-      range: 200,
-      projectileSpeed: 1,
-      spread: 0,
-      isAutomatic: false,
-    });
-
-    this.weapons.set("laser", {
-      type: "laser",
-      name: "Photon Beam",
-      damage: 40,
-      fireRate: 50,
-      ammo: 200,
-      maxAmmo: 200,
-      range: 300,
-      projectileSpeed: 10,
-      spread: 0,
-      isAutomatic: true,
-    });
-
-    this.weapons.set("grenade", {
-      type: "grenade",
-      name: "Fusion Grenades",
-      damage: 80,
-      fireRate: 1000,
-      ammo: 6,
-      maxAmmo: 6,
-      range: 50,
-      projectileSpeed: 0.5,
-      spread: 0,
-      isAutomatic: false,
-    });
+    define("pistol", "Plasma Pistol", 15, 300, 50, 100, 2, 0.02, false, 0);
+    define("rifle", "Pulse Rifle", 25, 100, 120, 150, 3, 0.03, true, 0);
+    define("shotgun", "Scatter Blaster", 8, 800, 24, 30, 2.5, 0.15, false, 0);
+    define("rocket", "Nova Launcher", 100, 1500, 8, 200, 1, 0, false, 5);
+    define("laser", "Photon Beam", 40, 50, 200, 300, 10, 0, true, 0);
+    define("grenade", "Fusion Grenades", 80, 1000, 6, 50, 0.5, 0, false, 4);
   }
 
   private setupControls(): void {
@@ -236,6 +269,7 @@ export class WeaponsSystem {
 
     projectileMesh.position = this.getAimOrigin().add(forward.scale(1));
 
+    const baseR = weapon.type === "rocket" ? 5 : weapon.type === "grenade" ? 4 : 0;
     const projectile: Projectile = {
       mesh: projectileMesh,
       direction,
@@ -244,7 +278,7 @@ export class WeaponsSystem {
       lifetime: 3000,
       type: weapon.type,
       isExplosive: weapon.type === "rocket" || weapon.type === "grenade",
-      explosionRadius: weapon.type === "rocket" ? 5 : weapon.type === "grenade" ? 4 : 0,
+      explosionRadius: baseR + (weapon.explosionRadiusBonus || 0),
     };
 
     this.projectiles.push(projectile);
@@ -378,5 +412,85 @@ export class WeaponsSystem {
 
   setOnWeaponChange(callback: (weapon: Weapon) => void): void {
     this.onWeaponChange = callback;
+  }
+
+  getAllWeapons(): Weapon[] {
+    return Array.from(this.weapons.values());
+  }
+
+  getCurrentWeaponType(): WeaponType {
+    return this.currentWeapon;
+  }
+
+  getUpgradeInfo(type: WeaponType): WeaponUpgradeInfo | null {
+    const w = this.weapons.get(type);
+    if (!w) return null;
+    const lvl = w.level;
+    const cur = levelStats(
+      { damage: w.baseDamage, fireRate: w.baseFireRate, spread: w.baseSpread, explosionRadius: w.baseExplosionRadius },
+      lvl,
+    );
+    const isMax = lvl >= MAX_WEAPON_LEVEL;
+    const next = isMax ? null : levelStats(
+      { damage: w.baseDamage, fireRate: w.baseFireRate, spread: w.baseSpread, explosionRadius: w.baseExplosionRadius },
+      lvl + 1,
+    );
+    const cost = isMax ? null : upgradeCostFor(type, lvl + 1);
+    let affordable = false;
+    if (cost && this.inventory) {
+      affordable = this.inventory.getItemCount("gear") >= cost.gears && this.inventory.getItemCount(cost.partItemId) >= cost.parts;
+    }
+    return {
+      type,
+      name: w.name,
+      level: lvl,
+      maxLevel: MAX_WEAPON_LEVEL,
+      damage: w.damage,
+      fireRate: w.fireRate,
+      spread: w.spread,
+      explosionRadius: w.baseExplosionRadius + w.explosionRadiusBonus,
+      knockback: w.knockbackBonus,
+      nextDamage: next?.damage,
+      nextFireRate: next?.fireRate,
+      nextSpread: next?.spread,
+      nextExplosionRadius: next ? w.baseExplosionRadius + next.explosionBonus : undefined,
+      nextKnockback: next?.knockback,
+      cost,
+      affordable,
+    };
+  }
+
+  getAllUpgradeInfo(): WeaponUpgradeInfo[] {
+    return Array.from(this.weapons.keys()).map(t => this.getUpgradeInfo(t)!).filter(x => !!x);
+  }
+
+  upgradeWeapon(type: WeaponType): boolean {
+    const w = this.weapons.get(type);
+    if (!w) return false;
+    if (w.level >= MAX_WEAPON_LEVEL) return false;
+    const cost = upgradeCostFor(type, w.level + 1);
+    if (!this.inventory) return false;
+    if (this.inventory.getItemCount("gear") < cost.gears) return false;
+    if (this.inventory.getItemCount(cost.partItemId) < cost.parts) return false;
+    const gearDef = ITEM_DEFINITIONS["gear"];
+    const partDef = ITEM_DEFINITIONS[cost.partItemId];
+    if (!gearDef || !partDef) return false;
+    this.inventory.removeItem(gearDef.id, cost.gears);
+    this.inventory.removeItem(partDef.id, cost.parts);
+    w.level += 1;
+    const stats = levelStats(
+      { damage: w.baseDamage, fireRate: w.baseFireRate, spread: w.baseSpread, explosionRadius: w.baseExplosionRadius },
+      w.level,
+    );
+    w.damage = stats.damage;
+    w.fireRate = stats.fireRate;
+    w.spread = stats.spread;
+    w.explosionRadiusBonus = stats.explosionBonus;
+    w.knockbackBonus = stats.knockback;
+    if (type === this.currentWeapon) {
+      this.onWeaponChange?.(w);
+    }
+    this.bus.emit(GameEvents.WEAPON_UPGRADED, { type, level: w.level, damage: w.damage });
+    return true;
   }
 }

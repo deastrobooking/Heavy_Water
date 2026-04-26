@@ -19,6 +19,8 @@ export interface CompanionBehavior {
 }
 
 interface ActiveCompanion {
+  id: string;
+  presetName: string;
   root: BABYLON.TransformNode;
   hitbox: BABYLON.Mesh;
   descriptor: RobotDescriptor;
@@ -30,6 +32,31 @@ interface ActiveCompanion {
   maxHealth: number;
   orbitAngle: number;
   bobTimer: number;
+  level: number;
+  baseDamage: number;
+  baseHeal: number;
+  baseMoveSpeed: number;
+  baseMaxHealth: number;
+}
+
+export interface CompanionUpgradeInfo {
+  id: string;
+  name: string;
+  presetName: string;
+  type: CompanionType;
+  level: number;
+  maxLevel: number;
+  health: number;
+  maxHealth: number;
+  damage: number;
+  speed: number;
+  healAmount: number;
+  nextMaxHealth?: number;
+  nextDamage?: number;
+  nextSpeed?: number;
+  upgradeCost: { gears: number; energyCores: number };
+  cost: { gears: number; cores: number } | null;
+  affordable: boolean;
 }
 
 const DEFAULT_ALLY_BEHAVIOR: CompanionBehavior = {
@@ -71,29 +98,41 @@ export class CompanionSystem {
     this.bus = EventBus.getInstance();
   }
 
-  addCompanion(presetName: string, playerPos: BABYLON.Vector3): boolean {
-    if (this.companions.length >= this.maxCompanions) return false;
-    if (this.collected.has(presetName)) return false;
+  setMaxCompanions(n: number): void {
+    this.maxCompanions = Math.max(1, Math.min(20, Math.floor(n)));
+  }
 
-    let descriptor: RobotDescriptor | null = null;
-    let type: CompanionType = "ally";
+  getMaxCompanions(): number {
+    return this.maxCompanions;
+  }
+
+  addCompanion(presetName: string, playerPos: BABYLON.Vector3, options?: { allowDuplicate?: boolean; customDescriptor?: RobotDescriptor; customType?: CompanionType }): boolean {
+    if (this.companions.length >= this.maxCompanions) return false;
+    if (!options?.allowDuplicate && !options?.customDescriptor && this.collected.has(presetName)) return false;
+
+    let descriptor: RobotDescriptor | null = options?.customDescriptor ?? null;
+    let type: CompanionType = options?.customType ?? "ally";
     let behavior = { ...DEFAULT_ALLY_BEHAVIOR };
 
-    if (ALLY_PRESETS[presetName]) {
-      descriptor = ALLY_PRESETS[presetName];
-      type = "ally";
-      behavior = { ...DEFAULT_ALLY_BEHAVIOR };
+    if (!descriptor) {
+      if (ALLY_PRESETS[presetName]) {
+        descriptor = ALLY_PRESETS[presetName];
+        type = "ally";
+        behavior = { ...DEFAULT_ALLY_BEHAVIOR };
 
-      if (presetName === "MedicDrone") {
-        behavior.canHeal = true;
-        behavior.canAttack = false;
-        behavior.healAmount = 8;
-        behavior.healCooldown = 6.0;
+        if (presetName === "MedicDrone") {
+          behavior.canHeal = true;
+          behavior.canAttack = false;
+          behavior.healAmount = 8;
+          behavior.healCooldown = 6.0;
+        }
+      } else if (PET_PRESETS[presetName]) {
+        descriptor = PET_PRESETS[presetName];
+        type = "pet";
+        behavior = { ...DEFAULT_PET_BEHAVIOR };
       }
-    } else if (PET_PRESETS[presetName]) {
-      descriptor = PET_PRESETS[presetName];
-      type = "pet";
-      behavior = { ...DEFAULT_PET_BEHAVIOR };
+    } else {
+      behavior = type === "pet" ? { ...DEFAULT_PET_BEHAVIOR } : { ...DEFAULT_ALLY_BEHAVIOR };
     }
 
     if (!descriptor) return false;
@@ -108,7 +147,7 @@ export class CompanionSystem {
     const root = this.factory.createRobot(descriptor, spawnPos);
 
     const hitbox = BABYLON.MeshBuilder.CreateBox(
-      `companion_hitbox_${presetName}`,
+      `companion_hitbox_${presetName}_${this.companions.length}`,
       { width: 1, height: 2, depth: 1 },
       this.scene
     );
@@ -116,7 +155,10 @@ export class CompanionSystem {
     hitbox.isVisible = false;
     root.parent = hitbox;
 
+    const baseMaxHp = type === "ally" ? 150 : 50;
     const companion: ActiveCompanion = {
+      id: `${presetName}_${Date.now()}_${Math.floor(Math.random() * 999)}`,
+      presetName,
       root,
       hitbox,
       descriptor,
@@ -124,14 +166,21 @@ export class CompanionSystem {
       behavior,
       attackTimer: 0,
       healTimer: 0,
-      health: type === "ally" ? 150 : 50,
-      maxHealth: type === "ally" ? 150 : 50,
+      health: baseMaxHp,
+      maxHealth: baseMaxHp,
       orbitAngle: this.companions.length * (Math.PI * 2 / this.maxCompanions),
       bobTimer: Math.random() * Math.PI * 2,
+      level: 1,
+      baseDamage: behavior.attackDamage,
+      baseHeal: behavior.healAmount,
+      baseMoveSpeed: behavior.moveSpeed,
+      baseMaxHealth: baseMaxHp,
     };
 
     this.companions.push(companion);
     this.collected.add(presetName);
+
+    this.bus.emit(GameEvents.COMPANION_BUILT, { id: companion.id, presetName, type });
 
     this.bus.emit("effect:capture", {
       position: spawnPos.clone(),
@@ -272,17 +321,80 @@ export class CompanionSystem {
     }, 500);
   }
 
-  getCompanions(): { name: string; type: CompanionType; health: number; maxHealth: number }[] {
+  getCompanions(): { id: string; name: string; type: CompanionType; health: number; maxHealth: number; level: number }[] {
     return this.companions.map(c => ({
+      id: c.id,
       name: c.descriptor.name,
       type: c.type,
       health: c.health,
       maxHealth: c.maxHealth,
+      level: c.level,
     }));
   }
 
   getCompanionCount(): number {
     return this.companions.length;
+  }
+
+  getUpgradeInfo(id: string, getGearCount: () => number, getCoreCount: () => number): CompanionUpgradeInfo | null {
+    const c = this.companions.find(x => x.id === id);
+    if (!c) return null;
+    const maxLvl = 5;
+    const tier = c.level;
+    const cost = { gears: 8 * tier, energyCores: tier };
+    const isMax = c.level >= maxLvl;
+    const affordable = !isMax && getGearCount() >= cost.gears && getCoreCount() >= cost.energyCores;
+    let nextMaxHealth: number | undefined;
+    let nextDamage: number | undefined;
+    let nextSpeed: number | undefined;
+    if (!isMax) {
+      const nt = c.level;
+      nextMaxHealth = Math.floor(c.baseMaxHealth * (1 + 0.3 * nt));
+      nextDamage = c.baseDamage * (1 + 0.25 * nt);
+      nextSpeed = c.baseMoveSpeed * (1 + 0.08 * nt);
+    }
+    return {
+      id: c.id,
+      name: c.descriptor.name,
+      presetName: c.presetName,
+      type: c.type,
+      level: c.level,
+      maxLevel: maxLvl,
+      health: c.health,
+      maxHealth: c.maxHealth,
+      damage: c.behavior.attackDamage,
+      speed: c.behavior.moveSpeed,
+      healAmount: c.behavior.healAmount,
+      nextMaxHealth,
+      nextDamage,
+      nextSpeed,
+      upgradeCost: cost,
+      cost: isMax ? null : { gears: cost.gears, cores: cost.energyCores },
+      affordable,
+    };
+  }
+
+  getAllUpgradeInfo(getGearCount: () => number, getCoreCount: () => number): CompanionUpgradeInfo[] {
+    return this.companions.map(c => this.getUpgradeInfo(c.id, getGearCount, getCoreCount)!).filter(x => !!x);
+  }
+
+  upgradeCompanion(id: string, spend: (gears: number, cores: number) => boolean): boolean {
+    const c = this.companions.find(x => x.id === id);
+    if (!c) return false;
+    if (c.level >= 5) return false;
+    const cost = { gears: 8 * c.level, energyCores: c.level };
+    if (!spend(cost.gears, cost.energyCores)) return false;
+    c.level += 1;
+    const tier = c.level - 1;
+    c.behavior.attackDamage = c.baseDamage * (1 + 0.25 * tier);
+    c.behavior.healAmount = c.baseHeal * (1 + 0.25 * tier);
+    c.behavior.moveSpeed = c.baseMoveSpeed * (1 + 0.08 * tier);
+    const newMax = Math.floor(c.baseMaxHealth * (1 + 0.3 * tier));
+    const heal = newMax - c.maxHealth;
+    c.maxHealth = newMax;
+    c.health = Math.min(c.maxHealth, c.health + heal);
+    this.bus.emit(GameEvents.COMPANION_UPGRADED, { id, level: c.level });
+    return true;
   }
 
   getCollectedNames(): string[] {

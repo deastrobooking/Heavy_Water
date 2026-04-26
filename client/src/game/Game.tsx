@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import * as BABYLON from "@babylonjs/core";
 import "@babylonjs/loaders";
 import { BabylonEngine } from "./BabylonEngine";
@@ -20,8 +20,14 @@ import { ArmorCapsuleSystem, ArmorUpgrade } from "./ArmorCapsuleSystem";
 import { ShopSystem, ShopDefinition } from "./ShopSystem";
 import { GardenSystem } from "./GardenSystem";
 import { MapSystem } from "./MapSystem";
-import { BuildingSystem, BlockType } from "./BuildingSystem";
+import { BuildingSystem, BlockType, BlockDefinition } from "./BuildingSystem";
 import { PrefabSystem, PrefabSummary } from "./PrefabSystem";
+import { PickupSystem } from "./PickupSystem";
+import { BaseSystem, BaseStructure } from "./BaseSystem";
+import { BioCreatureSystem, CapturedCreature } from "./BioCreatureSystem";
+import { WeaponUpgradeInfo } from "./WeaponsSystem";
+import { CompanionUpgradeInfo } from "./CompanionSystem";
+import { LabBlueprint } from "./LabUI";
 import { LevelSerializer } from "./LevelSerializer";
 import { MultiplayerSystem } from "./MultiplayerSystem";
 import { EffectsSystem } from "./EffectsSystem";
@@ -58,6 +64,9 @@ export const Game: React.FC = () => {
   const mapRef = useRef<MapSystem | null>(null);
   const buildingRef = useRef<BuildingSystem | null>(null);
   const prefabRef = useRef<PrefabSystem | null>(null);
+  const pickupRef = useRef<PickupSystem | null>(null);
+  const baseRef = useRef<BaseSystem | null>(null);
+  const bioRef = useRef<BioCreatureSystem | null>(null);
   const levelSerializerRef = useRef<LevelSerializer | null>(null);
   const loadInputRef = useRef<HTMLInputElement | null>(null);
   const multiplayerRef = useRef<MultiplayerSystem | null>(null);
@@ -76,7 +85,18 @@ export const Game: React.FC = () => {
   const [showLobby, setShowLobby] = useState(false);
   const [showCustomizer, setShowCustomizer] = useState(false);
   const [selectedBlock, setSelectedBlock] = useState<BlockType | null>(null);
+  const [selectedBlockDef, setSelectedBlockDef] = useState<BlockDefinition | null>(null);
   const [hotbarBlocks, setHotbarBlocks] = useState<BlockType[]>([]);
+  const [upgradeMenuOpen, setUpgradeMenuOpen] = useState(false);
+  const [weaponUpgradeInfo, setWeaponUpgradeInfo] = useState<WeaponUpgradeInfo[]>([]);
+  const [companionUpgradeInfo, setCompanionUpgradeInfo] = useState<CompanionUpgradeInfo[]>([]);
+  const [resourceCounts, setResourceCounts] = useState({ gears: 0, scrap: 0, cores: 0, circuits: 0, nanofiber: 0, bioEssence: 0 });
+  const [partCounts, setPartCounts] = useState<Record<string, number>>({});
+  const [labOpen, setLabOpen] = useState(false);
+  const [labStructure, setLabStructure] = useState<BaseStructure | null>(null);
+  const [gardenOpen, setGardenOpen] = useState(false);
+  const [gardenStructure, setGardenStructure] = useState<BaseStructure | null>(null);
+  const [capturedCreatures, setCapturedCreatures] = useState<CapturedCreature[]>([]);
   const [planMode, setPlanMode] = useState(false);
   const [prefabHotbar, setPrefabHotbar] = useState<PrefabSummary[]>([]);
   const [selectedPrefabIndex, setSelectedPrefabIndex] = useState(0);
@@ -342,6 +362,41 @@ export const Game: React.FC = () => {
         prefabRef.current = prefabSystem;
         setPrefabHotbar(prefabSystem.getHotbar());
 
+        const baseSystem = new BaseSystem(inventory);
+        baseRef.current = baseSystem;
+
+        const pickupSystem = new PickupSystem(scene, inventory);
+        pickupRef.current = pickupSystem;
+
+        const bioSystem = new BioCreatureSystem(scene, inventory);
+        bioRef.current = bioSystem;
+        bioSystem.setHooks(
+          () => baseSystem.getGardenCaptureBonus(),
+          () => Math.max(6, baseSystem.getGardenCaptureCap()),
+        );
+        bioSystem.spawnInitialCreatures();
+
+        weapons.setInventory(inventory);
+
+        const prefabToBaseId = new Map<string, string>();
+        prefabSystem.setOnPlacedCallback((placed, def) => {
+          if (def.baseStructureKind) {
+            const s = baseSystem.registerStructure(def.baseStructureKind, placed.position);
+            prefabToBaseId.set(placed.id, s.id);
+            companionSystem.setMaxCompanions(Math.max(3, baseSystem.getLabCompanionCap()));
+          }
+        });
+
+        prefabSystem.setOnRemovedCallback((prefabId: string) => {
+          const baseId = prefabToBaseId.get(prefabId);
+          if (baseId) {
+            const target = baseSystem.getStructures().find(s => s.id === baseId);
+            if (target) baseSystem.removeStructureAt(target.position, 0.25);
+            prefabToBaseId.delete(prefabId);
+            companionSystem.setMaxCompanions(Math.max(3, baseSystem.getLabCompanionCap()));
+          }
+        });
+
         levelSerializerRef.current = new LevelSerializer(buildingSystem, prefabSystem);
 
         bus.on("building:modeChanged", (on: boolean) => {
@@ -515,6 +570,8 @@ export const Game: React.FC = () => {
           }
 
           chestSystem.update(playerPos);
+          pickupSystem.setPlayerPosition(playerPos);
+          bioSystem.setPlayerPosition(playerPos);
 
           capsuleSystem.update(dt, playerPos);
           shopSystem.update();
@@ -544,7 +601,10 @@ export const Game: React.FC = () => {
           setMaxArmorEnergy(player.getMaxArmorEnergy());
           setHasFlightArmor(player.getHasFlightArmor());
           setBuildMode(buildingSystem.isBuildMode());
-          setSelectedBlock(buildingSystem.getSelectedBlockType());
+          const sel = buildingSystem.getSelectedBlockType();
+          setSelectedBlock(sel);
+          const defs = buildingSystem.getBlockDefinitions();
+          setSelectedBlockDef(sel ? defs[sel] ?? null : null);
           setPlanMode(prefabSystem.isPlanMode());
           setSelectedPrefabIndex(prefabSystem.getSelectedIndex());
 
@@ -553,6 +613,27 @@ export const Game: React.FC = () => {
             uiThrottleTimer = 0;
             setCompanionCount(companionSystem.getCompanionCount());
             setCompanionInfo(companionSystem.getCompanions());
+            const gears = inventory.getItemCount("gear");
+            const cores = inventory.getItemCount("energy_core");
+            setResourceCounts({
+              gears,
+              scrap: inventory.getItemCount("scrap_metal"),
+              cores,
+              circuits: inventory.getItemCount("circuit_board"),
+              nanofiber: inventory.getItemCount("nano_fiber"),
+              bioEssence: inventory.getItemCount("bio_essence"),
+            });
+            setPartCounts({
+              pistol: inventory.getItemCount("weapon_part_pistol"),
+              rifle: inventory.getItemCount("weapon_part_rifle"),
+              shotgun: inventory.getItemCount("weapon_part_shotgun"),
+              rocket: inventory.getItemCount("weapon_part_rocket"),
+              laser: inventory.getItemCount("weapon_part_laser"),
+              grenade: inventory.getItemCount("weapon_part_grenade"),
+            });
+            setWeaponUpgradeInfo(weapons.getAllUpgradeInfo());
+            setCompanionUpgradeInfo(companionSystem.getAllUpgradeInfo(() => gears, () => cores));
+            setCapturedCreatures(bioSystem.getCaptured());
           }
 
           if (player.getStats().health <= 0) {
@@ -602,6 +683,11 @@ export const Game: React.FC = () => {
         buildingRef.current = null;
         if (prefabRef.current) { try { prefabRef.current.dispose(); } catch {} }
         prefabRef.current = null;
+        if (pickupRef.current) { try { pickupRef.current.dispose(); } catch {} }
+        pickupRef.current = null;
+        if (bioRef.current) { try { bioRef.current.dispose(); } catch {} }
+        bioRef.current = null;
+        baseRef.current = null;
         multiplayerRef.current = null;
         initializingRef.current = false;
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -626,6 +712,8 @@ export const Game: React.FC = () => {
     if (mapRef.current) mapRef.current.dispose();
     if (buildingRef.current) buildingRef.current.dispose();
     if (prefabRef.current) prefabRef.current.dispose();
+    if (pickupRef.current) pickupRef.current.dispose();
+    if (bioRef.current) bioRef.current.dispose();
     if (multiplayerRef.current) multiplayerRef.current.dispose();
     if (engineRef.current) {
       engineRef.current.dispose();
@@ -715,6 +803,198 @@ export const Game: React.FC = () => {
     setGamePhase("auth");
   }, []);
 
+  const labBlueprints = useMemo<LabBlueprint[]>(() => [
+    { id: "scout", presetName: "ScoutPrime", displayName: "Scout Prime", type: "ally", description: "Fast recon ally", cost: { gears: 12, scrap: 8, cores: 1, circuits: 1 }, unlockTier: 1 },
+    { id: "brute", presetName: "BruteForge", displayName: "Brute Forge", type: "ally", description: "Heavy melee bruiser", cost: { gears: 18, scrap: 14, cores: 2, circuits: 1 }, unlockTier: 1 },
+    { id: "medic", presetName: "MedicDrone", displayName: "Medic Drone", type: "ally", description: "Healing companion", cost: { gears: 16, scrap: 6, cores: 2, circuits: 2 }, unlockTier: 1 },
+    { id: "spark", presetName: "SparkPup", displayName: "Spark Pup", type: "pet", description: "Loyal energy pet", cost: { gears: 10, scrap: 4, cores: 1, circuits: 1 }, unlockTier: 1 },
+    { id: "jet", presetName: "JetWarden", displayName: "Jet Warden", type: "ally", description: "Aerial guardian", cost: { gears: 24, scrap: 16, cores: 3, circuits: 2 }, unlockTier: 2 },
+    { id: "tank", presetName: "TankTitan", displayName: "Tank Titan", type: "ally", description: "Walking fortress", cost: { gears: 30, scrap: 24, cores: 4, circuits: 2 }, unlockTier: 2 },
+    { id: "guardian", presetName: "GuardianUnit", displayName: "Guardian Unit", type: "ally", description: "Defensive specialist", cost: { gears: 22, scrap: 18, cores: 3, circuits: 3 }, unlockTier: 2 },
+    { id: "optimus", presetName: "OptimusForge", displayName: "Optimus Forge", type: "ally", description: "Elite leader", cost: { gears: 40, scrap: 28, cores: 6, circuits: 4 }, unlockTier: 3 },
+    { id: "apex", presetName: "HybridApex", displayName: "Hybrid Apex", type: "ally", description: "Apex hybrid unit", cost: { gears: 50, scrap: 32, cores: 8, circuits: 5 }, unlockTier: 3 },
+    { id: "mega", presetName: "MegaUnitX", displayName: "Mega Unit X", type: "ally", description: "Boss-class robot", cost: { gears: 60, scrap: 40, cores: 10, circuits: 6 }, unlockTier: 3 },
+  ], []);
+
+  const syncResourcesNow = useCallback(() => {
+    const inv = inventoryRef.current;
+    const weapons = weaponsRef.current;
+    const comp = companionRef.current;
+    const bio = bioRef.current;
+    if (!inv) return;
+    const gears = inv.getItemCount("gear");
+    const cores = inv.getItemCount("energy_core");
+    setResourceCounts({
+      gears,
+      scrap: inv.getItemCount("scrap_metal"),
+      cores,
+      circuits: inv.getItemCount("circuit_board"),
+      nanofiber: inv.getItemCount("nano_fiber"),
+      bioEssence: inv.getItemCount("bio_essence"),
+    });
+    setPartCounts({
+      pistol: inv.getItemCount("weapon_part_pistol"),
+      rifle: inv.getItemCount("weapon_part_rifle"),
+      shotgun: inv.getItemCount("weapon_part_shotgun"),
+      rocket: inv.getItemCount("weapon_part_rocket"),
+      laser: inv.getItemCount("weapon_part_laser"),
+      grenade: inv.getItemCount("weapon_part_grenade"),
+    });
+    if (weapons) setWeaponUpgradeInfo(weapons.getAllUpgradeInfo());
+    if (comp) setCompanionUpgradeInfo(comp.getAllUpgradeInfo(() => gears, () => cores));
+    if (bio) setCapturedCreatures(bio.getCaptured());
+  }, []);
+
+  const handleUpgradeWeapon = useCallback((type: string) => {
+    if (!weaponsRef.current) return;
+    const ok = weaponsRef.current.upgradeWeapon(type as any);
+    if (ok) showMessage(`UPGRADED ${type.toUpperCase()}`, 1500);
+    else showMessage("UPGRADE FAILED — INSUFFICIENT RESOURCES", 1500);
+    syncResourcesNow();
+  }, [showMessage, syncResourcesNow]);
+
+  const handleUpgradeCompanion = useCallback((id: string) => {
+    if (!companionRef.current || !inventoryRef.current) return;
+    const inv = inventoryRef.current;
+    const ok = companionRef.current.upgradeCompanion(id, (g, c) => {
+      if (inv.getItemCount("gear") < g || inv.getItemCount("energy_core") < c) return false;
+      if (g > 0) inv.removeItem("gear", g);
+      if (c > 0) inv.removeItem("energy_core", c);
+      return true;
+    });
+    if (ok) showMessage("ROBOT UPGRADED", 1500);
+    else showMessage("ROBOT UPGRADE FAILED", 1500);
+    syncResourcesNow();
+  }, [showMessage, syncResourcesNow]);
+
+  const handleLabBuild = useCallback((presetName: string) => {
+    if (!companionRef.current || !playerRef.current || !inventoryRef.current || !baseRef.current) return;
+    const bp = labBlueprints.find(b => b.presetName === presetName);
+    if (!bp) return;
+    const cap = baseRef.current.getLabCompanionCap();
+    if (companionRef.current.getCompanionCount() >= cap) {
+      showMessage("LAB AT CAPACITY — UPGRADE LAB", 1800);
+      return;
+    }
+    const inv = inventoryRef.current;
+    if (inv.getItemCount("gear") < bp.cost.gears || inv.getItemCount("scrap_metal") < bp.cost.scrap ||
+        inv.getItemCount("energy_core") < bp.cost.cores || inv.getItemCount("circuit_board") < bp.cost.circuits) {
+      showMessage("INSUFFICIENT RESOURCES", 1500);
+      return;
+    }
+    inv.removeItem("gear", bp.cost.gears);
+    inv.removeItem("scrap_metal", bp.cost.scrap);
+    inv.removeItem("energy_core", bp.cost.cores);
+    inv.removeItem("circuit_board", bp.cost.circuits);
+    const pos = playerRef.current.getPosition();
+    const ok = companionRef.current.addCompanion(presetName, pos, { allowDuplicate: true });
+    if (ok) {
+      showMessage(`BUILT ${bp.displayName.toUpperCase()}`, 1800);
+      EventBus.getInstance().emit("effect:sparkle", { position: pos });
+    } else {
+      showMessage("BUILD FAILED", 1500);
+    }
+    syncResourcesNow();
+  }, [labBlueprints, showMessage, syncResourcesNow]);
+
+  const handleLabUpgrade = useCallback(() => {
+    if (!baseRef.current) return;
+    const lab = baseRef.current.getStructures().find(s => s.kind === "lab");
+    if (!lab) return;
+    const ok = baseRef.current.upgradeStructure(lab.id);
+    if (ok) {
+      showMessage(`LAB UPGRADED → LVL ${lab.level}`, 1800);
+      if (companionRef.current) companionRef.current.setMaxCompanions(Math.max(3, baseRef.current.getLabCompanionCap()));
+    } else {
+      showMessage("LAB UPGRADE FAILED", 1500);
+    }
+    syncResourcesNow();
+  }, [showMessage, syncResourcesNow]);
+
+  const handleGardenUpgrade = useCallback(() => {
+    if (!baseRef.current) return;
+    const g = baseRef.current.getStructures().find(s => s.kind === "garden");
+    if (!g) return;
+    const ok = baseRef.current.upgradeStructure(g.id);
+    if (ok) showMessage(`GARDEN UPGRADED → LVL ${g.level}`, 1800);
+    else showMessage("GARDEN UPGRADE FAILED", 1500);
+    syncResourcesNow();
+  }, [showMessage, syncResourcesNow]);
+
+  const handleGardenDeploy = useCallback((id: string) => {
+    if (!bioRef.current || !companionRef.current || !playerRef.current || !baseRef.current) return;
+    const cap = baseRef.current.getLabCompanionCap();
+    if (companionRef.current.getCompanionCount() >= cap) {
+      showMessage("ROSTER FULL — UPGRADE LAB FIRST", 1800);
+      return;
+    }
+    const captured = bioRef.current.getCaptured().find(c => c.id === id);
+    if (!captured) return;
+    const presetMap: Record<string, string> = {
+      robofox: "ScoutCompanion",
+      crystalbeetle: "TankTitan",
+      hoverserpent: "JetWarden",
+      neonowl: "InsectoidStalker",
+      voltfrog: "SparkPup",
+    };
+    const preset = presetMap[captured.speciesId] || "ScoutCompanion";
+    const ok = companionRef.current.addCompanion(preset, playerRef.current.getPosition(), { allowDuplicate: true });
+    if (ok) {
+      showMessage(`DEPLOYED ${captured.name.toUpperCase()}`, 1800);
+      bioRef.current.removeCaptured(id);
+    } else {
+      showMessage("DEPLOY FAILED", 1500);
+    }
+  }, [showMessage]);
+
+  useEffect(() => {
+    if (gamePhase !== "playing") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "Tab") {
+        e.preventDefault();
+        setUpgradeMenuOpen(v => !v);
+        if (labOpen) setLabOpen(false);
+        if (gardenOpen) setGardenOpen(false);
+        if (document.pointerLockElement) document.exitPointerLock();
+      } else if (e.code === "KeyH") {
+        if (bioRef.current) {
+          const ok = bioRef.current.attemptCaptureNearest();
+          if (!ok) showMessage("NO CREATURE IN RANGE", 1200);
+        }
+      } else if (e.code === "KeyE") {
+        if (!baseRef.current || !playerRef.current) return;
+        const pos = playerRef.current.getPosition();
+        const lab = baseRef.current.getNearestStructure(pos, "lab", 6);
+        const garden = baseRef.current.getNearestStructure(pos, "garden", 6);
+        if (lab) {
+          setLabStructure(lab);
+          setLabOpen(true);
+          if (document.pointerLockElement) document.exitPointerLock();
+        } else if (garden) {
+          setGardenStructure(garden);
+          setGardenOpen(true);
+          if (document.pointerLockElement) document.exitPointerLock();
+        }
+      } else if (e.code === "Escape") {
+        if (upgradeMenuOpen) setUpgradeMenuOpen(false);
+        if (labOpen) setLabOpen(false);
+        if (gardenOpen) setGardenOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [gamePhase, upgradeMenuOpen, labOpen, gardenOpen, showMessage]);
+
+  const labLevel = labStructure ? (baseRef.current?.getStructures().find(s => s.id === labStructure.id)?.level ?? labStructure.level) : 0;
+  const labRawCost = labStructure ? baseRef.current?.getUpgradeCost(labStructure.id) ?? null : null;
+  const labUpgradeCost = labRawCost ? { gears: labRawCost.gears, cores: labRawCost.energyCores, circuits: labRawCost.scrap } : null;
+  const labCanUpgrade = !!labRawCost && !!baseRef.current?.canAfford(labRawCost);
+
+  const gardenLevel = gardenStructure ? (baseRef.current?.getStructures().find(s => s.id === gardenStructure.id)?.level ?? gardenStructure.level) : 0;
+  const gardenRawCost = gardenStructure ? baseRef.current?.getUpgradeCost(gardenStructure.id) ?? null : null;
+  const gardenUpgradeCost = gardenRawCost ? { gears: gardenRawCost.gears, nano: gardenRawCost.scrap, cores: gardenRawCost.energyCores } : null;
+  const gardenCanUpgrade = !!gardenRawCost && !!baseRef.current?.canAfford(gardenRawCost);
+
   useEffect(() => {
     return () => {
       if (playerRef.current) playerRef.current.dispose();
@@ -726,6 +1006,9 @@ export const Game: React.FC = () => {
       if (shopRef.current) shopRef.current.dispose();
       if (buildingRef.current) buildingRef.current.dispose();
       if (prefabRef.current) prefabRef.current.dispose();
+      if (pickupRef.current) pickupRef.current.dispose();
+      if (bioRef.current) bioRef.current.dispose();
+      if (baseRef.current) baseRef.current.dispose();
       if (effectsRef.current) effectsRef.current.dispose();
       if (skyRef.current) skyRef.current.dispose();
       if (enemyHealthBarsRef.current) enemyHealthBarsRef.current.dispose();
@@ -811,6 +1094,48 @@ export const Game: React.FC = () => {
           buildMode={buildMode}
           hotbarBlocks={hotbarBlocks}
           selectedBlock={selectedBlock}
+          selectedBlockDef={selectedBlockDef}
+          upgradeMenuOpen={upgradeMenuOpen}
+          upgradeMenuWeapons={weaponUpgradeInfo}
+          upgradeMenuCompanions={companionUpgradeInfo}
+          upgradeMenuResources={{
+            gears: resourceCounts.gears,
+            scrap: resourceCounts.scrap,
+            cores: resourceCounts.cores,
+            circuits: resourceCounts.circuits,
+            nanofiber: resourceCounts.nanofiber,
+          }}
+          upgradeMenuPartCounts={partCounts}
+          onUpgradeWeapon={handleUpgradeWeapon}
+          onUpgradeCompanion={handleUpgradeCompanion}
+          onUpgradeMenuClose={() => setUpgradeMenuOpen(false)}
+          labOpen={labOpen}
+          labLevel={labLevel}
+          labBlueprints={labBlueprints}
+          labResources={{
+            gears: resourceCounts.gears,
+            scrap: resourceCounts.scrap,
+            cores: resourceCounts.cores,
+            circuits: resourceCounts.circuits,
+          }}
+          labCapacityUsed={companionInfo.length}
+          labCapacityMax={Math.max(3, baseRef.current?.getLabCompanionCap() ?? 3)}
+          labUpgradeCost={labUpgradeCost}
+          labCanUpgrade={labCanUpgrade}
+          onLabBuild={handleLabBuild}
+          onLabUpgrade={handleLabUpgrade}
+          onLabClose={() => setLabOpen(false)}
+          gardenOpen={gardenOpen}
+          gardenLevel={gardenLevel}
+          gardenCaptureBonus={baseRef.current?.getGardenCaptureBonus() ?? 0}
+          gardenCapacityMax={Math.max(6, baseRef.current?.getGardenCaptureCap() ?? 6)}
+          gardenCaptured={capturedCreatures}
+          bioEssenceCount={resourceCounts.bioEssence}
+          gardenUpgradeCost={gardenUpgradeCost}
+          gardenCanUpgrade={gardenCanUpgrade}
+          onGardenDeploy={handleGardenDeploy}
+          onGardenUpgrade={handleGardenUpgrade}
+          onGardenClose={() => setGardenOpen(false)}
           planMode={planMode}
           prefabHotbar={prefabHotbar}
           selectedPrefabIndex={selectedPrefabIndex}

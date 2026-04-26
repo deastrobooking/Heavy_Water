@@ -23,6 +23,24 @@ The ArmorMaterialFactory produces reusable material types for consistent aesthet
 ### Combat, Inventory & Crafting
 Combat involves light and heavy melee combo chains with input buffering. An InventorySystem provides a 24-slot grid. The CraftingSystem supports recipe-based crafting for weapons, armor, and base components.
 
+### Loot Drops & Pickups
+PickupSystem (`PickupSystem.ts`) spawns physical glowing world meshes when enemies die. Drops include `gear` (universal upgrade currency), `weapon_part_*` (per-weapon upgrade currency keyed to weapon type), `scrap_metal`, `energy_core`, `circuit_board`, `nano_fiber`, `bio_essence`, and `health_kit`. Pickups magnetize toward the player within ~6 units and collect within ~1.5 units, emitting `PICKUP_COLLECTED` events. Drop tables vary by enemy type (drone/grunt/sniper/hybrid/commander) with weapon-part chance scaled by tier (35%/60%/100%). Items go directly into InventorySystem.
+
+### Weapon & Companion Upgrades (TAB Menu)
+WeaponsSystem implements per-weapon level 1→5 progression with `getUpgradeInfo`, `getAllUpgradeInfo`, and `upgradeWeapon(type)`. Each level boosts damage, fire rate, reduces spread, and from level 3+ adds impact (knockback / explosion radius). Upgrade cost is `gears + weapon_part_<type>` scaling per level. CompanionSystem mirrors this with `getUpgradeInfo`, `getAllUpgradeInfo`, and `upgradeCompanion(id, spendFn)` boosting maxHealth/damage/speed for `gears + energy_cores`. The in-game UpgradeMenu (`UpgradeMenu.tsx`, opened with **TAB**) shows resource counts, both tabs (Weapons / Helper Robots), live cost preview, and per-row upgrade buttons. Pressing TAB toggles the modal and releases pointer lock; ESC also closes.
+
+### Base Structures (Lab + Garden)
+BaseSystem (`BaseSystem.ts`) tracks player-placed base structures (`lab`, `garden`) with levels 1→3. Lab level controls companion roster cap [3,5,8] and unlocks robot blueprint tiers; Garden level controls capture roster cap [3,6,10] and capture-bonus chance [0,0.15,0.3]. Lab/Garden are placed via two new prefabs in PrefabSystem (`base_lab`, `base_garden`) tagged with `baseStructureKind`. PrefabSystem has `setOnPlacedCallback` / `setOnRemovedCallback` hooks; Game.tsx wires placements into BaseSystem.registerStructure and re-syncs companion cap on placement/removal. Walking within 6 units of a Lab or Garden and pressing **E** opens its UI (LabUI / GardenCaptureUI). Upgrade cost is gears + scrap + energy_cores scaling per next-level tier.
+
+### Lab UI (Build Robots)
+LabUI (`LabUI.tsx`) shows ten robot blueprints across three Lab tiers (Scout/Brute/Medic/SparkPup at tier 1; Jet/Tank/Guardian at tier 2; Optimus/Apex/Mega at tier 3) — each blueprint declares preset name, type (ally/pet), description, and cost in gears+scrap+cores+circuits. BUILD spends resources, calls `CompanionSystem.addCompanion(presetName, playerPos, { allowDuplicate: true })`, and emits an `effect:sparkle`. The Lab can be upgraded inline from the same modal when affordable. Roster size is capped by the current Lab level via BaseSystem.getLabCompanionCap.
+
+### Bio Creature Capture & Garden UI
+BioCreatureSystem (`BioCreatureSystem.ts`) defines 5 wandering bio-robotic species (RoboFox, CrystalBeetle, HoverSerpent, NeonOwl, VoltFrog) using RobotDescriptor + RobotFactory styling. `spawnInitialCreatures()` seeds 8 spawn spots around the world. Pressing **H** while standing within range fires `attemptCaptureNearest()` — a capture orb arcs to the target, plays a capture beam, rolls a chance modified by Garden capture bonus, and on success adds the creature to the captured roster (capped by Garden level via setHooks). GardenCaptureUI (`GardenCaptureUI.tsx`, opened with **E** at a Garden) lists captured creatures with stats and a DEPLOY button that maps species → companion preset (robofox→ScoutCompanion, crystalbeetle→TankTitan, hoverserpent→JetWarden, neonowl→InsectoidStalker, voltfrog→SparkPup) and adds them via CompanionSystem.
+
+### Build HUD Labels
+The build hotbar in GameUI now displays the actively-selected block name, material cost (e.g. "2 scrap_metal"), and HP in a banner above the slot row, sourced from `BuildingSystem.getBlockDefinitions()[selected]`.
+
 ### Building & Prefab Systems
 The BuildingSystem offers Minecraft-style mining and building with 19 block types, grid-snapped placement, and a live GridMaterial overlay. The PrefabSystem allows players to place pre-designed structures (e.g., watchtowers, houses, city blocks) using the same material factory as the armor system, also with grid-snapped placement. Both systems are serialized by the LevelSerializer for saving and loading.
 

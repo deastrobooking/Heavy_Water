@@ -63,6 +63,21 @@ export const GameEvents = {
   LOOT_COLLECTED: "loot:collected",
   CHEST_OPENED: "chest:opened",
 
+  PICKUP_SPAWNED: "pickup:spawned",
+  PICKUP_COLLECTED: "pickup:collected",
+
+  WEAPON_UPGRADED: "weapon:upgraded",
+  COMPANION_UPGRADED: "companion:upgraded",
+  COMPANION_BUILT: "companion:built",
+
+  BASE_STRUCTURE_PLACED: "base:structurePlaced",
+  BASE_STRUCTURE_UPGRADED: "base:structureUpgraded",
+  BASE_INTERACT: "base:interact",
+
+  CREATURE_SPAWNED: "creature:spawned",
+  CREATURE_CAPTURED: "creature:captured",
+  CAPTURE_ORB_THROWN: "creature:captureOrbThrown",
+
   WAVE_STARTED: "wave:started",
   WAVE_COMPLETED: "wave:completed",
 

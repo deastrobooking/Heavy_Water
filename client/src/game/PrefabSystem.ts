@@ -23,6 +23,7 @@ export interface PrefabDefinition {
   footprint: { width: number; depth: number };
   cost: PrefabCost[];
   build: (ctx: PrefabBuildContext) => BABYLON.Mesh[];
+  baseStructureKind?: "lab" | "garden";
 }
 
 export interface PlacedPrefab {
@@ -480,6 +481,135 @@ export const PREFAB_REGISTRY: PrefabDefinition[] = [
     },
   },
   {
+    id: "base_lab",
+    name: "Lab",
+    category: "Industry",
+    footprint: { width: 7, depth: 7 },
+    cost: [
+      { materialId: "scrap_metal", quantity: 30 },
+      { materialId: "circuit_board", quantity: 4 },
+      { materialId: "energy_core", quantity: 2 },
+    ],
+    baseStructureKind: "lab",
+    build: ({ scene, parent, materials }) => {
+      const ms: BABYLON.Mesh[] = [];
+      const floor = box(scene, "lab_floor", 7, 0.3, 7, materials.metal());
+      floor.position.y = 0.15;
+      ms.push(floor);
+      const trim = box(scene, "lab_trim", 7.2, 0.12, 7.2, materials.gold());
+      trim.position.y = 0.35;
+      ms.push(trim);
+      for (const [x, z] of [[-3.2, -3.2], [3.2, -3.2], [-3.2, 3.2], [3.2, 3.2]] as [number, number][]) {
+        const post = pillar(scene, `lab_post_${x}_${z}`, 4.5, 0.35, materials.metal());
+        post.position.set(x, 2.4, z);
+        ms.push(post);
+      }
+      const wallBack = box(scene, "lab_wallBack", 7, 4.0, 0.3, materials.ceramic());
+      wallBack.position.set(0, 2.2, -3.4);
+      ms.push(wallBack);
+      const wallLeft = box(scene, "lab_wallLeft", 0.3, 4.0, 7, materials.ceramic());
+      wallLeft.position.set(-3.4, 2.2, 0);
+      ms.push(wallLeft);
+      const wallRight = box(scene, "lab_wallRight", 0.3, 4.0, 7, materials.ceramic());
+      wallRight.position.set(3.4, 2.2, 0);
+      ms.push(wallRight);
+      const dome = sphere(scene, "lab_dome", 5.5, materials.neon());
+      dome.scaling.y = 0.6;
+      dome.position.y = 4.6;
+      const domeMat = dome.material as BABYLON.StandardMaterial;
+      if (domeMat) domeMat.alpha = 0.55;
+      ms.push(dome);
+      const podBase = pillar(scene, "lab_podBase", 1.6, 1.4, materials.metal());
+      podBase.position.set(0, 0.8, -1.6);
+      ms.push(podBase);
+      const podGlass = sphere(scene, "lab_podGlass", 1.6, materials.neon());
+      podGlass.position.set(0, 2.2, -1.6);
+      const pgMat = podGlass.material as BABYLON.StandardMaterial;
+      if (pgMat) pgMat.alpha = 0.5;
+      ms.push(podGlass);
+      const console1 = box(scene, "lab_console", 2.2, 1.1, 0.8, materials.black());
+      console1.position.set(2.0, 0.55, 1.5);
+      ms.push(console1);
+      const screen = box(scene, "lab_screen", 1.8, 0.8, 0.05, materials.neon());
+      screen.position.set(2.0, 1.4, 1.1);
+      ms.push(screen);
+      const sign = box(scene, "lab_sign", 4.5, 0.6, 0.15, materials.neon());
+      sign.position.set(0, 4.6, 3.5);
+      ms.push(sign);
+      const signFrame = box(scene, "lab_signFrame", 4.7, 0.75, 0.18, materials.gold());
+      signFrame.position.set(0, 4.6, 3.45);
+      ms.push(signFrame);
+      const beacon = sphere(scene, "lab_beacon", 0.6, materials.neon());
+      beacon.position.set(0, 5.6, 0);
+      ms.push(beacon);
+      for (const m of ms) m.parent = parent;
+      return ms;
+    },
+  },
+  {
+    id: "base_garden",
+    name: "Garden Dome",
+    category: "Industry",
+    footprint: { width: 8, depth: 8 },
+    cost: [
+      { materialId: "scrap_metal", quantity: 22 },
+      { materialId: "nano_fiber", quantity: 6 },
+      { materialId: "energy_core", quantity: 1 },
+    ],
+    baseStructureKind: "garden",
+    build: ({ scene, parent, materials }) => {
+      const ms: BABYLON.Mesh[] = [];
+      const floor = box(scene, "gd_floor", 8, 0.3, 8, materials.ceramic());
+      floor.position.y = 0.15;
+      ms.push(floor);
+      const trim = box(scene, "gd_trim", 8.2, 0.12, 8.2, materials.gold());
+      trim.position.y = 0.35;
+      ms.push(trim);
+      const dome = sphere(scene, "gd_dome", 8.0, materials.neon());
+      dome.scaling.y = 0.85;
+      dome.position.y = 3.4;
+      const dmMat = dome.material as BABYLON.StandardMaterial;
+      if (dmMat) {
+        dmMat.alpha = 0.32;
+        dmMat.diffuseColor = new BABYLON.Color3(0.4, 1.0, 0.5);
+      }
+      ms.push(dome);
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const arch = pillar(scene, `gd_rib_${i}`, 6.5, 0.16, materials.metal());
+        arch.position.set(Math.cos(a) * 3.6, 3.0, Math.sin(a) * 3.6);
+        arch.rotation.z = -Math.cos(a) * 0.3;
+        arch.rotation.x = Math.sin(a) * 0.3;
+        ms.push(arch);
+      }
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        const planter = pillar(scene, `gd_planter_${i}`, 0.4, 1.2, materials.gold());
+        planter.position.set(Math.cos(a) * 2.4, 0.4, Math.sin(a) * 2.4);
+        ms.push(planter);
+        const plant = sphere(scene, `gd_plant_${i}`, 1.0, materials.neon());
+        plant.position.set(Math.cos(a) * 2.4, 1.0, Math.sin(a) * 2.4);
+        const pmMat = plant.material as BABYLON.StandardMaterial;
+        if (pmMat) pmMat.diffuseColor = new BABYLON.Color3(0.2, 0.8, 0.3);
+        ms.push(plant);
+      }
+      const pond = pillar(scene, "gd_pond", 0.18, 2.2, materials.neon());
+      pond.position.y = 0.4;
+      ms.push(pond);
+      const sign = box(scene, "gd_sign", 4.0, 0.55, 0.15, materials.neon());
+      sign.position.set(0, 5.4, 3.6);
+      ms.push(sign);
+      const signFrame = box(scene, "gd_signFrame", 4.2, 0.7, 0.18, materials.gold());
+      signFrame.position.set(0, 5.4, 3.55);
+      ms.push(signFrame);
+      const beacon = sphere(scene, "gd_beacon", 0.55, materials.neon());
+      beacon.position.set(0, 6.6, 0);
+      ms.push(beacon);
+      for (const m of ms) m.parent = parent;
+      return ms;
+    },
+  },
+  {
     id: "city_block_small",
     name: "City Block",
     category: "Housing",
@@ -568,6 +698,8 @@ export class PrefabSystem {
   private wheelHandler: ((e: WheelEvent) => void) | null = null;
   private clickHandler: ((e: PointerEvent) => void) | null = null;
   private renderObserver: BABYLON.Observer<BABYLON.Scene> | null = null;
+  private onPlacedCallback: ((p: PlacedPrefab, def: PrefabDefinition) => void) | null = null;
+  private onRemovedCallback: ((id: string) => void) | null = null;
 
   constructor(scene: BABYLON.Scene, camera: BABYLON.FreeCamera, inventory: InventorySystem) {
     this.scene = scene;
@@ -746,9 +878,27 @@ export class PrefabSystem {
       rotation: this.placementRotation,
       materials,
     });
+    const placed = this.placed[this.placed.length - 1];
+    if (this.onPlacedCallback) this.onPlacedCallback(placed, def);
     this.bus.emit(GameEvents.UI_MESSAGE, `Placed ${def.name}`);
     this.bus.emit(GameEvents.INVENTORY_CHANGED);
     console.log("[PrefabSystem] Placed", def.name, "at", pos.x.toFixed(1), pos.z.toFixed(1));
+  }
+
+  setOnPlacedCallback(cb: (p: PlacedPrefab, def: PrefabDefinition) => void): void {
+    this.onPlacedCallback = cb;
+  }
+
+  setOnRemovedCallback(cb: (id: string) => void): void {
+    this.onRemovedCallback = cb;
+  }
+
+  getPlaced(): PlacedPrefab[] {
+    return this.placed.slice();
+  }
+
+  getDefinition(defId: string): PrefabDefinition | undefined {
+    return PREFAB_REGISTRY.find(p => p.id === defId);
   }
 
   private removeAtCrosshair(): void {
@@ -771,6 +921,7 @@ export class PrefabSystem {
     target.materials.dispose();
     target.root.dispose();
     this.placed.splice(idx, 1);
+    if (this.onRemovedCallback) this.onRemovedCallback(target.id);
     this.bus.emit(GameEvents.UI_MESSAGE, "Structure removed");
   }
 
