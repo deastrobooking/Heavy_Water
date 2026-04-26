@@ -37,6 +37,7 @@ import { LevelSerializer } from "./LevelSerializer";
 import { MultiplayerSystem } from "./MultiplayerSystem";
 import { EffectsSystem } from "./EffectsSystem";
 import { PropAudioSystem } from "./PropAudioSystem";
+import { SoundSystem } from "./SoundSystem";
 import { SkySystem } from "./SkySystem";
 import { MiningSystem } from "./MiningSystem";
 import { EnemyBaseSystem } from "./EnemyBaseSystem";
@@ -85,6 +86,7 @@ export const Game: React.FC = () => {
   const multiplayerRef = useRef<MultiplayerSystem | null>(null);
   const effectsRef = useRef<EffectsSystem | null>(null);
   const propAudioRef = useRef<PropAudioSystem | null>(null);
+  const soundRef = useRef<SoundSystem | null>(null);
   const skyRef = useRef<SkySystem | null>(null);
   const miningRef = useRef<MiningSystem | null>(null);
   const enemyBaseRef = useRef<EnemyBaseSystem | null>(null);
@@ -425,11 +427,15 @@ export const Game: React.FC = () => {
           if (on && buildingRef.current?.isBuildMode()) buildingRef.current.toggleBuildMode();
         });
 
-        const effects = new EffectsSystem(scene);
+        const effects = new EffectsSystem(scene, engine.getCamera());
         effectsRef.current = effects;
 
         const propAudio = new PropAudioSystem();
         propAudioRef.current = propAudio;
+
+        const sound = new SoundSystem();
+        sound.preload("/sounds/hit.mp3");
+        soundRef.current = sound;
 
         const multiplayer = new MultiplayerSystem(scene);
         multiplayerRef.current = multiplayer;
@@ -849,6 +855,26 @@ export const Game: React.FC = () => {
                   attacker: activeVehicle,
                   knockbackForce: 600 + speed * 20,
                 });
+
+                // === Ram impact feedback (gated by per-target cooldown above) ===
+                // Spark/dust burst at the contact point. Bigger, redder, longer
+                // for heavies; small yellow pop for light bots.
+                const impactScale = isLarge ? 1.8 : isSmall ? 0.9 : 1.2;
+                const impactColor = isLarge
+                  ? new BABYLON.Color3(1.0, 0.45, 0.25) // orange-red
+                  : new BABYLON.Color3(1.0, 0.85, 0.3); // yellow-orange
+                bus.emit("effect:hitImpact", { position: hitPoint, color: impactColor, scale: impactScale });
+
+                // Camera shake — scales with damage / target weight, capped
+                const shakeAmp = Math.min(0.65, 0.12 + speed * 0.012 + (isLarge ? 0.18 : 0));
+                const shakeDur = isLarge ? 0.32 : 0.18;
+                bus.emit("effect:cameraShake", { intensity: shakeAmp, duration: shakeDur });
+
+                // Metallic crunch sound — lower pitch for big targets, higher
+                // for small bots so players can feel the difference.
+                const enemyPitch = isLarge ? 0.7 : isSmall ? 1.15 : 0.9;
+                const enemyVol = Math.min(1.0, 0.55 + speed * 0.015);
+                bus.emit("sound:play", { url: "/sounds/hit.mp3", volume: enemyVol, playbackRate: enemyPitch });
               }
 
               // Garbage-collect cooldown entries older than 5 s
@@ -871,10 +897,30 @@ export const Game: React.FC = () => {
                 cooldownMap.set(propKey, nowMs);
                 const meta = propMesh.metadata;
                 if (!isPropMeta(meta)) continue;
+                const propHitPoint = wpos.clone();
+                propHitPoint.y += 0.5;
                 meta.damageable.takeDamage({
                   amount: Math.max(60, ramDamage),
                   damageType: DamageType.Collision,
-                  hitPoint: wpos.clone(),
+                  hitPoint: propHitPoint,
+                });
+
+                // === Prop ram impact feedback ===
+                // Lighter, dustier burst than enemy hits — tan/grey palette
+                bus.emit("effect:hitImpact", {
+                  position: propHitPoint,
+                  color: new BABYLON.Color3(0.85, 0.78, 0.55),
+                  scale: 1.0,
+                });
+                bus.emit("effect:cameraShake", {
+                  intensity: Math.min(0.45, 0.08 + speed * 0.01),
+                  duration: 0.14,
+                });
+                // Higher pitch than enemies — wood/metal "clatter" feel
+                bus.emit("sound:play", {
+                  url: "/sounds/hit.mp3",
+                  volume: Math.min(0.9, 0.45 + speed * 0.012),
+                  playbackRate: 1.4,
                 });
               }
             }
@@ -1408,6 +1454,7 @@ export const Game: React.FC = () => {
       if (respawnTimeoutRef.current !== null) window.clearTimeout(respawnTimeoutRef.current);
       if (effectsRef.current) effectsRef.current.dispose();
       if (propAudioRef.current) propAudioRef.current.dispose();
+      if (soundRef.current) soundRef.current.dispose();
       if (skyRef.current) skyRef.current.dispose();
       if (enemyHealthBarsRef.current) enemyHealthBarsRef.current.dispose();
       if (aerialEnemyRef.current) aerialEnemyRef.current.dispose();

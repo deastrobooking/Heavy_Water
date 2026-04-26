@@ -19,9 +19,18 @@ export class EffectsSystem {
   private pickupHandler: (data: any) => void;
   private hitImpactHandler: (data: any) => void;
   private smokePuffHandler: (data: any) => void;
+  private cameraShakeHandler: (data: any) => void;
 
-  constructor(scene: BABYLON.Scene) {
+  // Camera shake state
+  private camera: BABYLON.Camera | null = null;
+  private shakeIntensity: number = 0;
+  private shakeRemaining: number = 0;
+  private shakeDuration: number = 0;
+  private lastShakeOffset: BABYLON.Vector3 = new BABYLON.Vector3(0, 0, 0);
+
+  constructor(scene: BABYLON.Scene, camera?: BABYLON.Camera) {
     this.scene = scene;
+    this.camera = camera || null;
     this.bus = EventBus.getInstance();
 
     this.sparkleHandler = (data: { position: BABYLON.Vector3; color?: BABYLON.Color3; count?: number }) => {
@@ -42,6 +51,9 @@ export class EffectsSystem {
     this.smokePuffHandler = (data: { position: BABYLON.Vector3; color?: BABYLON.Color3; scale?: number; rise?: number; duration?: number }) => {
       this.spawnSmokePuff(data.position, data.color, data.scale, data.rise, data.duration);
     };
+    this.cameraShakeHandler = (data: { intensity?: number; duration?: number }) => {
+      this.shakeCamera(data?.intensity ?? 0.25, data?.duration ?? 0.25);
+    };
 
     this.bus.on("effect:sparkle", this.sparkleHandler);
     this.bus.on("effect:capture", this.captureHandler);
@@ -49,8 +61,50 @@ export class EffectsSystem {
     this.bus.on("effect:pickup", this.pickupHandler);
     this.bus.on("effect:hitImpact", this.hitImpactHandler);
     this.bus.on("effect:smokePuff", this.smokePuffHandler);
+    this.bus.on("effect:cameraShake", this.cameraShakeHandler);
 
     console.log("[EffectsSystem] Initialized");
+  }
+
+  setCamera(camera: BABYLON.Camera): void {
+    this.camera = camera;
+  }
+
+  /**
+   * Trigger a brief camera shake. New shakes layer onto existing ones —
+   * the strongest of the requested or current intensity wins, and the
+   * remaining time is extended to whichever lasts longer.
+   */
+  shakeCamera(intensity: number, duration: number): void {
+    if (intensity <= 0 || duration <= 0) return;
+    this.shakeIntensity = Math.max(this.shakeIntensity, intensity);
+    this.shakeRemaining = Math.max(this.shakeRemaining, duration);
+    this.shakeDuration = Math.max(this.shakeDuration, duration);
+  }
+
+  private updateCameraShake(dt: number): void {
+    if (!this.camera) return;
+    // Always undo previous frame's offset first so we don't drift
+    if (this.lastShakeOffset.x !== 0 || this.lastShakeOffset.y !== 0 || this.lastShakeOffset.z !== 0) {
+      this.camera.position.subtractInPlace(this.lastShakeOffset);
+      this.lastShakeOffset.set(0, 0, 0);
+    }
+    if (this.shakeRemaining <= 0 || this.shakeIntensity <= 0) return;
+
+    const t = this.shakeRemaining / Math.max(this.shakeDuration, 0.001);
+    const amp = this.shakeIntensity * t; // ease-out
+    const ox = (Math.random() * 2 - 1) * amp;
+    const oy = (Math.random() * 2 - 1) * amp * 0.7;
+    const oz = (Math.random() * 2 - 1) * amp;
+    this.lastShakeOffset.set(ox, oy, oz);
+    this.camera.position.addInPlace(this.lastShakeOffset);
+
+    this.shakeRemaining -= dt;
+    if (this.shakeRemaining <= 0) {
+      this.shakeRemaining = 0;
+      this.shakeIntensity = 0;
+      this.shakeDuration = 0;
+    }
   }
 
   spawnSparkle(position: BABYLON.Vector3, color?: BABYLON.Color3, count: number = 14): void {
@@ -296,6 +350,7 @@ export class EffectsSystem {
         this.active.splice(i, 1);
       }
     }
+    this.updateCameraShake(dt);
   }
 
   dispose(): void {
@@ -305,6 +360,12 @@ export class EffectsSystem {
     this.bus.off("effect:pickup", this.pickupHandler);
     this.bus.off("effect:hitImpact", this.hitImpactHandler);
     this.bus.off("effect:smokePuff", this.smokePuffHandler);
+    this.bus.off("effect:cameraShake", this.cameraShakeHandler);
+    // Undo any pending camera offset before letting go of the camera
+    if (this.camera && (this.lastShakeOffset.x !== 0 || this.lastShakeOffset.y !== 0 || this.lastShakeOffset.z !== 0)) {
+      this.camera.position.subtractInPlace(this.lastShakeOffset);
+      this.lastShakeOffset.set(0, 0, 0);
+    }
     for (const e of this.active) this.disposeEffect(e);
     this.active = [];
   }
