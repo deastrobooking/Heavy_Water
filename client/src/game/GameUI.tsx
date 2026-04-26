@@ -202,6 +202,13 @@ export const GameUI: React.FC<GameUIProps> = ({
 }) => {
   const [joinCode, setJoinCode] = React.useState("");
   const [chatInput, setChatInput] = React.useState("");
+  const anyModalOpen =
+    upgradeMenuOpen ||
+    labOpen ||
+    gardenOpen ||
+    capsuleOpen ||
+    shopOpen ||
+    showLobby;
   return (
     <div className="fixed inset-0 pointer-events-none" style={{ fontFamily: "'Press Start 2P', monospace" }}>
       <div
@@ -327,23 +334,6 @@ export const GameUI: React.FC<GameUIProps> = ({
             </span>
           </div>
         )}
-      </div>
-
-      <div
-        style={{
-          position: "absolute",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          pointerEvents: "none",
-          width: 24,
-          height: 24,
-          zIndex: 30,
-        }}
-      >
-        <div style={{ position: "absolute", top: 11, left: 0, width: 24, height: 2, background: "rgba(0,255,255,0.85)", boxShadow: "0 0 4px rgba(0,255,255,0.9)" }} />
-        <div style={{ position: "absolute", top: 0, left: 11, width: 2, height: 24, background: "rgba(0,255,255,0.85)", boxShadow: "0 0 4px rgba(0,255,255,0.9)" }} />
-        <div style={{ position: "absolute", top: 10, left: 10, width: 4, height: 4, borderRadius: "50%", background: "rgba(255,255,255,0.95)", boxShadow: "0 0 4px rgba(0,255,255,1)" }} />
       </div>
 
       {buildMode && (
@@ -473,15 +463,27 @@ export const GameUI: React.FC<GameUIProps> = ({
         </div>
       </div>
 
-      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30">
-        <div className="w-10 h-10 relative" style={{ filter: "drop-shadow(0 0 3px rgba(0,0,0,0.95)) drop-shadow(0 0 1px rgba(0,0,0,1))" }}>
+      {!anyModalOpen && (
+        <div
+          className="pointer-events-none"
+          style={{
+            position: "fixed",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            zIndex: 30,
+            width: 40,
+            height: 40,
+            filter: "drop-shadow(0 0 3px rgba(0,0,0,0.95)) drop-shadow(0 0 1px rgba(0,0,0,1))",
+          }}
+        >
           <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-[3px] h-3 bg-cyan-300" />
           <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-[3px] h-3 bg-cyan-300" />
           <div className="absolute left-0 top-1/2 transform -translate-y-1/2 w-3 h-[3px] bg-cyan-300" />
           <div className="absolute right-0 top-1/2 transform -translate-y-1/2 w-3 h-[3px] bg-cyan-300" />
           <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-1.5 h-1.5 bg-red-500 rounded-full ring-1 ring-white/80" />
         </div>
-      </div>
+      )}
 
       {showMessage && (
         <div className="absolute top-1/3 left-1/2 transform -translate-x-1/2 bg-black/90 border-2 border-cyan-400 px-6 py-3 rounded-lg animate-pulse">

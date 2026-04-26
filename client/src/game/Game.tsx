@@ -27,6 +27,7 @@ import { PickupSystem } from "./PickupSystem";
 import { BaseSystem, BaseStructure } from "./BaseSystem";
 import { BioCreatureSystem, CapturedCreature } from "./BioCreatureSystem";
 import { VehicleSystem } from "./VehicleSystem";
+import { EnvironmentPropSystem, PropHitboxMetadata } from "./EnvironmentPropSystem";
 import { MusicSystem } from "./MusicSystem";
 import { MusicPlayerUI } from "./MusicPlayerUI";
 import { WeaponUpgradeInfo } from "./WeaponsSystem";
@@ -76,6 +77,8 @@ export const Game: React.FC = () => {
   const baseRef = useRef<BaseSystem | null>(null);
   const bioRef = useRef<BioCreatureSystem | null>(null);
   const vehicleRef = useRef<VehicleSystem | null>(null);
+  const propSystemRef = useRef<EnvironmentPropSystem | null>(null);
+  const atvHitCooldownRef = useRef<Map<number, number>>(new Map());
   const levelSerializerRef = useRef<LevelSerializer | null>(null);
   const loadInputRef = useRef<HTMLInputElement | null>(null);
   const multiplayerRef = useRef<MultiplayerSystem | null>(null);
@@ -536,6 +539,35 @@ export const Game: React.FC = () => {
         vehicleSystem.spawnPreset("RaiderATV", new BABYLON.Vector3(-6, 0.6, -10));
         vehicleSystem.spawnPreset("CometFighter", new BABYLON.Vector3(8, 1.2, -10));
 
+        // === EnvironmentPropSystem: scattered destructible/lootable sci-fi props ===
+        const propSystem = new EnvironmentPropSystem(scene);
+        propSystemRef.current = propSystem;
+        atvHitCooldownRef.current.clear();
+
+        // Cluster locations: spawn-area, near each enemy base, plus scattered nodes.
+        const clusterCenters: Array<{ pos: BABYLON.Vector3; opts?: { count?: number; radius?: number } }> = [
+          { pos: new BABYLON.Vector3(18, 0, 22), opts: { count: 5, radius: 4.5 } },
+          { pos: new BABYLON.Vector3(-22, 0, 14), opts: { count: 4, radius: 4 } },
+          { pos: new BABYLON.Vector3(40, 0, -18), opts: { count: 6, radius: 5 } },
+          { pos: new BABYLON.Vector3(-46, 0, -32), opts: { count: 5, radius: 5 } },
+          // Outpost props near each enemy base
+          { pos: new BABYLON.Vector3(232, 0, 232), opts: { count: 6, radius: 6 } },
+          { pos: new BABYLON.Vector3(-232, 0, 232), opts: { count: 6, radius: 6 } },
+          { pos: new BABYLON.Vector3(0, 0, -262), opts: { count: 6, radius: 6 } },
+          // Scattered roadside caches
+          { pos: new BABYLON.Vector3(120, 0, 60), opts: { count: 4, radius: 4 } },
+          { pos: new BABYLON.Vector3(-110, 0, -80), opts: { count: 4, radius: 4 } },
+          { pos: new BABYLON.Vector3(180, 0, -140), opts: { count: 5, radius: 5 } },
+          { pos: new BABYLON.Vector3(-160, 0, 120), opts: { count: 4, radius: 4 } },
+        ];
+        for (const c of clusterCenters) {
+          propSystem.spawnCluster(c.pos, c.opts);
+        }
+        // A handful of standalone holo-signs along main approaches
+        propSystem.spawn("holo_sign", new BABYLON.Vector3(0, 0, 30));
+        propSystem.spawn("holo_sign", new BABYLON.Vector3(60, 0, -10));
+        propSystem.spawn("holo_sign", new BABYLON.Vector3(-60, 0, -10));
+
         let totalKillsLocal = 0;
         let highestWaveLocal = 1;
 
@@ -683,10 +715,24 @@ export const Game: React.FC = () => {
           const aerialMeshes = aerialEnemySystem.getMeshes();
           const miningMeshes = miningSystem.getActiveMeshes();
           const baseMeshes = enemyBaseSystem.getActiveMeshes();
-          const enemyMeshes = groundEnemyMeshes.concat(aerialMeshes).concat(miningMeshes).concat(baseMeshes);
+          const propMeshes = propSystem.getHitboxMeshes();
+          const enemyMeshes = groundEnemyMeshes.concat(aerialMeshes).concat(miningMeshes).concat(baseMeshes).concat(propMeshes);
           const hits = weapons.update(enemyMeshes);
 
+          const isPropMeta = (m: unknown): m is PropHitboxMetadata =>
+            !!m && typeof m === "object" && (m as PropHitboxMetadata).isProp === true;
+
           const routeHit = (mesh: BABYLON.AbstractMesh, dmg: number) => {
+            // Props use the standard mesh.metadata.damageable interface
+            const meta = mesh.metadata;
+            if (isPropMeta(meta)) {
+              meta.damageable.takeDamage({
+                amount: dmg,
+                damageType: DamageType.Kinetic,
+                hitPoint: mesh.getAbsolutePosition().clone(),
+              });
+              return;
+            }
             // Try mining first (cheap), then enemy bases, then aerial, then ground
             if (miningSystem.damageNode(mesh, dmg)) return;
             if (enemyBaseSystem.damageStructure(mesh, dmg)) return;
@@ -740,6 +786,94 @@ export const Game: React.FC = () => {
           chestSystem.update(playerPos);
           pickupSystem.setPlayerPosition(playerPos);
           bioSystem.setPlayerPosition(playerPos);
+          propSystem.setPlayerPosition(playerPos);
+
+          // === ATV contact damage ===
+          // While the player is driving the ATV, treat fast vehicle contact
+          // with enemies as a "ramming" attack scaled to current speed.
+          const activeVehicle = vehicleSystem.getActive();
+          if (activeVehicle && activeVehicle.kind === "atv") {
+            const speed = Math.abs(activeVehicle.speed);
+            // Below ~6 m/s we don't want gentle nudges to deal damage
+            if (speed > 6) {
+              const cooldownMap = atvHitCooldownRef.current;
+              const nowMs = now;
+              // Per-enemy cooldown so a single brush doesn't shred everyone
+              const enemyCooldownMs = 350;
+              // Ram damage scales linearly with speed; capped both ways
+              const ramDamage = Math.min(140, Math.max(35, speed * 4.0));
+              const vpos = activeVehicle.position;
+
+              for (const enemy of enemySystem.getActiveEnemies()) {
+                const epos = enemy.mesh.position;
+                const dx = epos.x - vpos.x;
+                const dz = epos.z - vpos.z;
+                const distSq = dx * dx + dz * dz;
+                // ATV ram radius ~2.6 m
+                if (distSq > 2.6 * 2.6) continue;
+
+                const enemyId = enemy.mesh.uniqueId;
+                const last = cooldownMap.get(enemyId) || 0;
+                if (nowMs - last < enemyCooldownMs) continue;
+                cooldownMap.set(enemyId, nowMs);
+
+                // Categorize toughness — small bots die in 1-2 hits, larger
+                // ones take chip damage and stagger the ATV.
+                const isSmall = enemy.type === "drone" || enemy.type === "soldier" || enemy.type === "insectoid";
+                const isLarge = enemy.type === "heavy" || enemy.type === "commander" || enemy.type === "hybrid";
+
+                let dmg = ramDamage;
+                if (isSmall) {
+                  dmg = Math.max(80, ramDamage * 1.5);
+                } else if (isLarge) {
+                  dmg = Math.min(60, ramDamage * 0.5);
+                  // Stagger the ATV — bleed off speed sharply on heavy contact
+                  activeVehicle.speed *= 0.45;
+                }
+
+                const hitPoint = new BABYLON.Vector3(
+                  (vpos.x + epos.x) * 0.5,
+                  Math.max(vpos.y, epos.y) + 0.6,
+                  (vpos.z + epos.z) * 0.5,
+                );
+                // takeDamage handles its own death/loot via ENEMY_KILLED bus event
+                enemy.takeDamage({
+                  amount: dmg,
+                  damageType: DamageType.Collision,
+                  hitPoint,
+                  attacker: activeVehicle,
+                  knockbackForce: 600 + speed * 20,
+                });
+              }
+
+              // Garbage-collect cooldown entries older than 5 s
+              if (cooldownMap.size > 64) {
+                for (const [k, t] of cooldownMap) {
+                  if (nowMs - t > 5000) cooldownMap.delete(k);
+                }
+              }
+
+              // ATV vs. props — ram destroys crates/barrels/canisters
+              for (const propMesh of propSystem.getHitboxMeshes()) {
+                const wpos = propMesh.getAbsolutePosition();
+                const dx = wpos.x - vpos.x;
+                const dz = wpos.z - vpos.z;
+                const distSq = dx * dx + dz * dz;
+                if (distSq > 2.6 * 2.6) continue;
+                const propKey = -propMesh.uniqueId; // negative to avoid clash with enemy ids
+                const last = cooldownMap.get(propKey) || 0;
+                if (nowMs - last < enemyCooldownMs) continue;
+                cooldownMap.set(propKey, nowMs);
+                const meta = propMesh.metadata;
+                if (!isPropMeta(meta)) continue;
+                meta.damageable.takeDamage({
+                  amount: Math.max(60, ramDamage),
+                  damageType: DamageType.Collision,
+                  hitPoint: wpos.clone(),
+                });
+              }
+            }
+          }
 
           capsuleSystem.update(dt, playerPos);
           shopSystem.update();
@@ -855,6 +989,9 @@ export const Game: React.FC = () => {
         prefabRef.current = null;
         if (pickupRef.current) { try { pickupRef.current.dispose(); } catch {} }
         pickupRef.current = null;
+        if (propSystemRef.current) { try { propSystemRef.current.dispose(); } catch {} }
+        propSystemRef.current = null;
+        atvHitCooldownRef.current.clear();
         if (bioRef.current) { try { bioRef.current.dispose(); } catch {} }
         bioRef.current = null;
         if (miningRef.current) { try { miningRef.current.dispose(); } catch {} }
@@ -1257,6 +1394,8 @@ export const Game: React.FC = () => {
       if (pickupRef.current) pickupRef.current.dispose();
       if (bioRef.current) bioRef.current.dispose();
       if (vehicleRef.current) vehicleRef.current.dispose();
+      if (propSystemRef.current) propSystemRef.current.dispose();
+      atvHitCooldownRef.current.clear();
       if (baseRef.current) baseRef.current.dispose();
       if (miningRef.current) miningRef.current.dispose();
       if (enemyBaseRef.current) enemyBaseRef.current.dispose();

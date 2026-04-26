@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo } from "react";
 import { MusicSystem } from "./MusicSystem";
 import { MusicPlayerUI } from "./MusicPlayerUI";
 
@@ -23,21 +23,34 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize }) => {
     };
   }, []);
 
+  // Pre-computed star positions for star field — stable across renders
+  const stars = useMemo(
+    () =>
+      Array.from({ length: 140 }, () => ({
+        left: Math.random() * 100,
+        top: Math.random() * 100,
+        size: Math.random() < 0.85 ? 1 : 2,
+        delay: Math.random() * 3,
+        opacity: 0.3 + Math.random() * 0.7,
+      })),
+    [],
+  );
+
   return (
     <div className="fixed inset-0 bg-gradient-to-b from-black via-purple-950 to-black flex flex-col items-center overflow-hidden">
       {/* Star field */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {Array.from({ length: 140 }).map((_, i) => (
+        {stars.map((s, i) => (
           <div
             key={i}
             className="absolute bg-white rounded-full animate-pulse"
             style={{
-              left: `${Math.random() * 100}%`,
-              top: `${Math.random() * 100}%`,
-              width: `${Math.random() < 0.85 ? 1 : 2}px`,
-              height: `${Math.random() < 0.85 ? 1 : 2}px`,
-              animationDelay: `${Math.random() * 3}s`,
-              opacity: 0.3 + Math.random() * 0.7,
+              left: `${s.left}%`,
+              top: `${s.top}%`,
+              width: `${s.size}px`,
+              height: `${s.size}px`,
+              animationDelay: `${s.delay}s`,
+              opacity: s.opacity,
             }}
           />
         ))}
@@ -60,187 +73,29 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize }) => {
                "radial-gradient(ellipse at 50% 100%, rgba(255,80,0,0.25), transparent 65%)",
            }} />
 
-      {/* === HERO ART: animated dogfight scene === */}
-      <div className="relative z-10 w-full max-w-5xl mt-12 px-6">
+      {/* === HERO ART: blackletter title + CRT scene === */}
+      <div className="relative z-10 w-full max-w-5xl mt-10 px-6">
         <h1
-          className="text-7xl font-black text-center tracking-[0.18em] bg-gradient-to-b from-cyan-200 via-cyan-400 to-blue-700 bg-clip-text text-transparent"
+          className="text-center"
           style={{
-            filter: "drop-shadow(0 0 24px rgba(0,200,255,0.55)) drop-shadow(0 4px 0 rgba(0,40,80,0.4))",
-            fontFamily: "'Press Start 2P', monospace",
-            letterSpacing: "0.15em",
+            fontFamily: "'UnifrakturMaguntia', 'UnifrakturCook', 'Old English Text MT', 'Times New Roman', serif",
+            fontSize: "clamp(64px, 9vw, 128px)",
+            lineHeight: 1.0,
+            letterSpacing: "0.04em",
+            color: "#e7fbff",
+            textShadow:
+              "0 0 18px rgba(0,220,255,0.85), 0 0 38px rgba(255,80,200,0.55), 0 4px 0 rgba(0,40,80,0.6)",
+            filter: "drop-shadow(0 0 24px rgba(0,200,255,0.45))",
           }}
         >
           HEAVY WATER
         </h1>
-        <h2 className="text-center text-cyan-200/80 text-base tracking-[0.5em] mt-3"
-            style={{ fontFamily: "'Press Start 2P', monospace" }}>
-          ◢ DEFEND THE SKIES ◣
-        </h2>
 
-        {/* Animated SVG scene */}
-        <div className="relative w-full h-72 mt-4 mb-2">
-          <svg viewBox="0 0 800 280" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
-            <defs>
-              <linearGradient id="bshipBody" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stopColor="#1a1140" />
-                <stop offset="50%" stopColor="#0a0820" />
-                <stop offset="100%" stopColor="#000" />
-              </linearGradient>
-              <linearGradient id="cityGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stopColor="#0a2540" />
-                <stop offset="100%" stopColor="#000" />
-              </linearGradient>
-              <radialGradient id="engineGlow">
-                <stop offset="0%" stopColor="#fff5b0" stopOpacity="1" />
-                <stop offset="40%" stopColor="#ff9900" stopOpacity="0.9" />
-                <stop offset="100%" stopColor="#ff3300" stopOpacity="0" />
-              </radialGradient>
-              <radialGradient id="muzzleFlash">
-                <stop offset="0%" stopColor="#fff" stopOpacity="1" />
-                <stop offset="60%" stopColor="#ff5544" stopOpacity="0.6" />
-                <stop offset="100%" stopColor="#ff5544" stopOpacity="0" />
-              </radialGradient>
-              <filter id="bloom">
-                <feGaussianBlur stdDeviation="3" result="b" />
-                <feMerge>
-                  <feMergeNode in="b" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-            </defs>
-
-            {/* Distant city skyline silhouette */}
-            <g opacity="0.85">
-              <rect x="0" y="225" width="800" height="55" fill="url(#cityGradient)" />
-              {[40, 100, 160, 230, 290, 360, 430, 500, 560, 630, 700, 760].map((x, i) => {
-                const h = 28 + ((i * 13) % 38);
-                const w = 22 + ((i * 7) % 18);
-                return (
-                  <g key={i}>
-                    <rect x={x} y={225 - h} width={w} height={h} fill="#06121f" stroke="#0a2540" strokeWidth="1" />
-                    {/* Window lights */}
-                    {Array.from({ length: Math.floor(h / 6) }).map((_, j) => (
-                      <rect
-                        key={j}
-                        x={x + 3 + ((j * 5) % (w - 5))}
-                        y={225 - h + 3 + j * 6}
-                        width="2"
-                        height="2"
-                        fill={j % 3 === 0 ? "#ffcc44" : "#88ccff"}
-                        opacity={0.7 + ((j * 7) % 3) * 0.1}
-                      />
-                    ))}
-                  </g>
-                );
-              })}
-              {/* Antennae */}
-              <line x1="105" y1="195" x2="105" y2="180" stroke="#ff3344" strokeWidth="1" />
-              <circle cx="105" cy="180" r="2" fill="#ff3344">
-                <animate attributeName="opacity" values="1;0.2;1" dur="1.2s" repeatCount="indefinite" />
-              </circle>
-              <line x1="565" y1="190" x2="565" y2="172" stroke="#ff3344" strokeWidth="1" />
-              <circle cx="565" cy="172" r="2" fill="#ff3344">
-                <animate attributeName="opacity" values="1;0.2;1" dur="0.9s" repeatCount="indefinite" />
-              </circle>
-            </g>
-
-            {/* === BATTLESHIP (slow drift) === */}
-            <g>
-              <animateTransform attributeName="transform" type="translate"
-                values="-40,0; 40,4; -40,0" dur="14s" repeatCount="indefinite" />
-              <g transform="translate(280,80)">
-                {/* Main hull */}
-                <polygon points="-130,0 110,-8 140,0 110,8 -130,0" fill="url(#bshipBody)" stroke="#3a2a60" strokeWidth="1" />
-                {/* Bow nose */}
-                <polygon points="110,-8 165,-2 165,2 110,8" fill="#1a0a30" stroke="#3a2a60" strokeWidth="1" />
-                {/* Bridge tower */}
-                <polygon points="-60,-8 30,-8 20,-22 -50,-22" fill="#1a1240" stroke="#3a2a60" strokeWidth="1" />
-                {/* Bridge windows (glowing red) */}
-                <rect x="-48" y="-19" width="68" height="3" fill="#ff2244" filter="url(#bloom)">
-                  <animate attributeName="opacity" values="1;0.6;1" dur="2.5s" repeatCount="indefinite" />
-                </rect>
-                {/* Turrets */}
-                {[-90, -40, 10, 60].map((tx, i) => (
-                  <g key={i}>
-                    <ellipse cx={tx} cy="-6" rx="8" ry="4" fill="#1a1030" stroke="#3a2a60" strokeWidth="0.8" />
-                    <line x1={tx} y1="-6" x2={tx + 12} y2="-6" stroke="#3a2a60" strokeWidth="2" />
-                  </g>
-                ))}
-                {/* Underside lights */}
-                {[-100, -60, -20, 20, 60, 100].map((lx, i) => (
-                  <circle key={i} cx={lx} cy="6" r="1.6" fill="#ffaa44" filter="url(#bloom)">
-                    <animate attributeName="opacity" values="0.4;1;0.4" dur={`${1.4 + i * 0.2}s`} repeatCount="indefinite" />
-                  </circle>
-                ))}
-                {/* Rear engines */}
-                <circle cx="-130" cy="-3" r="6" fill="url(#engineGlow)" filter="url(#bloom)" />
-                <circle cx="-130" cy="3" r="6" fill="url(#engineGlow)" filter="url(#bloom)" />
-                {/* Turret muzzle flash */}
-                <circle cx="22" cy="-6" r="6" fill="url(#muzzleFlash)" filter="url(#bloom)">
-                  <animate attributeName="opacity" values="0;1;0;0;0" dur="2.2s" repeatCount="indefinite" />
-                  <animate attributeName="r" values="2;9;2;2;2" dur="2.2s" repeatCount="indefinite" />
-                </circle>
-              </g>
-            </g>
-
-            {/* === FIGHTER 1 — fast strafe across screen === */}
-            <g>
-              <animateTransform attributeName="transform" type="translate"
-                values="850,140; -120,170" dur="6s" repeatCount="indefinite" />
-              <g transform="rotate(180)">
-                <polygon points="-22,0 12,-5 18,0 12,5" fill="#2a0a10" stroke="#5a1a25" strokeWidth="0.8" />
-                <polygon points="-2,-3 14,0 -2,3" fill="#ff4455" filter="url(#bloom)" opacity="0.9" />
-                <polygon points="-8,-2 -22,-12 -28,-12 -10,-1" fill="#1a0510" stroke="#5a1a25" strokeWidth="0.6" />
-                <polygon points="-8,2 -22,12 -28,12 -10,1" fill="#1a0510" stroke="#5a1a25" strokeWidth="0.6" />
-                <circle cx="-22" cy="0" r="3" fill="#ff8833" filter="url(#bloom)" />
-                {/* Tracer */}
-                <line x1="14" y1="0" x2="80" y2="0" stroke="#ffdd44" strokeWidth="1.6" filter="url(#bloom)" opacity="0.9">
-                  <animate attributeName="opacity" values="0;1;0;0" dur="0.5s" repeatCount="indefinite" />
-                </line>
-              </g>
-            </g>
-
-            {/* === FIGHTER 2 — opposite direction higher altitude === */}
-            <g>
-              <animateTransform attributeName="transform" type="translate"
-                values="-100,55; 880,80" dur="7.5s" repeatCount="indefinite" />
-              <g>
-                <polygon points="-22,0 12,-5 18,0 12,5" fill="#2a0a10" stroke="#5a1a25" strokeWidth="0.8" />
-                <polygon points="-2,-3 14,0 -2,3" fill="#ff4455" filter="url(#bloom)" opacity="0.9" />
-                <polygon points="-8,-2 -22,-12 -28,-12 -10,-1" fill="#1a0510" stroke="#5a1a25" strokeWidth="0.6" />
-                <polygon points="-8,2 -22,12 -28,12 -10,1" fill="#1a0510" stroke="#5a1a25" strokeWidth="0.6" />
-                <circle cx="-22" cy="0" r="3" fill="#ff8833" filter="url(#bloom)" />
-              </g>
-            </g>
-
-            {/* === PLAYER FIGHTER returning fire (blue) — diving across center === */}
-            <g>
-              <animateTransform attributeName="transform" type="translate"
-                values="900,200; -100,30" dur="9s" repeatCount="indefinite" />
-              <g transform="rotate(195)">
-                <polygon points="-22,0 12,-5 18,0 12,5" fill="#0a1a30" stroke="#3388cc" strokeWidth="0.8" />
-                <polygon points="-2,-3 14,0 -2,3" fill="#44ddff" filter="url(#bloom)" opacity="0.95" />
-                <polygon points="-8,-2 -22,-10 -26,-10 -10,-1" fill="#08111e" stroke="#3388cc" strokeWidth="0.6" />
-                <polygon points="-8,2 -22,10 -26,10 -10,1" fill="#08111e" stroke="#3388cc" strokeWidth="0.6" />
-                <circle cx="-22" cy="0" r="3" fill="#44ccff" filter="url(#bloom)" />
-                <line x1="14" y1="0" x2="120" y2="0" stroke="#66eeff" strokeWidth="2" filter="url(#bloom)" opacity="0.95">
-                  <animate attributeName="opacity" values="0;1;1;0" dur="0.45s" repeatCount="indefinite" />
-                </line>
-              </g>
-            </g>
-
-            {/* Falling sparks / debris */}
-            {[160, 320, 480, 640].map((sx, i) => (
-              <circle key={i} cx={sx} cy="120" r="1.5" fill="#ffaa44" filter="url(#bloom)">
-                <animate attributeName="cy" values="100;240" dur={`${2 + i * 0.4}s`} repeatCount="indefinite" />
-                <animate attributeName="opacity" values="1;0" dur={`${2 + i * 0.4}s`} repeatCount="indefinite" />
-              </circle>
-            ))}
-          </svg>
-        </div>
+        {/* === CRT MONITOR + NEON PLANET + BOSS SILHOUETTE === */}
+        <CrtBossScene />
 
         {/* Status indicators */}
-        <div className="flex justify-center gap-8 text-xs text-gray-400 mt-1"
+        <div className="flex justify-center gap-8 text-xs text-gray-400 mt-3"
              style={{ fontFamily: "'Press Start 2P', monospace" }}>
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse" />
@@ -314,6 +169,273 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize }) => {
       </div>
 
       <MusicPlayerUI variant="menu" />
+    </div>
+  );
+};
+
+/**
+ * Retro CRT-monitor hero scene: bezel + scanlines + neon wireframe planet on
+ * a grid horizon, with a silhouetted boss looming next to it watching the
+ * screen. All built with SVG/CSS, no 3D model dependencies.
+ */
+const CrtBossScene: React.FC = () => {
+  // Pre-computed star positions for the CRT screen
+  const screenStars = useMemo(
+    () =>
+      Array.from({ length: 38 }, () => ({
+        x: 60 + Math.random() * 480,
+        y: 30 + Math.random() * 110,
+        r: Math.random() < 0.8 ? 0.6 : 1.1,
+        d: 1.5 + Math.random() * 2.5,
+      })),
+    [],
+  );
+
+  return (
+    <div className="relative w-full mt-6 mb-2" style={{ height: 320 }}>
+      <svg
+        viewBox="0 0 800 320"
+        className="w-full h-full"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        <defs>
+          <linearGradient id="crtBezel" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#1a1530" />
+            <stop offset="50%" stopColor="#0b0820" />
+            <stop offset="100%" stopColor="#05030f" />
+          </linearGradient>
+          <linearGradient id="crtScreen" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#020920" />
+            <stop offset="60%" stopColor="#020715" />
+            <stop offset="100%" stopColor="#03040a" />
+          </linearGradient>
+          <radialGradient id="crtVignette" cx="50%" cy="50%" r="60%">
+            <stop offset="60%" stopColor="rgba(0,0,0,0)" />
+            <stop offset="100%" stopColor="rgba(0,0,0,0.85)" />
+          </radialGradient>
+          <radialGradient id="crtGlow" cx="50%" cy="50%" r="60%">
+            <stop offset="0%" stopColor="rgba(0,220,255,0.20)" />
+            <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+          </radialGradient>
+          <linearGradient id="planetFill" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#04243a" />
+            <stop offset="100%" stopColor="#01060f" />
+          </linearGradient>
+          <radialGradient id="planetSheen" cx="35%" cy="35%" r="55%">
+            <stop offset="0%" stopColor="rgba(120,230,255,0.55)" />
+            <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+          </radialGradient>
+          <linearGradient id="bossGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#0a0316" />
+            <stop offset="100%" stopColor="#000" />
+          </linearGradient>
+          <pattern id="scanlines" width="2" height="3" patternUnits="userSpaceOnUse">
+            <rect width="2" height="1.5" fill="rgba(0,0,0,0)" />
+            <rect y="1.5" width="2" height="1.5" fill="rgba(0,0,0,0.45)" />
+          </pattern>
+          <filter id="bossBlur" x="-10%" y="-10%" width="120%" height="120%">
+            <feGaussianBlur stdDeviation="0.8" />
+          </filter>
+          <filter id="neonBloom" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="2.2" result="b" />
+            <feMerge>
+              <feMergeNode in="b" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+
+        {/* === CRT MONITOR FRAME === */}
+        {/* Outer bezel */}
+        <rect
+          x="40"
+          y="20"
+          width="540"
+          height="280"
+          rx="22"
+          fill="url(#crtBezel)"
+          stroke="#3a2a60"
+          strokeWidth="2"
+        />
+        {/* Inner bezel */}
+        <rect
+          x="56"
+          y="36"
+          width="508"
+          height="248"
+          rx="14"
+          fill="#000"
+          stroke="#5a3aa0"
+          strokeWidth="1"
+        />
+        {/* Screen */}
+        <rect
+          x="64"
+          y="44"
+          width="492"
+          height="232"
+          rx="10"
+          fill="url(#crtScreen)"
+        />
+        {/* Outer ambient glow */}
+        <rect
+          x="40"
+          y="20"
+          width="540"
+          height="280"
+          rx="22"
+          fill="url(#crtGlow)"
+          pointerEvents="none"
+        />
+
+        {/* === SCREEN CONTENT === */}
+        {/* Stars on the screen */}
+        <g clipPath="url(#screenClip)">
+          {screenStars.map((s, i) => (
+            <circle key={i} cx={s.x} cy={s.y} r={s.r} fill="#9be7ff" opacity="0.8">
+              <animate
+                attributeName="opacity"
+                values="0.2;1;0.2"
+                dur={`${s.d}s`}
+                repeatCount="indefinite"
+              />
+            </circle>
+          ))}
+        </g>
+        <clipPath id="screenClip">
+          <rect x="64" y="44" width="492" height="232" rx="10" />
+        </clipPath>
+
+        {/* Grid horizon */}
+        <g clipPath="url(#screenClip)" opacity="0.85">
+          <line x1="64" y1="200" x2="556" y2="200" stroke="#ff48d6" strokeWidth="1.2" filter="url(#neonBloom)" />
+          {/* Receding grid lines */}
+          {Array.from({ length: 8 }).map((_, i) => {
+            const t = (i + 1) / 9;
+            const y = 200 + t * 76;
+            const stroke = `rgba(255,72,214,${0.7 - t * 0.55})`;
+            return <line key={i} x1="64" y1={y} x2="556" y2={y} stroke={stroke} strokeWidth="1" />;
+          })}
+          {/* Vertical perspective lines */}
+          {Array.from({ length: 13 }).map((_, i) => {
+            const x = 64 + i * 41;
+            const dx = (x - 310) * 1.6 + 310;
+            return <line key={i} x1={x} y1="200" x2={dx} y2="276" stroke="rgba(255,72,214,0.45)" strokeWidth="0.9" />;
+          })}
+          <line x1="64" y1="276" x2="556" y2="276" stroke="rgba(255,72,214,0.65)" strokeWidth="1" />
+        </g>
+
+        {/* === NEON WIREFRAME PLANET === */}
+        <g clipPath="url(#screenClip)" transform="translate(310, 158)">
+          {/* Planet halo */}
+          <circle cx="0" cy="0" r="74" fill="url(#planetSheen)" opacity="0.7" />
+          <circle cx="0" cy="0" r="60" fill="url(#planetFill)" stroke="#22d3ee" strokeWidth="1.6" filter="url(#neonBloom)" />
+          {/* Latitude rings (give it volume) */}
+          <ellipse cx="0" cy="0" rx="60" ry="10" fill="none" stroke="#22d3ee" strokeWidth="0.9" opacity="0.85" />
+          <ellipse cx="0" cy="-22" rx="55" ry="8" fill="none" stroke="#22d3ee" strokeWidth="0.7" opacity="0.6" />
+          <ellipse cx="0" cy="22" rx="55" ry="8" fill="none" stroke="#22d3ee" strokeWidth="0.7" opacity="0.6" />
+          {/* Rotating longitude lines */}
+          <g>
+            <animateTransform attributeName="transform" type="rotate" values="0;360" dur="22s" repeatCount="indefinite" />
+            <ellipse cx="0" cy="0" rx="14" ry="60" fill="none" stroke="#22d3ee" strokeWidth="0.7" opacity="0.7" />
+            <ellipse cx="0" cy="0" rx="32" ry="60" fill="none" stroke="#22d3ee" strokeWidth="0.6" opacity="0.55" />
+            <ellipse cx="0" cy="0" rx="48" ry="60" fill="none" stroke="#22d3ee" strokeWidth="0.5" opacity="0.4" />
+          </g>
+          {/* Continent blobs (subtle) */}
+          <g opacity="0.65">
+            <path d="M -28,-14 q 12,-8 22,2 q 6,8 -6,12 q -16,4 -16,-14 z" fill="rgba(34,211,238,0.18)" stroke="rgba(34,211,238,0.4)" strokeWidth="0.6" />
+            <path d="M 8,18 q 14,-2 18,8 q 2,10 -10,10 q -14,0 -8,-18 z" fill="rgba(34,211,238,0.18)" stroke="rgba(34,211,238,0.4)" strokeWidth="0.6" />
+          </g>
+          {/* Equator orbiting ring */}
+          <g>
+            <animateTransform attributeName="transform" type="rotate" values="0;-360" dur="14s" repeatCount="indefinite" />
+            <ellipse cx="0" cy="0" rx="78" ry="14" fill="none" stroke="#ff48d6" strokeWidth="0.9" opacity="0.7" filter="url(#neonBloom)" />
+          </g>
+        </g>
+
+        {/* "RADAR" target reticle */}
+        <g clipPath="url(#screenClip)" opacity="0.7">
+          <circle cx="120" cy="80" r="14" fill="none" stroke="#22d3ee" strokeWidth="0.8" />
+          <line x1="106" y1="80" x2="134" y2="80" stroke="#22d3ee" strokeWidth="0.6" />
+          <line x1="120" y1="66" x2="120" y2="94" stroke="#22d3ee" strokeWidth="0.6" />
+          <text x="140" y="84" fontFamily="'Press Start 2P', monospace" fontSize="6" fill="#22d3ee">
+            TGT-01
+          </text>
+          <text x="74" y="60" fontFamily="'Press Start 2P', monospace" fontSize="6" fill="#22d3ee">
+            SCAN..
+          </text>
+        </g>
+
+        {/* Scanlines overlay */}
+        <rect x="64" y="44" width="492" height="232" rx="10" fill="url(#scanlines)" pointerEvents="none">
+          <animate attributeName="y" values="44;47;44" dur="2.6s" repeatCount="indefinite" />
+        </rect>
+        {/* Vignette */}
+        <rect x="64" y="44" width="492" height="232" rx="10" fill="url(#crtVignette)" pointerEvents="none" />
+
+        {/* Occasional flicker */}
+        <rect x="64" y="44" width="492" height="232" rx="10" fill="rgba(180,230,255,0.06)" pointerEvents="none">
+          <animate attributeName="opacity" values="0.0;0.0;0.5;0.0;0.0;0.0" dur="6.5s" repeatCount="indefinite" />
+        </rect>
+
+        {/* CRT chassis details — base + power LED */}
+        <rect x="120" y="296" width="380" height="14" rx="4" fill="#10082a" stroke="#3a2a60" strokeWidth="1" />
+        <rect x="280" y="296" width="60" height="6" rx="2" fill="#000" />
+        <circle cx="540" cy="290" r="2.5" fill="#22d3ee" filter="url(#neonBloom)">
+          <animate attributeName="opacity" values="0.5;1;0.5" dur="1.6s" repeatCount="indefinite" />
+        </circle>
+
+        {/* === BOSS SILHOUETTE — looming next to monitor, watching === */}
+        <g filter="url(#bossBlur)">
+          <g transform="translate(660, 305)">
+            {/* Subtle breathing sway */}
+            <animateTransform
+              attributeName="transform"
+              type="translate"
+              values="660,305; 660,300; 660,305"
+              dur="4.5s"
+              repeatCount="indefinite"
+              additive="replace"
+            />
+            {/* Body / cloak */}
+            <path
+              d="M -78,0 L -68,-130 L -54,-180 L -30,-210 L 30,-210 L 54,-180 L 68,-130 L 78,0 Z"
+              fill="url(#bossGrad)"
+              stroke="#1a0a2a"
+              strokeWidth="1"
+            />
+            {/* Shoulder pauldrons */}
+            <path d="M -68,-130 L -92,-150 L -86,-110 L -68,-110 Z" fill="#03020a" />
+            <path d="M 68,-130 L 92,-150 L 86,-110 L 68,-110 Z" fill="#03020a" />
+            {/* Spiked horns */}
+            <path d="M -22,-218 L -34,-256 L -8,-228 Z" fill="#03020a" />
+            <path d="M 22,-218 L 34,-256 L 8,-228 Z" fill="#03020a" />
+            {/* Head */}
+            <ellipse cx="0" cy="-208" rx="24" ry="22" fill="#03020a" />
+            {/* Glowing eyes — looking at the monitor (left) */}
+            <ellipse cx="-9" cy="-208" rx="3.6" ry="1.6" fill="#ff2a55" filter="url(#neonBloom)">
+              <animate attributeName="opacity" values="1;0.55;1" dur="2.2s" repeatCount="indefinite" />
+            </ellipse>
+            <ellipse cx="6" cy="-208" rx="3.6" ry="1.6" fill="#ff2a55" filter="url(#neonBloom)">
+              <animate attributeName="opacity" values="0.7;1;0.7" dur="2.2s" repeatCount="indefinite" />
+            </ellipse>
+            {/* Chest core */}
+            <circle cx="0" cy="-150" r="6" fill="#ff2a55" filter="url(#neonBloom)">
+              <animate attributeName="opacity" values="0.5;1;0.5" dur="2.0s" repeatCount="indefinite" />
+            </circle>
+            {/* Arm reaching toward screen */}
+            <path d="M -54,-180 L -120,-150 L -160,-100 L -150,-95 L -118,-130 L -68,-130 Z" fill="#03020a" />
+            {/* Claw */}
+            <path d="M -160,-100 L -172,-94 L -168,-90 L -160,-93 Z" fill="#03020a" />
+            <path d="M -160,-93 L -172,-86 L -168,-82 L -160,-86 Z" fill="#03020a" />
+          </g>
+        </g>
+
+        {/* Boss eye-glow reflection on monitor (subtle) */}
+        <ellipse cx="540" cy="160" rx="14" ry="40" fill="rgba(255,42,85,0.06)" pointerEvents="none">
+          <animate attributeName="opacity" values="0.04;0.10;0.04" dur="4.5s" repeatCount="indefinite" />
+        </ellipse>
+      </svg>
     </div>
   );
 };
