@@ -1,4 +1,5 @@
 import * as BABYLON from "@babylonjs/core";
+import { GridMaterial } from "@babylonjs/materials/grid";
 import { EventBus, GameEvents } from "./EventBus";
 import { InventorySystem, ItemType, ItemRarity } from "./InventorySystem";
 import { CRAFTING_MATERIALS } from "./CraftingSystem";
@@ -17,6 +18,18 @@ export enum BlockType {
   Foundation = "foundation",
   Fence = "fence",
   NeonStrip = "neon_strip",
+  Brick = "brick",
+  Stairs = "stairs",
+  Window = "window",
+  Tower = "tower",
+  ConeRoof = "cone_roof",
+  Turret = "turret",
+}
+
+export interface SerializedBlock {
+  type: BlockType;
+  pos: [number, number, number];
+  rot: number;
 }
 
 export interface BlockDefinition {
@@ -38,6 +51,7 @@ export interface PlacedBlock {
   maxHealth: number;
   position: BABYLON.Vector3;
   rotation: number;
+  light?: BABYLON.PointLight;
 }
 
 export interface MinedChunk {
@@ -166,13 +180,73 @@ const BLOCK_DEFINITIONS: Record<BlockType, BlockDefinition> = {
     health: 40,
     emissive: new BABYLON.Color3(1.0, 0.1, 0.6),
   },
+  [BlockType.Brick]: {
+    type: BlockType.Brick,
+    name: "Brick",
+    size: { width: 1, height: 0.6, depth: 0.5 },
+    color: new BABYLON.Color3(0.55, 0.28, 0.22),
+    alpha: 1,
+    materialCost: [{ materialId: "scrap_metal", quantity: 1 }],
+    health: 90,
+  },
+  [BlockType.Stairs]: {
+    type: BlockType.Stairs,
+    name: "Stairs",
+    size: { width: 4, height: 3, depth: 4 },
+    color: new BABYLON.Color3(0.5, 0.5, 0.55),
+    alpha: 1,
+    materialCost: [{ materialId: "scrap_metal", quantity: 6 }],
+    health: 200,
+  },
+  [BlockType.Window]: {
+    type: BlockType.Window,
+    name: "Window",
+    size: { width: 4, height: 3, depth: 0.3 },
+    color: new BABYLON.Color3(0.45, 0.75, 1.0),
+    alpha: 1,
+    materialCost: [{ materialId: "crystal_shard", quantity: 1 }, { materialId: "scrap_metal", quantity: 2 }],
+    health: 90,
+  },
+  [BlockType.Tower]: {
+    type: BlockType.Tower,
+    name: "Tower",
+    size: { width: 1.8, height: 8, depth: 1.8 },
+    color: new BABYLON.Color3(0.45, 0.45, 0.5),
+    alpha: 1,
+    materialCost: [{ materialId: "scrap_metal", quantity: 8 }],
+    health: 320,
+  },
+  [BlockType.ConeRoof]: {
+    type: BlockType.ConeRoof,
+    name: "Cone Roof",
+    size: { width: 4, height: 3, depth: 4 },
+    color: new BABYLON.Color3(0.55, 0.18, 0.2),
+    alpha: 1,
+    materialCost: [{ materialId: "scrap_metal", quantity: 4 }],
+    health: 140,
+  },
+  [BlockType.Turret]: {
+    type: BlockType.Turret,
+    name: "Turret",
+    size: { width: 2.4, height: 2.6, depth: 2.4 },
+    color: new BABYLON.Color3(0.4, 0.45, 0.5),
+    alpha: 1,
+    materialCost: [
+      { materialId: "scrap_metal", quantity: 6 },
+      { materialId: "circuit_board", quantity: 1 },
+      { materialId: "energy_core", quantity: 1 },
+    ],
+    health: 240,
+    emissive: new BABYLON.Color3(0.3, 0.05, 0.05),
+  },
 };
 
 const BLOCK_HOTBAR: BlockType[] = [
   BlockType.MetalWall, BlockType.Glass, BlockType.Platform, BlockType.Ramp,
   BlockType.Door, BlockType.Light, BlockType.Cube, BlockType.Sphere,
   BlockType.Pyramid, BlockType.Pillar, BlockType.Foundation, BlockType.Fence,
-  BlockType.NeonStrip,
+  BlockType.NeonStrip, BlockType.Brick, BlockType.Stairs, BlockType.Window,
+  BlockType.Tower, BlockType.ConeRoof, BlockType.Turret,
 ];
 
 const GRID_SIZE = 2;
@@ -187,6 +261,7 @@ export class BuildingSystem {
   private selectedBlockType: BlockType = BlockType.MetalWall;
   private placementRotation: number = 0;
   private previewMesh: BABYLON.Mesh | null = null;
+  private gridGround: BABYLON.Mesh | null = null;
 
   private placedBlocks: PlacedBlock[] = [];
   private minedChunks: MinedChunk[] = [];
@@ -269,15 +344,47 @@ export class BuildingSystem {
 
     if (this.buildMode) {
       this.createPreviewMesh();
-      this.bus.emit(GameEvents.UI_MESSAGE, "Build Mode ON — 1-6: select block, R: rotate, LMB: place, RMB: mine");
+      this.showGridOverlay(true);
+      this.bus.emit(GameEvents.UI_MESSAGE, "Build Mode ON — 1-9/0/-/=: select, R: rotate, LMB: place, RMB: mine");
       console.log("[BuildingSystem] Build mode enabled");
     } else {
       this.destroyPreviewMesh();
+      this.showGridOverlay(false);
       this.bus.emit(GameEvents.UI_MESSAGE, "Build Mode OFF");
       console.log("[BuildingSystem] Build mode disabled");
     }
 
     this.bus.emit("building:modeChanged", this.buildMode);
+  }
+
+  private showGridOverlay(on: boolean): void {
+    if (on) {
+      if (!this.gridGround) {
+        this.gridGround = BABYLON.MeshBuilder.CreateGround("buildGridGround", {
+          width: 400, height: 400, subdivisions: 1,
+        }, this.scene);
+        const gm = new GridMaterial("buildGridMat", this.scene);
+        gm.majorUnitFrequency = 5;
+        gm.minorUnitVisibility = 0.4;
+        gm.gridRatio = GRID_SIZE;
+        gm.mainColor = new BABYLON.Color3(0, 0, 0);
+        gm.lineColor = new BABYLON.Color3(0.2, 1.0, 0.5);
+        gm.opacity = 0.55;
+        gm.backFaceCulling = false;
+        this.gridGround.material = gm;
+        this.gridGround.isPickable = false;
+        this.gridGround.position.y = 0.04;
+      }
+      this.gridGround.setEnabled(true);
+    } else if (this.gridGround) {
+      this.gridGround.setEnabled(false);
+    }
+  }
+
+  private updateGridOverlayPosition(): void {
+    if (!this.gridGround || !this.gridGround.isEnabled()) return;
+    this.gridGround.position.x = Math.round(this.camera.position.x / GRID_SIZE) * GRID_SIZE;
+    this.gridGround.position.z = Math.round(this.camera.position.z / GRID_SIZE) * GRID_SIZE;
   }
 
   isBuildMode(): boolean {
@@ -328,12 +435,87 @@ export class BuildingSystem {
         }, this.scene);
       case BlockType.Fence:
         return this.createFenceMesh(name, def);
+      case BlockType.Stairs:
+        return this.createStairsMesh(name, def);
+      case BlockType.Window:
+        return this.createWindowMesh(name, def);
+      case BlockType.Tower:
+        return BABYLON.MeshBuilder.CreateCylinder(name, {
+          height: def.size.height, diameter: def.size.width, tessellation: 16,
+        }, this.scene);
+      case BlockType.ConeRoof:
+        return BABYLON.MeshBuilder.CreateCylinder(name, {
+          height: def.size.height, diameterTop: 0, diameterBottom: def.size.width, tessellation: 16,
+        }, this.scene);
+      case BlockType.Turret:
+        return this.createTurretMesh(name, def);
       default:
         return BABYLON.MeshBuilder.CreateBox(name,
           { width: def.size.width, height: def.size.height, depth: def.size.depth },
           this.scene
         );
     }
+  }
+
+  private createStairsMesh(name: string, def: BlockDefinition): BABYLON.Mesh {
+    const steps = 6;
+    const stepH = def.size.height / steps;
+    const stepD = def.size.depth / steps;
+    const parts: BABYLON.Mesh[] = [];
+    for (let i = 0; i < steps; i++) {
+      const s = BABYLON.MeshBuilder.CreateBox(`${name}_step_${i}`, {
+        width: def.size.width,
+        height: stepH * (i + 1),
+        depth: stepD,
+      }, this.scene);
+      s.position.set(0, (stepH * (i + 1)) / 2, -def.size.depth / 2 + stepD * (i + 0.5));
+      parts.push(s);
+    }
+    const merged = BABYLON.Mesh.MergeMeshes(parts, true, true);
+    if (merged) { merged.name = name; return merged; }
+    return parts[0];
+  }
+
+  private createWindowMesh(name: string, def: BlockDefinition): BABYLON.Mesh {
+    const frameThick = 0.18;
+    const w = def.size.width, h = def.size.height, d = def.size.depth;
+    const top = BABYLON.MeshBuilder.CreateBox(`${name}_top`, { width: w, height: frameThick, depth: d }, this.scene);
+    top.position.y = h / 2 - frameThick / 2;
+    const bot = BABYLON.MeshBuilder.CreateBox(`${name}_bot`, { width: w, height: frameThick, depth: d }, this.scene);
+    bot.position.y = -h / 2 + frameThick / 2;
+    const left = BABYLON.MeshBuilder.CreateBox(`${name}_left`, { width: frameThick, height: h, depth: d }, this.scene);
+    left.position.x = -w / 2 + frameThick / 2;
+    const right = BABYLON.MeshBuilder.CreateBox(`${name}_right`, { width: frameThick, height: h, depth: d }, this.scene);
+    right.position.x = w / 2 - frameThick / 2;
+    const cross = BABYLON.MeshBuilder.CreateBox(`${name}_cross`, { width: w, height: frameThick * 0.6, depth: d }, this.scene);
+    cross.position.y = 0;
+    const merged = BABYLON.Mesh.MergeMeshes([top, bot, left, right, cross], true, true);
+    if (merged) { merged.name = name; return merged; }
+    return top;
+  }
+
+  private createTurretMesh(name: string, def: BlockDefinition): BABYLON.Mesh {
+    const baseR = def.size.width / 2;
+    const base = BABYLON.MeshBuilder.CreateCylinder(`${name}_base`, {
+      height: 0.6, diameter: def.size.width, tessellation: 16,
+    }, this.scene);
+    base.position.y = 0.3;
+    const dome = BABYLON.MeshBuilder.CreateSphere(`${name}_dome`, {
+      diameter: def.size.width * 0.85, segments: 16, slice: 0.55,
+    }, this.scene);
+    dome.position.y = 0.6;
+    const turretBody = BABYLON.MeshBuilder.CreateCylinder(`${name}_body`, {
+      height: 0.8, diameter: def.size.width * 0.7, tessellation: 16,
+    }, this.scene);
+    turretBody.position.y = 1.2;
+    const barrel = BABYLON.MeshBuilder.CreateCylinder(`${name}_barrel`, {
+      height: def.size.depth * 1.2, diameter: 0.35, tessellation: 12,
+    }, this.scene);
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.set(0, 1.3, def.size.depth * 0.55);
+    const merged = BABYLON.Mesh.MergeMeshes([base, dome, turretBody, barrel], true, true);
+    if (merged) { merged.name = name; return merged; }
+    return base;
   }
 
   private createFenceMesh(name: string, def: BlockDefinition): BABYLON.Mesh {
@@ -451,15 +633,16 @@ export class BuildingSystem {
     mesh.checkCollisions = true;
     mesh.metadata = { tag: "PlacedBlock", blockId: `block_${this.blockIdCounter}` };
 
+    let blockLight: BABYLON.PointLight | undefined;
     if (this.selectedBlockType === BlockType.Light) {
-      const light = new BABYLON.PointLight(
+      blockLight = new BABYLON.PointLight(
         `blockLight_${this.blockIdCounter}`,
         pos.clone().add(new BABYLON.Vector3(0, 0.5, 0)),
         this.scene
       );
-      light.diffuse = new BABYLON.Color3(0.8, 0.9, 1.0);
-      light.intensity = 0.6;
-      light.range = 15;
+      blockLight.diffuse = new BABYLON.Color3(0.8, 0.9, 1.0);
+      blockLight.intensity = 0.6;
+      blockLight.range = 15;
     }
 
     const block: PlacedBlock = {
@@ -470,6 +653,7 @@ export class BuildingSystem {
       maxHealth: def.health,
       position: pos.clone(),
       rotation: this.placementRotation,
+      light: blockLight,
     };
 
     this.placedBlocks.push(block);
@@ -571,6 +755,9 @@ export class BuildingSystem {
     this.dropMaterials(hitPoint);
 
     block.mesh.dispose();
+    if (block.light) {
+      block.light.dispose();
+    }
     this.placedBlocks.splice(index, 1);
 
     this.bus.emit(GameEvents.UI_MESSAGE, `Destroyed ${def.name}`);
@@ -659,6 +846,9 @@ export class BuildingSystem {
   }
 
   update(deltaTime: number): void {
+    if (this.buildMode) {
+      this.updateGridOverlayPosition();
+    }
     if (this.buildMode && this.previewMesh) {
       const pos = this.getPlacementPosition();
       this.previewMesh.position = pos;
@@ -715,6 +905,62 @@ export class BuildingSystem {
     return this.placedBlocks.length;
   }
 
+  exportPlaced(): SerializedBlock[] {
+    return this.placedBlocks.map((b) => ({
+      type: b.type,
+      pos: [b.position.x, b.position.y, b.position.z] as [number, number, number],
+      rot: b.rotation,
+    }));
+  }
+
+  clearAll(): void {
+    for (const block of this.placedBlocks) {
+      if (!block.mesh.isDisposed()) block.mesh.dispose();
+      if (block.light) block.light.dispose();
+    }
+    this.placedBlocks = [];
+    this.bus.emit(GameEvents.UI_MESSAGE, "Level cleared");
+  }
+
+  placeAt(type: BlockType, pos: BABYLON.Vector3, rotationDeg: number): boolean {
+    const def = BLOCK_DEFINITIONS[type];
+    if (!def) {
+      console.warn(`[BuildingSystem] Unknown block type: ${type}`);
+      return false;
+    }
+    const id = `block_${this.blockIdCounter++}`;
+    const mesh = this.buildShapeMesh(id, type, def);
+    mesh.position = pos.clone();
+    mesh.rotation.y = BABYLON.Tools.ToRadians(rotationDeg);
+    const mat = new BABYLON.StandardMaterial(`blockMat_${id}`, this.scene);
+    mat.diffuseColor = def.color.clone();
+    mat.alpha = def.alpha;
+    if (def.emissive) mat.emissiveColor = def.emissive.clone();
+    mat.specularPower = 32;
+    mesh.material = mat;
+    mesh.checkCollisions = true;
+    mesh.metadata = { tag: "PlacedBlock", blockId: id };
+    let blockLight: BABYLON.PointLight | undefined;
+    if (type === BlockType.Light) {
+      blockLight = new BABYLON.PointLight(
+        `blockLight_${id}`,
+        pos.clone().add(new BABYLON.Vector3(0, 0.5, 0)),
+        this.scene
+      );
+      blockLight.diffuse = new BABYLON.Color3(0.8, 0.9, 1.0);
+      blockLight.intensity = 0.6;
+      blockLight.range = 15;
+    }
+    this.placedBlocks.push({
+      id, type, mesh,
+      health: def.health, maxHealth: def.health,
+      position: pos.clone(),
+      rotation: rotationDeg,
+      light: blockLight,
+    });
+    return true;
+  }
+
   dispose(): void {
     if (this.keyHandler) {
       window.removeEventListener("keydown", this.keyHandler);
@@ -728,8 +974,15 @@ export class BuildingSystem {
 
     this.destroyPreviewMesh();
 
+    if (this.gridGround) {
+      this.gridGround.material?.dispose();
+      this.gridGround.dispose();
+      this.gridGround = null;
+    }
+
     for (const block of this.placedBlocks) {
       block.mesh.dispose();
+      if (block.light) block.light.dispose();
     }
     this.placedBlocks = [];
 

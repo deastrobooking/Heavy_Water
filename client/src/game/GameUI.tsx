@@ -10,7 +10,8 @@ const BLOCK_LABELS: Record<string, string> = {
   metal_wall: "Wall", glass: "Glass", platform: "Platform", ramp: "Ramp",
   door: "Door", light: "Light", cube: "Cube", sphere: "Sphere",
   pyramid: "Pyramid", pillar: "Pillar", foundation: "Foundation",
-  fence: "Fence", neon_strip: "Neon",
+  fence: "Fence", neon_strip: "Neon", brick: "Brick", stairs: "Stairs",
+  window: "Window", tower: "Tower", cone_roof: "Roof", turret: "Turret",
 };
 
 interface GameUIProps {
@@ -48,6 +49,9 @@ interface GameUIProps {
   selectedPrefabIndex?: number;
   hotbarBlocks?: BlockType[];
   selectedBlock?: BlockType | null;
+  onSaveLevel?: () => void;
+  onLoadLevel?: () => void;
+  onClearLevel?: () => void;
   username?: string | null;
   multiplayerConnected?: boolean;
   inRoom?: boolean;
@@ -109,6 +113,9 @@ export const GameUI: React.FC<GameUIProps> = ({
   selectedPrefabIndex = 0,
   hotbarBlocks = [],
   selectedBlock = null,
+  onSaveLevel,
+  onLoadLevel,
+  onClearLevel,
   username = null,
   multiplayerConnected = false,
   inRoom = false,
@@ -412,13 +419,49 @@ export const GameUI: React.FC<GameUIProps> = ({
         </div>
       )}
 
-      {buildMode && hotbarBlocks && hotbarBlocks.length > 0 && (
-        <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2">
-          <div className="bg-black/85 border-2 border-emerald-400/70 rounded-lg px-3 py-2 shadow-lg shadow-emerald-500/30">
-            <div className="text-emerald-300 text-xs text-center mb-1.5 font-bold tracking-wider">
-              BUILD HOTBAR — Wheel/1-9 to switch · LMB Place · RMB Mine · R Rotate
+      {(buildMode || planMode) && (onSaveLevel || onLoadLevel || onClearLevel) && (
+        <div className="absolute top-4 right-4 pointer-events-auto">
+          <div className="bg-black/85 border-2 border-amber-400/70 rounded-lg px-3 py-2 shadow-lg shadow-amber-500/30 flex flex-col gap-1.5">
+            <div className="text-amber-300 text-[10px] font-bold tracking-wider text-center">
+              LEVEL FILE
             </div>
             <div className="flex gap-1.5">
+              {onSaveLevel && (
+                <button
+                  onClick={onSaveLevel}
+                  className="px-2 py-1 text-xs font-bold text-emerald-200 bg-emerald-900/60 border border-emerald-500 rounded hover:bg-emerald-700/60 transition-colors"
+                >
+                  SAVE
+                </button>
+              )}
+              {onLoadLevel && (
+                <button
+                  onClick={onLoadLevel}
+                  className="px-2 py-1 text-xs font-bold text-cyan-200 bg-cyan-900/60 border border-cyan-500 rounded hover:bg-cyan-700/60 transition-colors"
+                >
+                  LOAD
+                </button>
+              )}
+              {onClearLevel && (
+                <button
+                  onClick={onClearLevel}
+                  className="px-2 py-1 text-xs font-bold text-red-200 bg-red-900/60 border border-red-500 rounded hover:bg-red-700/60 transition-colors"
+                >
+                  CLEAR
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {buildMode && hotbarBlocks && hotbarBlocks.length > 0 && (
+        <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 max-w-[95vw]">
+          <div className="bg-black/85 border-2 border-emerald-400/70 rounded-lg px-3 py-2 shadow-lg shadow-emerald-500/30">
+            <div className="text-emerald-300 text-xs text-center mb-1.5 font-bold tracking-wider">
+              BUILD HOTBAR — Wheel/1-9 to switch · LMB Place · RMB Mine · R Rotate · GRID-SNAP ON
+            </div>
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
               {hotbarBlocks.map((bt, i) => {
                 const active = bt === selectedBlock;
                 const keyHint = i < 9 ? `${i + 1}` : i === 9 ? "0" : i === 10 ? "-" : "=";

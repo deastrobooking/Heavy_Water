@@ -35,6 +35,14 @@ export interface PlacedPrefab {
   materials: ArmorMaterialFactory;
 }
 
+export interface SerializedPrefab {
+  defId: string;
+  pos: [number, number, number];
+  rot: number;
+}
+
+const PREFAB_GRID_SIZE = 2;
+
 const DEFAULT_PALETTE: ArmorPalette = {
   primary: new BABYLON.Color3(0.55, 0.6, 0.7),
   secondary: new BABYLON.Color3(0.3, 0.32, 0.36),
@@ -471,6 +479,69 @@ export const PREFAB_REGISTRY: PrefabDefinition[] = [
       return ms;
     },
   },
+  {
+    id: "city_block_small",
+    name: "City Block",
+    category: "Housing",
+    footprint: { width: 14, depth: 14 },
+    cost: [
+      { materialId: "scrap_metal", quantity: 60 },
+      { materialId: "circuit_board", quantity: 4 },
+      { materialId: "energy_core", quantity: 2 },
+      { materialId: "nano_fiber", quantity: 6 },
+    ],
+    build: ({ scene, parent, materials }) => {
+      const ms: BABYLON.Mesh[] = [];
+      const plaza = box(scene, "cb_plaza", 14, 0.3, 14, materials.ceramic());
+      plaza.position.y = 0.15;
+      ms.push(plaza);
+      const trimRing = box(scene, "cb_trim_ring", 14.4, 0.12, 14.4, materials.gold());
+      trimRing.position.y = 0.32;
+      ms.push(trimRing);
+      const innerCut = box(scene, "cb_inner", 11.6, 0.32, 11.6, materials.metal());
+      innerCut.position.y = 0.34;
+      ms.push(innerCut);
+      const houseSpots: [number, number][] = [[-5, -5], [5, -5], [-5, 5], [5, 5]];
+      for (let i = 0; i < houseSpots.length; i++) {
+        const [hx, hz] = houseSpots[i];
+        const base = box(scene, `cb_h_base_${i}`, 4, 0.4, 4, materials.metal());
+        base.position.set(hx, 0.55, hz);
+        ms.push(base);
+        const walls = box(scene, `cb_h_walls_${i}`, 3.6, 2.6, 3.6, materials.ceramic());
+        walls.position.set(hx, 1.85, hz);
+        ms.push(walls);
+        const roof = BABYLON.MeshBuilder.CreateCylinder(`cb_h_roof_${i}`, {
+          height: 1.4, diameterTop: 0, diameterBottom: 4.2, tessellation: 4,
+        }, scene);
+        roof.material = materials.metal();
+        roof.position.set(hx, 3.85, hz);
+        roof.rotation.y = Math.PI / 4;
+        ms.push(roof);
+        const glow = sphere(scene, `cb_h_glow_${i}`, 0.45, materials.neon());
+        glow.position.set(hx, 4.6, hz);
+        ms.push(glow);
+      }
+      for (const sgn of [-1, 1]) {
+        const lampPost = pillar(scene, `cb_lamp_post_${sgn}`, 3.5, 0.18, materials.metal());
+        lampPost.position.set(sgn * 6.4, 2.0, 0);
+        ms.push(lampPost);
+        const lampHead = sphere(scene, `cb_lamp_head_${sgn}`, 0.5, materials.neon());
+        lampHead.position.set(sgn * 6.4, 4.0, 0);
+        ms.push(lampHead);
+      }
+      const fountainBase = pillar(scene, "cb_fb", 0.6, 3.2, materials.metal());
+      fountainBase.position.y = 0.6;
+      ms.push(fountainBase);
+      const fountainBowl = ring(scene, "cb_fbowl", 2.8, 0.4, materials.gold());
+      fountainBowl.position.y = 1.0;
+      ms.push(fountainBowl);
+      const fountainOrb = sphere(scene, "cb_forb", 1.2, materials.neon());
+      fountainOrb.position.y = 1.6;
+      ms.push(fountainOrb);
+      for (const m of ms) m.parent = parent;
+      return ms;
+    },
+  },
 ];
 
 export interface PrefabSummary {
@@ -582,17 +653,20 @@ export class PrefabSystem {
     );
     const groundPlane = BABYLON.Plane.FromPositionAndNormal(BABYLON.Vector3.Zero(), BABYLON.Axis.Y);
     const dist = ray.intersectsPlane(groundPlane);
+    let pt: BABYLON.Vector3;
     if (dist !== null && dist >= 0) {
-      const pt = ray.origin.add(ray.direction.scale(dist));
+      pt = ray.origin.add(ray.direction.scale(dist));
       const maxDist = 60;
-      if (BABYLON.Vector3.Distance(this.camera.position, pt) <= maxDist) {
-        pt.y = 0;
-        return pt;
+      if (BABYLON.Vector3.Distance(this.camera.position, pt) > maxDist) {
+        pt = this.camera.position.add(this.camera.getDirection(BABYLON.Axis.Z).scale(15));
       }
+    } else {
+      pt = this.camera.position.add(this.camera.getDirection(BABYLON.Axis.Z).scale(15));
     }
-    const fallback = this.camera.position.add(this.camera.getDirection(BABYLON.Axis.Z).scale(15));
-    fallback.y = 0;
-    return fallback;
+    pt.x = Math.round(pt.x / PREFAB_GRID_SIZE) * PREFAB_GRID_SIZE;
+    pt.z = Math.round(pt.z / PREFAB_GRID_SIZE) * PREFAB_GRID_SIZE;
+    pt.y = 0;
+    return pt;
   }
 
   private createPreview(): void {
@@ -702,6 +776,46 @@ export class PrefabSystem {
 
   getPlacedCount(): number {
     return this.placed.length;
+  }
+
+  exportPlaced(): SerializedPrefab[] {
+    return this.placed.map((p) => ({
+      defId: p.definitionId,
+      pos: [p.position.x, p.position.y, p.position.z] as [number, number, number],
+      rot: p.rotation,
+    }));
+  }
+
+  clearAll(): void {
+    for (const p of this.placed) {
+      for (const m of p.meshes) if (!m.isDisposed()) m.dispose();
+      p.materials.dispose();
+      p.root.dispose();
+    }
+    this.placed = [];
+  }
+
+  placeAt(defId: string, pos: BABYLON.Vector3, rotationDeg: number): boolean {
+    const def = PREFAB_REGISTRY.find((p) => p.id === defId);
+    if (!def) {
+      console.warn(`[PrefabSystem] Unknown prefab id: ${defId}`);
+      return false;
+    }
+    const id = `prefab_${this.placedCounter++}`;
+    const root = new BABYLON.TransformNode(id, this.scene);
+    const materials = new ArmorMaterialFactory(this.scene, DEFAULT_PALETTE, id);
+    const meshes = def.build({ scene: this.scene, parent: root, materials });
+    for (const m of meshes) {
+      m.checkCollisions = true;
+      m.metadata = { tag: "PlacedPrefab", prefabId: id };
+    }
+    root.position = pos.clone();
+    root.rotation.y = BABYLON.Tools.ToRadians(rotationDeg);
+    this.placed.push({
+      id, definitionId: def.id, root, meshes,
+      position: pos.clone(), rotation: rotationDeg, materials,
+    });
+    return true;
   }
 
   dispose(): void {

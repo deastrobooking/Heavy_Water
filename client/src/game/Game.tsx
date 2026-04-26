@@ -20,6 +20,7 @@ import { GardenSystem } from "./GardenSystem";
 import { MapSystem } from "./MapSystem";
 import { BuildingSystem, BlockType } from "./BuildingSystem";
 import { PrefabSystem, PrefabSummary } from "./PrefabSystem";
+import { LevelSerializer } from "./LevelSerializer";
 import { MultiplayerSystem } from "./MultiplayerSystem";
 import { EffectsSystem } from "./EffectsSystem";
 import { EventBus, GameEvents } from "./EventBus";
@@ -52,6 +53,8 @@ export const Game: React.FC = () => {
   const mapRef = useRef<MapSystem | null>(null);
   const buildingRef = useRef<BuildingSystem | null>(null);
   const prefabRef = useRef<PrefabSystem | null>(null);
+  const levelSerializerRef = useRef<LevelSerializer | null>(null);
+  const loadInputRef = useRef<HTMLInputElement | null>(null);
   const multiplayerRef = useRef<MultiplayerSystem | null>(null);
   const effectsRef = useRef<EffectsSystem | null>(null);
 
@@ -318,6 +321,8 @@ export const Game: React.FC = () => {
         const prefabSystem = new PrefabSystem(scene, engine.getCamera(), inventory);
         prefabRef.current = prefabSystem;
         setPrefabHotbar(prefabSystem.getHotbar());
+
+        levelSerializerRef.current = new LevelSerializer(buildingSystem, prefabSystem);
 
         bus.on("building:modeChanged", (on: boolean) => {
           if (on && prefabRef.current?.isPlanMode()) prefabRef.current.togglePlanMode();
@@ -717,6 +722,24 @@ export const Game: React.FC = () => {
         }}
       />
 
+      <input
+        ref={loadInputRef}
+        type="file"
+        accept="application/json,.json"
+        style={{ display: "none" }}
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          if (!file || !levelSerializerRef.current) return;
+          try {
+            await levelSerializerRef.current.loadFromFile(file);
+          } catch (err) {
+            console.error("[Game] Failed to load level:", err);
+            setMessage(`Load failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          e.target.value = "";
+        }}
+      />
+
       {gamePhase === "playing" && (
         <GameUI
           stats={stats}
@@ -753,6 +776,12 @@ export const Game: React.FC = () => {
           planMode={planMode}
           prefabHotbar={prefabHotbar}
           selectedPrefabIndex={selectedPrefabIndex}
+          onSaveLevel={() => levelSerializerRef.current?.download()}
+          onLoadLevel={() => loadInputRef.current?.click()}
+          onClearLevel={() => {
+            buildingRef.current?.clearAll();
+            prefabRef.current?.clearAll();
+          }}
           username={currentUser?.username || null}
           multiplayerConnected={multiplayerConnected}
           inRoom={inRoom}
