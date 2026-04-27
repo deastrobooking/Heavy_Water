@@ -112,23 +112,20 @@ export class VehicleFactory {
       rh.position.set(wid * 0.32, wheelR + hgt * 0.6, len * 0.62);
     }
 
-    // Roll cage
+    // Roll cage — only the rear posts and short rear rails so the front
+    // forward view from the driver's seat stays unobstructed.
     if (style.hasRollCage) {
       const cageH = hgt * 1.6;
-      const post1 = cyl(scene, "atv_cage_fl", cageH, 0.08, root, matAccent);
-      post1.position.set(-wid * 0.42, wheelR + hgt + cageH / 2, len * 0.15);
-      const post2 = cyl(scene, "atv_cage_fr", cageH, 0.08, root, matAccent);
-      post2.position.set(wid * 0.42, wheelR + hgt + cageH / 2, len * 0.15);
       const post3 = cyl(scene, "atv_cage_bl", cageH, 0.08, root, matAccent);
       post3.position.set(-wid * 0.42, wheelR + hgt + cageH / 2, -len * 0.32);
       const post4 = cyl(scene, "atv_cage_br", cageH, 0.08, root, matAccent);
       post4.position.set(wid * 0.42, wheelR + hgt + cageH / 2, -len * 0.32);
-      const top1 = box(scene, "atv_cage_top_l", 0.08, 0.08, len * 0.5, root, matAccent);
-      top1.position.set(-wid * 0.42, wheelR + hgt + cageH, -len * 0.08);
-      const top2 = box(scene, "atv_cage_top_r", 0.08, 0.08, len * 0.5, root, matAccent);
-      top2.position.set(wid * 0.42, wheelR + hgt + cageH, -len * 0.08);
+      const top1 = box(scene, "atv_cage_top_l", 0.08, 0.08, len * 0.25, root, matAccent);
+      top1.position.set(-wid * 0.42, wheelR + hgt + cageH, -len * 0.20);
+      const top2 = box(scene, "atv_cage_top_r", 0.08, 0.08, len * 0.25, root, matAccent);
+      top2.position.set(wid * 0.42, wheelR + hgt + cageH, -len * 0.20);
       const cross = box(scene, "atv_cage_cross", wid * 0.92, 0.08, 0.08, root, matAccent);
-      cross.position.set(0, wheelR + hgt + cageH, len * 0.15);
+      cross.position.set(0, wheelR + hgt + cageH, -len * 0.32);
     }
 
     // Wheels

@@ -137,6 +137,7 @@ export const Game: React.FC = () => {
     level: 1,
   });
   const [playerUpgradeInfo, setPlayerUpgradeInfo] = useState<PlayerUpgradeInfo[]>([]);
+  const [inVehicle, setInVehicle] = useState(false);
   const [currentWeapon, setCurrentWeapon] = useState<Weapon | null>(null);
   const [ammo, setAmmo] = useState(50);
   const [maxAmmo, setMaxAmmo] = useState(50);
@@ -772,6 +773,9 @@ export const Game: React.FC = () => {
 
           vehicleSystem.update(dt);
           player.update(dt);
+          // Amplify weapons while mounted in a vehicle (1.5x size/damage/explosion).
+          const mounted = player.isMounted();
+          weapons.setVehicleMode(mounted);
           const playerPos = player.getPosition();
 
           combatSystem.update(dt);
@@ -1001,6 +1005,7 @@ export const Game: React.FC = () => {
 
           setStats(player.getStats());
           setPlayerUpgradeInfo(player.getPlayerUpgradeInfo());
+          setInVehicle(mounted);
           setEnemyCount(enemySystem.getEnemyCount());
           setChestCount(chestSystem.getChestCount());
           setJetpackFuel(player.getJetpackFuel());
@@ -1184,6 +1189,7 @@ export const Game: React.FC = () => {
       stamina: 100, maxStamina: 100, credits: 0, experience: 0, level: 1,
     });
     setPlayerUpgradeInfo([]);
+    setInVehicle(false);
     setWaveNumber(1);
     setComboInfo(null);
     setSpecialWeaponInfo([]);
@@ -1625,6 +1631,7 @@ export const Game: React.FC = () => {
           activeShop={activeShop}
           onShopBuy={handleShopBuy}
           buildMode={buildMode}
+          inVehicle={inVehicle}
           hotbarBlocks={hotbarBlocks}
           selectedBlock={selectedBlock}
           selectedBlockDef={selectedBlockDef}

@@ -96,6 +96,7 @@ export class WeaponsSystem {
   private camera: BABYLON.FreeCamera;
   private weapons: Map<WeaponType, Weapon> = new Map();
   private currentWeapon: WeaponType = "pistol";
+  private vehicleMode: boolean = false;
   private projectiles: Projectile[] = [];
   private lastFireTime: number = 0;
   private isFiring: boolean = false;
@@ -198,12 +199,17 @@ export class WeaponsSystem {
     });
   }
 
+  setVehicleMode(active: boolean): void {
+    this.vehicleMode = active;
+  }
+
   private fire(): void {
     const weapon = this.weapons.get(this.currentWeapon);
     if (!weapon) return;
 
+    const fireRateMul = this.vehicleMode ? 1 / 1.25 : 1; // 25% faster cycle in vehicle
     const now = Date.now();
-    if (now - this.lastFireTime < weapon.fireRate) return;
+    if (now - this.lastFireTime < weapon.fireRate * fireRateMul) return;
 
     this.lastFireTime = now;
     weapon.ammo = weapon.maxAmmo;
@@ -221,44 +227,49 @@ export class WeaponsSystem {
 
   private createProjectile(weapon: Weapon): void {
     const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
-    
+
     const spreadX = (Math.random() - 0.5) * weapon.spread;
     const spreadY = (Math.random() - 0.5) * weapon.spread;
     const direction = forward.add(new BABYLON.Vector3(spreadX, spreadY, 0)).normalize();
+
+    // Vehicle amplification: 1.5x size, damage, explosion, and 1.25x speed.
+    const sizeMul = this.vehicleMode ? 1.5 : 1;
+    const dmgMul = this.vehicleMode ? 1.5 : 1;
+    const speedMul = this.vehicleMode ? 1.25 : 1;
 
     let projectileMesh: BABYLON.Mesh;
     let color: BABYLON.Color3;
 
     switch (weapon.type) {
       case "pistol":
-        projectileMesh = BABYLON.MeshBuilder.CreateSphere("projectile", { diameter: 0.1 }, this.scene);
+        projectileMesh = BABYLON.MeshBuilder.CreateSphere("projectile", { diameter: 0.1 * sizeMul }, this.scene);
         color = new BABYLON.Color3(0, 1, 1);
         break;
       case "rifle":
-        projectileMesh = BABYLON.MeshBuilder.CreateCylinder("projectile", { height: 0.3, diameter: 0.05 }, this.scene);
+        projectileMesh = BABYLON.MeshBuilder.CreateCylinder("projectile", { height: 0.3 * sizeMul, diameter: 0.05 * sizeMul }, this.scene);
         projectileMesh.rotation.x = Math.PI / 2;
         color = new BABYLON.Color3(1, 0.5, 0);
         break;
       case "shotgun":
-        projectileMesh = BABYLON.MeshBuilder.CreateSphere("projectile", { diameter: 0.08 }, this.scene);
+        projectileMesh = BABYLON.MeshBuilder.CreateSphere("projectile", { diameter: 0.08 * sizeMul }, this.scene);
         color = new BABYLON.Color3(1, 1, 0);
         break;
       case "rocket":
-        projectileMesh = BABYLON.MeshBuilder.CreateCylinder("projectile", { height: 0.5, diameter: 0.15 }, this.scene);
+        projectileMesh = BABYLON.MeshBuilder.CreateCylinder("projectile", { height: 0.5 * sizeMul, diameter: 0.15 * sizeMul }, this.scene);
         projectileMesh.rotation.x = Math.PI / 2;
         color = new BABYLON.Color3(1, 0.2, 0);
         break;
       case "laser":
-        projectileMesh = BABYLON.MeshBuilder.CreateCylinder("projectile", { height: 2, diameter: 0.03 }, this.scene);
+        projectileMesh = BABYLON.MeshBuilder.CreateCylinder("projectile", { height: 2 * sizeMul, diameter: 0.03 * sizeMul }, this.scene);
         projectileMesh.rotation.x = Math.PI / 2;
         color = new BABYLON.Color3(1, 0, 0);
         break;
       case "grenade":
-        projectileMesh = BABYLON.MeshBuilder.CreateSphere("projectile", { diameter: 0.2 }, this.scene);
+        projectileMesh = BABYLON.MeshBuilder.CreateSphere("projectile", { diameter: 0.2 * sizeMul }, this.scene);
         color = new BABYLON.Color3(0.5, 1, 0);
         break;
       default:
-        projectileMesh = BABYLON.MeshBuilder.CreateSphere("projectile", { diameter: 0.1 }, this.scene);
+        projectileMesh = BABYLON.MeshBuilder.CreateSphere("projectile", { diameter: 0.1 * sizeMul }, this.scene);
         color = new BABYLON.Color3(1, 1, 1);
     }
 
@@ -273,12 +284,12 @@ export class WeaponsSystem {
     const projectile: Projectile = {
       mesh: projectileMesh,
       direction,
-      speed: weapon.projectileSpeed,
-      damage: weapon.damage,
+      speed: weapon.projectileSpeed * speedMul,
+      damage: weapon.damage * dmgMul,
       lifetime: 3000,
       type: weapon.type,
       isExplosive: weapon.type === "rocket" || weapon.type === "grenade",
-      explosionRadius: baseR + (weapon.explosionRadiusBonus || 0),
+      explosionRadius: (baseR + (weapon.explosionRadiusBonus || 0)) * sizeMul,
     };
 
     this.projectiles.push(projectile);

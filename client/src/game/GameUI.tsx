@@ -51,6 +51,7 @@ interface GameUIProps {
   onShopBuy?: (itemId: string) => void;
   buildMode?: boolean;
   planMode?: boolean;
+  inVehicle?: boolean;
   prefabHotbar?: PrefabSummary[];
   selectedPrefabIndex?: number;
   hotbarBlocks?: BlockType[];
@@ -147,6 +148,7 @@ export const GameUI: React.FC<GameUIProps> = ({
   activeShop = null,
   onShopBuy,
   buildMode = false,
+  inVehicle = false,
   planMode = false,
   prefabHotbar = [],
   selectedPrefabIndex = 0,
@@ -215,8 +217,33 @@ export const GameUI: React.FC<GameUIProps> = ({
     shopOpen ||
     showLobby;
   const shieldRegenLow = stats.maxShield > 0 && stats.shield < stats.maxShield;
+  const showCrosshair = !anyModalOpen && !buildMode && !planMode;
+  const crosshairSize = inVehicle ? 36 : 24;
+  const crosshairColor = inVehicle ? "#fbbf24" : "#67e8f9";
   return (
     <div className="fixed inset-0 pointer-events-none" style={{ fontFamily: "'Press Start 2P', monospace", zIndex: 20 }}>
+      {showCrosshair && (
+        <div
+          className="absolute top-1/2 left-1/2"
+          style={{
+            transform: "translate(-50%, -50%)",
+            width: crosshairSize,
+            height: crosshairSize,
+            pointerEvents: "none",
+          }}
+        >
+          <svg width={crosshairSize} height={crosshairSize} viewBox="0 0 36 36">
+            <circle cx="18" cy="18" r="1.6" fill={crosshairColor} style={{ filter: `drop-shadow(0 0 3px ${crosshairColor})` }} />
+            <line x1="18" y1="2" x2="18" y2="10" stroke={crosshairColor} strokeWidth="1.5" style={{ filter: `drop-shadow(0 0 2px ${crosshairColor})` }} />
+            <line x1="18" y1="26" x2="18" y2="34" stroke={crosshairColor} strokeWidth="1.5" style={{ filter: `drop-shadow(0 0 2px ${crosshairColor})` }} />
+            <line x1="2" y1="18" x2="10" y2="18" stroke={crosshairColor} strokeWidth="1.5" style={{ filter: `drop-shadow(0 0 2px ${crosshairColor})` }} />
+            <line x1="26" y1="18" x2="34" y2="18" stroke={crosshairColor} strokeWidth="1.5" style={{ filter: `drop-shadow(0 0 2px ${crosshairColor})` }} />
+            {inVehicle && (
+              <circle cx="18" cy="18" r="14" fill="none" stroke={crosshairColor} strokeWidth="1" strokeDasharray="2,3" opacity="0.8" />
+            )}
+          </svg>
+        </div>
+      )}
       <div
         className="absolute top-4 left-4 bg-black/85 border-[3px] border-cyan-400 p-5 rounded-xl"
         style={{ boxShadow: "0 0 18px rgba(34,211,238,0.45), 0 4px 24px rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
