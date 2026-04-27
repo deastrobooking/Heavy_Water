@@ -269,6 +269,65 @@ export class MapSystem {
     return { x, y };
   }
 
+  /** If `targetWorldPos` falls outside the mini-map's visible window, return
+   *  the on-border point + heading (radians) of an arrow that points toward
+   *  it. Returns null when the target is on-screen or degenerate. The
+   *  origin used for the ray is the player's icon when it's on-screen, with
+   *  a fallback to the map center if the player too is off-window — that
+   *  way arrows still appear in a sensible direction in edge cases. */
+  private computeEdgeArrow(
+    targetWorldPos: BABYLON.Vector3
+  ): { x: number; y: number; angle: number } | null {
+    const w = this.mapCanvas.width;
+    const h = this.mapCanvas.height;
+    const target = this.worldToMapCoords(targetWorldPos);
+    if (target.x >= 0 && target.x <= w && target.y >= 0 && target.y <= h) {
+      return null;
+    }
+
+    // Inset so the rotated arrow head still fits inside the border frame
+    // and isn't clipped at the corners.
+    const inset = 10;
+    const minX = inset;
+    const maxX = w - inset;
+    const minY = inset;
+    const maxY = h - inset;
+
+    // Use the player as the ray origin only when the icon is fully inside
+    // the mini-map; otherwise fall back to the map center for both axes.
+    // Mixing axes (player.x but center.y, etc.) can produce arrows that
+    // point to the wrong side when the player is near a border.
+    const player = this.worldToMapCoords(this.playerWorldPos);
+    const playerOnScreen =
+      player.x >= 0 && player.x <= w && player.y >= 0 && player.y <= h;
+    let ox = playerOnScreen ? player.x : w / 2;
+    let oy = playerOnScreen ? player.y : h / 2;
+
+    // Clamp the origin into the inset rect so the border-intersection math
+    // always yields a positive t. Without this, a player hugging the very
+    // edge of the map could produce a negative t and we'd lose the arrow
+    // for a perfectly valid off-screen target.
+    ox = Math.min(maxX, Math.max(minX, ox));
+    oy = Math.min(maxY, Math.max(minY, oy));
+
+    const dx = target.x - ox;
+    const dy = target.y - oy;
+    if (dx === 0 && dy === 0) return null;
+
+    let t = Infinity;
+    if (dx > 0) t = Math.min(t, (maxX - ox) / dx);
+    else if (dx < 0) t = Math.min(t, (minX - ox) / dx);
+    if (dy > 0) t = Math.min(t, (maxY - oy) / dy);
+    else if (dy < 0) t = Math.min(t, (minY - oy) / dy);
+    if (!isFinite(t) || t <= 0) return null;
+
+    return {
+      x: ox + dx * t,
+      y: oy + dy * t,
+      angle: Math.atan2(dy, dx),
+    };
+  }
+
   draw(): void {
     if (!this.isVisible) return;
 
@@ -347,32 +406,70 @@ export class MapSystem {
     // Enemy bases: bold red diamonds with a black outline. Cleared bases
     // (vault destroyed) drop to a dim hollow marker so the player can still
     // see "I've been here" without the icon screaming for attention.
+    // Off-screen bases get a small directional arrow clamped to the border
+    // so the player can orient toward the next objective from any spot.
     for (const base of this.bases) {
       const coords = this.worldToMapCoords(base.position);
-      if (coords.x < 0 || coords.x > width || coords.y < 0 || coords.y > height) continue;
+      const onScreen =
+        coords.x >= 0 && coords.x <= width && coords.y >= 0 && coords.y <= height;
       const falloff = this.distanceFalloff(base.position);
-      // Bases stay readable further out than caches — they're the biggest
-      // landmarks on the map, so we floor their scale a bit higher.
-      const scale = Math.max(0.6, falloff.scale);
-      const alpha = base.alive ? Math.max(0.55, falloff.alpha) : 0.35;
-      const size = 6 * scale;
-      ctx.globalAlpha = alpha;
-      ctx.beginPath();
-      ctx.moveTo(coords.x, coords.y - size);
-      ctx.lineTo(coords.x + size, coords.y);
-      ctx.lineTo(coords.x, coords.y + size);
-      ctx.lineTo(coords.x - size, coords.y);
-      ctx.closePath();
-      if (base.alive) {
-        ctx.fillStyle = "rgba(255, 60, 60, 1)";
-        ctx.fill();
-        ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+
+      if (onScreen) {
+        // Bases stay readable further out than caches — they're the biggest
+        // landmarks on the map, so we floor their scale a bit higher.
+        const scale = Math.max(0.6, falloff.scale);
+        const alpha = base.alive ? Math.max(0.55, falloff.alpha) : 0.35;
+        const size = 6 * scale;
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.moveTo(coords.x, coords.y - size);
+        ctx.lineTo(coords.x + size, coords.y);
+        ctx.lineTo(coords.x, coords.y + size);
+        ctx.lineTo(coords.x - size, coords.y);
+        ctx.closePath();
+        if (base.alive) {
+          ctx.fillStyle = "rgba(255, 60, 60, 1)";
+          ctx.fill();
+          ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        } else {
+          ctx.strokeStyle = "rgba(120, 60, 60, 0.9)";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
       } else {
-        ctx.strokeStyle = "rgba(120, 60, 60, 0.9)";
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+        const arrow = this.computeEdgeArrow(base.position);
+        if (!arrow) continue;
+        // Edge arrows shrink/fade with distance like the icons but keep a
+        // higher floor so a far-off base is still visible at the border.
+        // Cleared bases use a dim variant so they don't compete with live
+        // objectives for the player's attention.
+        const scale = Math.max(0.7, falloff.scale);
+        const alpha = base.alive ? Math.max(0.55, falloff.alpha) : 0.28;
+        const len = 7 * scale;
+        const wid = 5 * scale;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(arrow.x, arrow.y);
+        ctx.rotate(arrow.angle);
+        ctx.beginPath();
+        ctx.moveTo(len, 0);
+        ctx.lineTo(-len * 0.6, -wid);
+        ctx.lineTo(-len * 0.6, wid);
+        ctx.closePath();
+        if (base.alive) {
+          ctx.fillStyle = "rgba(255, 80, 80, 1)";
+          ctx.fill();
+          ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        } else {
+          ctx.strokeStyle = "rgba(140, 80, 80, 0.9)";
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+        }
+        ctx.restore();
       }
     }
     ctx.globalAlpha = 1;
