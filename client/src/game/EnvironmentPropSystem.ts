@@ -419,6 +419,26 @@ export class EnvironmentPropSystem {
   static readonly MAX_PROPS = 220;
 
   /**
+   * Distance-based visual culling thresholds (squared, world units).
+   *
+   * Props farther than `CULL_DISTANCE_SQ` from the player have their visual
+   * root `setEnabled(false)`, which cheaply removes the entire mesh group
+   * (body + braces + glow + decorations + hitbox child) from rendering AND
+   * picking. They re-enable once the player gets back within
+   * `SHOW_DISTANCE_SQ` (slight hysteresis prevents per-frame flicker for
+   * props sitting right on the boundary).
+   *
+   * Hitboxes are parented to the root, so disabled props are also skipped
+   * by Babylon's picking (weapon raycasts ignore disabled meshes). The
+   * ATV ram loop in Game.tsx still iterates every alive hitbox but does
+   * its own ~2.6m proximity check, so far disabled props bail out cheaply.
+   * Either way, at 200m+ neither weapons nor a ramming ATV could realistically
+   * hit, so gating these interactions at the same threshold is deliberate.
+   */
+  private static readonly CULL_DISTANCE_SQ = 200 * 200;
+  private static readonly SHOW_DISTANCE_SQ = 195 * 195;
+
+  /**
    * Helper: spawn a small cluster of mixed props at `center`.
    *
    * `theme` biases the prop pool so areas feel distinct:
@@ -976,6 +996,41 @@ export class EnvironmentPropSystem {
       if (!p.damageable.isAlive) {
         this.props.splice(i, 1);
         continue;
+      }
+
+      // ---- Distance-based visual culling ----
+      // Cheap squared-distance check; no sqrt. Disabling the root naturally
+      // cascades to all child meshes (visuals + hitbox) so Babylon skips
+      // rendering and picking for far props. We also skip the rest of the
+      // per-frame work (rattle, smoke, holo pulse, open-container loot)
+      // for hidden props — none of it is observable from 200m+ away.
+      const dxCull = ppos.x - p.position.x;
+      const dyCull = ppos.y - p.position.y;
+      const dzCull = ppos.z - p.position.z;
+      const distSq = dxCull * dxCull + dyCull * dyCull + dzCull * dzCull;
+      const wasEnabled = p.root.isEnabled(false);
+      if (wasEnabled && distSq > EnvironmentPropSystem.CULL_DISTANCE_SQ) {
+        // Snap any in-flight rattle back to anchor before hiding so the prop
+        // doesn't pop back into view at an offset position next time.
+        if (p.rattleUntil) {
+          p.root.position.copyFrom(p.position);
+          if (p.kind === "open_container") p.root.rotation.z = 0;
+          p.rattleUntil = undefined;
+          p.rattleDuration = undefined;
+          p.rattleAmp = undefined;
+        }
+        // Clear smoke timer so we don't dump a backlog of puffs on re-enable.
+        p.nextSmokeAt = undefined;
+        p.root.setEnabled(false);
+        continue;
+      }
+      if (!wasEnabled) {
+        if (distSq < EnvironmentPropSystem.SHOW_DISTANCE_SQ) {
+          p.root.setEnabled(true);
+        } else {
+          // Still hidden — skip all per-frame work below.
+          continue;
+        }
       }
 
       // ---- Rattle / impact-shake (kinematic, never persists into anchor) ----
