@@ -46,6 +46,7 @@ export const GameEvents = {
   PLAYER_DODGE: "player:dodge",
   PLAYER_PARRY: "player:parry",
   PLAYER_LEVEL_UP: "player:levelUp",
+  PLAYER_UPGRADED: "player:upgraded",
   PLAYER_STAMINA_CHANGED: "player:staminaChanged",
 
   ENEMY_DAMAGED: "enemy:damaged",

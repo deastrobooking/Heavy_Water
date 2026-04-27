@@ -14,11 +14,46 @@ export interface PlayerStats {
   maxHealth: number;
   armor: number;
   maxArmor: number;
+  shield: number;
+  maxShield: number;
+  shieldRegenRate: number;
+  shieldRegenDelay: number;
   stamina: number;
   maxStamina: number;
   credits: number;
   experience: number;
   level: number;
+}
+
+export interface PlayerUpgradeDef {
+  id: string;
+  name: string;
+  description: string;
+  baseAmount: number;
+  baseCost: number;
+  costGrowth: number;
+  maxLevel: number;
+}
+
+export interface PlayerUpgradeInfo extends PlayerUpgradeDef {
+  level: number;
+  cost: number;
+  current: number;
+  next: number;
+  affordable: boolean;
+  maxed: boolean;
+}
+
+export const PLAYER_UPGRADES: PlayerUpgradeDef[] = [
+  { id: "maxHealth",         name: "Max Health",      description: "Increase total health pool",     baseAmount:  25, baseCost: 200, costGrowth: 0.6, maxLevel: 10 },
+  { id: "maxArmor",          name: "Max Armor",       description: "Increase armor capacity (70% absorb)", baseAmount: 15, baseCost: 200, costGrowth: 0.6, maxLevel: 10 },
+  { id: "maxShield",         name: "Max Shield",      description: "Increase recharging shield pool",baseAmount:  20, baseCost: 250, costGrowth: 0.6, maxLevel: 10 },
+  { id: "shieldRegenRate",   name: "Shield Regen",    description: "Faster shield restore per second",baseAmount:  5, baseCost: 300, costGrowth: 0.5, maxLevel:  8 },
+  { id: "shieldRegenDelay",  name: "Recharge Speed",  description: "Less delay before shield regenerates", baseAmount: -0.3, baseCost: 400, costGrowth: 0.5, maxLevel: 5 },
+];
+
+function upgradeCost(def: PlayerUpgradeDef, level: number): number {
+  return Math.floor(def.baseCost * (1 + level * def.costGrowth));
 }
 
 export class PlayerController implements IDamageable {
@@ -78,6 +113,9 @@ export class PlayerController implements IDamageable {
   private invulnerabilityTimer: number = 0;
   private cameraMode: "first" | "third" = "first";
 
+  private shieldRegenCooldown: number = 0;
+  private playerUpgradeLevels: Record<string, number> = {};
+
   setCameraMode(mode: "first" | "third"): void {
     this.cameraMode = mode;
   }
@@ -130,6 +168,10 @@ export class PlayerController implements IDamageable {
       maxHealth: 250,
       armor: 100,
       maxArmor: 100,
+      shield: 75,
+      maxShield: 75,
+      shieldRegenRate: 15,
+      shieldRegenDelay: 3,
       stamina: 100,
       maxStamina: 100,
       credits: 0,
@@ -446,6 +488,7 @@ export class PlayerController implements IDamageable {
     this.stateMachine.update(deltaTime);
     this.updateTimers(deltaTime);
     this.updateStamina(deltaTime);
+    this.updateShield(deltaTime);
 
     if (this.isFlying) {
       this.updateFlight(deltaTime);
@@ -484,6 +527,19 @@ export class PlayerController implements IDamageable {
       if (this.parryTimer <= 0) {
         this.isParrying = false;
       }
+    }
+  }
+
+  private updateShield(dt: number): void {
+    if (this.shieldRegenCooldown > 0) {
+      this.shieldRegenCooldown -= dt;
+      return;
+    }
+    if (this.stats.shield < this.stats.maxShield) {
+      this.stats.shield = Math.min(
+        this.stats.maxShield,
+        this.stats.shield + this.stats.shieldRegenRate * dt,
+      );
     }
   }
 
@@ -797,10 +853,25 @@ export class PlayerController implements IDamageable {
       amount *= (1 - resistance.resistancePercent);
     }
 
-    if (this.stats.armor > 0) {
+    this.shieldRegenCooldown = this.stats.shieldRegenDelay;
+
+    if (this.stats.shield > 0 && amount > 0) {
+      const shieldAbsorb = Math.min(this.stats.shield, amount);
+      this.stats.shield -= shieldAbsorb;
+      amount -= shieldAbsorb;
+      this.bus.emit(GameEvents.PLAYER_DAMAGED, { amount: shieldAbsorb, remaining: this.stats.health, viaShield: true });
+    }
+
+    if (this.stats.armor > 0 && amount > 0) {
       const armorAbsorb = Math.min(this.stats.armor, amount * 0.7);
       this.stats.armor -= armorAbsorb;
       amount -= armorAbsorb;
+    }
+
+    if (amount <= 0) {
+      this.invulnerabilityTimer = 0.2;
+      this.isInvulnerable = true;
+      return { damageAmount: 0, wasKilled: false, wasBlocked: true, wasParried: false };
     }
 
     amount = Math.max(1, amount);
@@ -842,6 +913,8 @@ export class PlayerController implements IDamageable {
     this.stats.health = this.stats.maxHealth;
     this.health = this.stats.health;
     this.stats.armor = this.stats.maxArmor;
+    this.stats.shield = this.stats.maxShield;
+    this.shieldRegenCooldown = 0;
     this.stats.stamina = this.stats.maxStamina;
     this.armorEnergy = this.maxArmorEnergy;
     this.jetpackFuel = this.maxJetpackFuel;
@@ -855,12 +928,20 @@ export class PlayerController implements IDamageable {
     this.bus.emit(GameEvents.PLAYER_HEALED, { amount: this.stats.maxHealth, health: this.stats.health });
   }
 
-  applyLoadedSnapshot(snap: { stats?: Partial<PlayerStats>; hasFlightArmor?: boolean }): void {
+  applyLoadedSnapshot(snap: { stats?: Partial<PlayerStats>; hasFlightArmor?: boolean; playerUpgrades?: Record<string, number> }): void {
+    if (snap.playerUpgrades) {
+      this.playerUpgradeLevels = { ...snap.playerUpgrades };
+      this.recomputeUpgradeStats();
+    }
     if (snap.stats) {
       if (typeof snap.stats.maxHealth === "number") {
         this.stats.maxHealth = snap.stats.maxHealth;
         this.maxHealth = snap.stats.maxHealth;
       }
+      if (typeof snap.stats.maxArmor === "number") this.stats.maxArmor = snap.stats.maxArmor;
+      if (typeof snap.stats.maxShield === "number") this.stats.maxShield = snap.stats.maxShield;
+      if (typeof snap.stats.shieldRegenRate === "number") this.stats.shieldRegenRate = snap.stats.shieldRegenRate;
+      if (typeof snap.stats.shieldRegenDelay === "number") this.stats.shieldRegenDelay = snap.stats.shieldRegenDelay;
       if (typeof snap.stats.maxStamina === "number") this.stats.maxStamina = snap.stats.maxStamina;
       if (typeof snap.stats.credits === "number") this.stats.credits = snap.stats.credits;
       if (typeof snap.stats.experience === "number") this.stats.experience = snap.stats.experience;
@@ -870,10 +951,98 @@ export class PlayerController implements IDamageable {
       this.health = this.stats.health;
       this.stats.stamina = this.stats.maxStamina;
       this.stats.armor = this.stats.maxArmor;
+      this.stats.shield = this.stats.maxShield;
+      this.shieldRegenCooldown = 0;
     }
     if (snap.hasFlightArmor && !this.hasFlightArmor) {
       this.hasFlightArmor = true;
     }
+  }
+
+  private getBaseStat(id: string): number {
+    switch (id) {
+      case "maxHealth": return 250;
+      case "maxArmor": return 100;
+      case "maxShield": return 75;
+      case "shieldRegenRate": return 15;
+      case "shieldRegenDelay": return 3;
+      default: return 0;
+    }
+  }
+
+  private applyStatFromUpgrade(id: string, value: number): void {
+    switch (id) {
+      case "maxHealth":
+        this.stats.maxHealth = value;
+        this.maxHealth = value;
+        if (this.stats.health > value) this.stats.health = value;
+        this.health = this.stats.health;
+        break;
+      case "maxArmor":
+        this.stats.maxArmor = value;
+        if (this.stats.armor > value) this.stats.armor = value;
+        break;
+      case "maxShield":
+        this.stats.maxShield = value;
+        if (this.stats.shield > value) this.stats.shield = value;
+        break;
+      case "shieldRegenRate":
+        this.stats.shieldRegenRate = value;
+        break;
+      case "shieldRegenDelay":
+        this.stats.shieldRegenDelay = Math.max(0.5, value);
+        break;
+    }
+  }
+
+  private recomputeUpgradeStats(): void {
+    for (const def of PLAYER_UPGRADES) {
+      const lvl = this.playerUpgradeLevels[def.id] ?? 0;
+      const value = this.getBaseStat(def.id) + def.baseAmount * lvl;
+      this.applyStatFromUpgrade(def.id, value);
+    }
+  }
+
+  getPlayerUpgradeLevels(): Record<string, number> {
+    return { ...this.playerUpgradeLevels };
+  }
+
+  getPlayerUpgradeInfo(): PlayerUpgradeInfo[] {
+    return PLAYER_UPGRADES.map(def => {
+      const level = this.playerUpgradeLevels[def.id] ?? 0;
+      const maxed = level >= def.maxLevel;
+      const cost = maxed ? 0 : upgradeCost(def, level);
+      const current = this.getBaseStat(def.id) + def.baseAmount * level;
+      const next = current + def.baseAmount;
+      return {
+        ...def,
+        level,
+        cost,
+        current,
+        next,
+        affordable: !maxed && this.stats.credits >= cost,
+        maxed,
+      };
+    });
+  }
+
+  upgradePlayerStat(id: string): boolean {
+    const def = PLAYER_UPGRADES.find(d => d.id === id);
+    if (!def) return false;
+    const level = this.playerUpgradeLevels[id] ?? 0;
+    if (level >= def.maxLevel) return false;
+    const cost = upgradeCost(def, level);
+    if (this.stats.credits < cost) return false;
+    this.stats.credits -= cost;
+    this.playerUpgradeLevels[id] = level + 1;
+    const value = this.getBaseStat(id) + def.baseAmount * (level + 1);
+    this.applyStatFromUpgrade(id, value);
+    // Top off newly added pool when upgrading capacity
+    if (id === "maxShield") this.stats.shield = this.stats.maxShield;
+    if (id === "maxArmor") this.stats.armor = this.stats.maxArmor;
+    if (id === "maxHealth") this.stats.health = this.stats.maxHealth;
+    this.bus.emit(GameEvents.PLAYER_UPGRADED, { id, level: level + 1 });
+    return true;
   }
 
   heal(amount: number): void {

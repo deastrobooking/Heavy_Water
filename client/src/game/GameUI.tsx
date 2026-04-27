@@ -8,6 +8,7 @@ import { PrefabSummary } from "./PrefabSystem";
 import { CompanionUpgradeInfo } from "./CompanionSystem";
 import { CapturedCreature } from "./BioCreatureSystem";
 import { UpgradeMenu } from "./UpgradeMenu";
+import type { PlayerUpgradeInfo } from "./PlayerController";
 import { LabUI, LabBlueprint } from "./LabUI";
 import { GardenCaptureUI } from "./GardenCaptureUI";
 
@@ -58,11 +59,13 @@ interface GameUIProps {
   upgradeMenuOpen?: boolean;
   upgradeMenuWeapons?: WeaponUpgradeInfo[];
   upgradeMenuCompanions?: CompanionUpgradeInfo[];
+  upgradeMenuPlayer?: PlayerUpgradeInfo[];
   upgradeMenuResources?: { gears: number; scrap: number; cores: number; circuits: number; nanofiber: number };
   upgradeMenuPartCounts?: Record<string, number>;
   onUpgradeMenuClose?: () => void;
   onUpgradeWeapon?: (type: string) => void;
   onUpgradeCompanion?: (id: string) => void;
+  onUpgradePlayer?: (id: string) => void;
   labOpen?: boolean;
   labLevel?: number;
   labBlueprints?: LabBlueprint[];
@@ -153,11 +156,13 @@ export const GameUI: React.FC<GameUIProps> = ({
   upgradeMenuOpen = false,
   upgradeMenuWeapons = [],
   upgradeMenuCompanions = [],
+  upgradeMenuPlayer = [],
   upgradeMenuResources = { gears: 0, scrap: 0, cores: 0, circuits: 0, nanofiber: 0 },
   upgradeMenuPartCounts = {},
   onUpgradeMenuClose,
   onUpgradeWeapon,
   onUpgradeCompanion,
+  onUpgradePlayer,
   labOpen = false,
   labLevel = 1,
   labBlueprints = [],
@@ -209,8 +214,9 @@ export const GameUI: React.FC<GameUIProps> = ({
     capsuleOpen ||
     shopOpen ||
     showLobby;
+  const shieldRegenLow = stats.maxShield > 0 && stats.shield < stats.maxShield;
   return (
-    <div className="fixed inset-0 pointer-events-none" style={{ fontFamily: "'Press Start 2P', monospace" }}>
+    <div className="fixed inset-0 pointer-events-none" style={{ fontFamily: "'Press Start 2P', monospace", zIndex: 20 }}>
       <div
         className="absolute top-4 left-4 bg-black/85 border-[3px] border-cyan-400 p-5 rounded-xl"
         style={{ boxShadow: "0 0 18px rgba(34,211,238,0.45), 0 4px 24px rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
@@ -218,6 +224,25 @@ export const GameUI: React.FC<GameUIProps> = ({
         <div className="text-cyan-300 text-sm font-bold mb-3 tracking-widest" style={{ textShadow: "0 0 8px rgba(34,211,238,0.7)" }}>
           HEAVY WATER
         </div>
+
+        {stats.maxShield > 0 && (
+          <div className="mb-3">
+            <div className="flex items-baseline justify-between mb-1">
+              <div className="text-cyan-300 text-sm font-bold tracking-wider" style={{ textShadow: "0 0 6px rgba(103,232,249,0.7)" }}>
+                SHIELD {shieldRegenLow && <span className="text-cyan-200 text-[10px] ml-1 animate-pulse">RECHARGING</span>}
+              </div>
+              <div className="text-cyan-200 text-base font-bold tabular-nums" style={{ textShadow: "0 0 4px rgba(0,0,0,0.9)" }}>
+                {Math.floor(stats.shield)}<span className="text-cyan-500/70 text-xs">/{Math.floor(stats.maxShield)}</span>
+              </div>
+            </div>
+            <div className="w-72 h-5 bg-gray-900 border-2 border-cyan-400 rounded-md overflow-hidden" style={{ boxShadow: "inset 0 0 6px rgba(0,0,0,0.7)" }}>
+              <div
+                className="h-full bg-gradient-to-r from-cyan-700 via-cyan-400 to-cyan-200 transition-all"
+                style={{ width: `${(stats.shield / stats.maxShield) * 100}%`, boxShadow: "0 0 12px rgba(103,232,249,0.85)" }}
+              />
+            </div>
+          </div>
+        )}
 
         <div className="mb-3">
           <div className="flex items-baseline justify-between mb-1">
@@ -623,10 +648,13 @@ export const GameUI: React.FC<GameUIProps> = ({
         open={upgradeMenuOpen}
         weapons={upgradeMenuWeapons}
         companions={upgradeMenuCompanions}
+        playerUpgrades={upgradeMenuPlayer}
+        playerCredits={stats.credits}
         resources={upgradeMenuResources}
         partCounts={upgradeMenuPartCounts}
         onUpgradeWeapon={(t) => onUpgradeWeapon?.(t)}
         onUpgradeCompanion={(id) => onUpgradeCompanion?.(id)}
+        onUpgradePlayer={(id) => onUpgradePlayer?.(id)}
         onClose={() => onUpgradeMenuClose?.()}
       />
 

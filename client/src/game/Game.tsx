@@ -3,7 +3,7 @@ import * as BABYLON from "@babylonjs/core";
 import "@babylonjs/loaders";
 import { BabylonEngine } from "./BabylonEngine";
 import { CityGenerator } from "./CityGenerator";
-import { PlayerController, PlayerStats } from "./PlayerController";
+import { PlayerController, PlayerStats, PlayerUpgradeInfo } from "./PlayerController";
 import { WeaponsSystem, Weapon } from "./WeaponsSystem";
 import { EnemySystem } from "./EnemySystem";
 import { AerialEnemySystem } from "./AerialEnemySystem";
@@ -126,12 +126,17 @@ export const Game: React.FC = () => {
     maxHealth: 250,
     armor: 100,
     maxArmor: 100,
+    shield: 75,
+    maxShield: 75,
+    shieldRegenRate: 15,
+    shieldRegenDelay: 3,
     stamina: 100,
     maxStamina: 100,
     credits: 0,
     experience: 0,
     level: 1,
   });
+  const [playerUpgradeInfo, setPlayerUpgradeInfo] = useState<PlayerUpgradeInfo[]>([]);
   const [currentWeapon, setCurrentWeapon] = useState<Weapon | null>(null);
   const [ammo, setAmmo] = useState(50);
   const [maxAmmo, setMaxAmmo] = useState(50);
@@ -642,6 +647,7 @@ export const Game: React.FC = () => {
           return {
             stats: player.getStats(),
             weaponLevels: weapons.getWeaponLevels(),
+            playerUpgrades: player.getPlayerUpgradeLevels(),
             inventoryCounts,
             hasFlightArmor: player.getHasFlightArmor(),
             totalKills: totalKillsLocal,
@@ -664,7 +670,7 @@ export const Game: React.FC = () => {
           void loadProgress().then((snap) => {
             if (!snap) return;
             try {
-              player.applyLoadedSnapshot({ stats: snap.stats as any, hasFlightArmor: snap.hasFlightArmor });
+              player.applyLoadedSnapshot({ stats: snap.stats as any, hasFlightArmor: snap.hasFlightArmor, playerUpgrades: snap.playerUpgrades });
               if (snap.weaponLevels) weapons.setWeaponLevels(snap.weaponLevels);
               if (snap.inventoryCounts) {
                 inventory.clear();
@@ -994,6 +1000,7 @@ export const Game: React.FC = () => {
           setRemotePlayerCount(multiplayer.getRemotePlayerCount());
 
           setStats(player.getStats());
+          setPlayerUpgradeInfo(player.getPlayerUpgradeInfo());
           setEnemyCount(enemySystem.getEnemyCount());
           setChestCount(chestSystem.getChestCount());
           setJetpackFuel(player.getJetpackFuel());
@@ -1132,33 +1139,51 @@ export const Game: React.FC = () => {
   }, [showMessage]);
 
   const handleRestart = useCallback(() => {
-    if (combatSystemRef.current) combatSystemRef.current.dispose();
-    if (specialWeaponsRef.current) specialWeaponsRef.current.dispose();
-    if (beamSabreRef.current) beamSabreRef.current.dispose();
-    if (companionRef.current) companionRef.current.dispose();
-    if (capsuleRef.current) capsuleRef.current.dispose();
-    if (shopRef.current) shopRef.current.dispose();
-    if (gardenRef.current) gardenRef.current.dispose();
-    if (mapRef.current) mapRef.current.dispose();
-    if (buildingRef.current) buildingRef.current.dispose();
-    if (prefabRef.current) prefabRef.current.dispose();
-    if (pickupRef.current) pickupRef.current.dispose();
-    if (bioRef.current) bioRef.current.dispose();
-    if (miningRef.current) { miningRef.current.dispose(); miningRef.current = null; }
-    if (enemyBaseRef.current) { enemyBaseRef.current.dispose(); enemyBaseRef.current = null; }
+    // CRITICAL: dispose player FIRST to remove window keydown/keyup listeners.
+    // Without this, the stale PlayerController keeps responding to input
+    // against disposed Babylon meshes, causing the post-restart freeze.
+    if (playerRef.current) { try { playerRef.current.dispose(); } catch {} playerRef.current = null; }
+    weaponsRef.current = null;
+    if (combatSystemRef.current) { try { combatSystemRef.current.dispose(); } catch {} combatSystemRef.current = null; }
+    if (specialWeaponsRef.current) { try { specialWeaponsRef.current.dispose(); } catch {} specialWeaponsRef.current = null; }
+    if (beamSabreRef.current) { try { beamSabreRef.current.dispose(); } catch {} beamSabreRef.current = null; }
+    if (companionRef.current) { try { companionRef.current.dispose(); } catch {} companionRef.current = null; }
+    if (capsuleRef.current) { try { capsuleRef.current.dispose(); } catch {} capsuleRef.current = null; }
+    if (shopRef.current) { try { shopRef.current.dispose(); } catch {} shopRef.current = null; }
+    if (gardenRef.current) { try { gardenRef.current.dispose(); } catch {} gardenRef.current = null; }
+    if (mapRef.current) { try { mapRef.current.dispose(); } catch {} mapRef.current = null; }
+    if (buildingRef.current) { try { buildingRef.current.dispose(); } catch {} buildingRef.current = null; }
+    if (prefabRef.current) { try { prefabRef.current.dispose(); } catch {} prefabRef.current = null; }
+    if (pickupRef.current) { try { pickupRef.current.dispose(); } catch {} pickupRef.current = null; }
+    if (propSystemRef.current) { try { propSystemRef.current.dispose(); } catch {} propSystemRef.current = null; }
+    if (bioRef.current) { try { bioRef.current.dispose(); } catch {} bioRef.current = null; }
+    if (miningRef.current) { try { miningRef.current.dispose(); } catch {} miningRef.current = null; }
+    if (enemyBaseRef.current) { try { enemyBaseRef.current.dispose(); } catch {} enemyBaseRef.current = null; }
+    if (enemyHealthBarsRef.current) { try { enemyHealthBarsRef.current.dispose(); } catch {} enemyHealthBarsRef.current = null; }
+    if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} gamepadRef.current = null; }
+    if (aerialEnemyRef.current) { try { aerialEnemyRef.current.dispose(); } catch {} aerialEnemyRef.current = null; }
+    enemySystemRef.current = null;
+    chestSystemRef.current = null;
+    armorSystemRef.current = null;
+    craftingSystemRef.current = null;
+    inventoryRef.current = null;
+    baseRef.current = null;
+    atvHitCooldownRef.current.clear();
     if (autosaveTimerRef.current !== null) { window.clearInterval(autosaveTimerRef.current); autosaveTimerRef.current = null; }
     if (respawnTimeoutRef.current !== null) { window.clearTimeout(respawnTimeoutRef.current); respawnTimeoutRef.current = null; }
-    if (multiplayerRef.current) multiplayerRef.current.dispose();
+    if (multiplayerRef.current) { try { multiplayerRef.current.dispose(); } catch {} multiplayerRef.current = null; }
     if (engineRef.current) {
-      engineRef.current.dispose();
+      try { engineRef.current.dispose(); } catch {}
       engineRef.current = null;
     }
     initializingRef.current = false;
     EventBus.getInstance().clear();
     setStats({
       health: 250, maxHealth: 250, armor: 100, maxArmor: 100,
+      shield: 75, maxShield: 75, shieldRegenRate: 15, shieldRegenDelay: 3,
       stamina: 100, maxStamina: 100, credits: 0, experience: 0, level: 1,
     });
+    setPlayerUpgradeInfo([]);
     setWaveNumber(1);
     setComboInfo(null);
     setSpecialWeaponInfo([]);
@@ -1286,6 +1311,13 @@ export const Game: React.FC = () => {
     else showMessage("UPGRADE FAILED — INSUFFICIENT RESOURCES", 1500);
     syncResourcesNow();
   }, [showMessage, syncResourcesNow]);
+
+  const handleUpgradePlayer = useCallback((id: string) => {
+    if (!playerRef.current) return;
+    const ok = playerRef.current.upgradePlayerStat(id);
+    if (ok) showMessage(`UPGRADED ${id.toUpperCase()}`, 1500);
+    else showMessage("UPGRADE FAILED — INSUFFICIENT CREDITS", 1500);
+  }, [showMessage]);
 
   const handleUpgradeCompanion = useCallback((id: string) => {
     if (!companionRef.current || !inventoryRef.current) return;
@@ -1599,6 +1631,7 @@ export const Game: React.FC = () => {
           upgradeMenuOpen={upgradeMenuOpen}
           upgradeMenuWeapons={weaponUpgradeInfo}
           upgradeMenuCompanions={companionUpgradeInfo}
+          upgradeMenuPlayer={playerUpgradeInfo}
           upgradeMenuResources={{
             gears: resourceCounts.gears,
             scrap: resourceCounts.scrap,
@@ -1609,6 +1642,7 @@ export const Game: React.FC = () => {
           upgradeMenuPartCounts={partCounts}
           onUpgradeWeapon={handleUpgradeWeapon}
           onUpgradeCompanion={handleUpgradeCompanion}
+          onUpgradePlayer={handleUpgradePlayer}
           onUpgradeMenuClose={() => setUpgradeMenuOpen(false)}
           labOpen={labOpen}
           labLevel={labLevel}

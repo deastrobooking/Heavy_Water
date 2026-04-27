@@ -3,6 +3,7 @@ import type { PlayerStats } from "./PlayerController";
 export interface ProgressSnapshot {
   stats: PlayerStats;
   weaponLevels: Record<string, number>;
+  playerUpgrades?: Record<string, number>;
   inventoryCounts: Record<string, number>;
   hasFlightArmor: boolean;
   totalKills: number;

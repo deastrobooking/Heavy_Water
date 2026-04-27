@@ -1,31 +1,46 @@
 import React, { useState } from "react";
 import type { WeaponUpgradeInfo } from "./WeaponsSystem";
 import type { CompanionUpgradeInfo } from "./CompanionSystem";
+import type { PlayerUpgradeInfo } from "./PlayerController";
 
 interface UpgradeMenuProps {
   open: boolean;
   weapons: WeaponUpgradeInfo[];
   companions: CompanionUpgradeInfo[];
+  playerUpgrades?: PlayerUpgradeInfo[];
+  playerCredits?: number;
   resources: { gears: number; scrap: number; cores: number; circuits: number; nanofiber: number };
   partCounts: Record<string, number>;
   onUpgradeWeapon: (type: string) => void;
   onUpgradeCompanion: (id: string) => void;
+  onUpgradePlayer?: (id: string) => void;
   onClose: () => void;
 }
 
 const formatStat = (n: number, digits = 1) => n.toFixed(digits);
 
+const formatUpgradeValue = (id: string, value: number): string => {
+  switch (id) {
+    case "shieldRegenRate":  return `${value.toFixed(0)}/s`;
+    case "shieldRegenDelay": return `${value.toFixed(1)}s`;
+    default:                  return value.toFixed(0);
+  }
+};
+
 export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
   open,
   weapons,
   companions,
+  playerUpgrades = [],
+  playerCredits = 0,
   resources,
   partCounts,
   onUpgradeWeapon,
   onUpgradeCompanion,
+  onUpgradePlayer,
   onClose,
 }) => {
-  const [tab, setTab] = useState<"weapons" | "robots">("weapons");
+  const [tab, setTab] = useState<"player" | "weapons" | "robots">("player");
   if (!open) return null;
 
   return (
@@ -40,6 +55,7 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
             <div className="text-cyan-500 text-xs">[TAB] to close</div>
           </div>
           <div className="flex gap-3 text-xs font-mono">
+            <Resource label="CREDITS" value={playerCredits} color="yellow" />
             <Resource label="GEARS" value={resources.gears} color="amber" />
             <Resource label="SCRAP" value={resources.scrap} color="zinc" />
             <Resource label="CORES" value={resources.cores} color="cyan" />
@@ -49,11 +65,56 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
         </div>
 
         <div className="flex border-b border-zinc-700">
+          <TabBtn active={tab === "player"} onClick={() => setTab("player")} label="PLAYER" />
           <TabBtn active={tab === "weapons"} onClick={() => setTab("weapons")} label="WEAPONS" />
           <TabBtn active={tab === "robots"} onClick={() => setTab("robots")} label="HELPER ROBOTS" />
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          {tab === "player" && (playerUpgrades.length === 0 ? (
+            <div className="text-center text-zinc-400 py-8 text-sm">No player upgrades available.</div>
+          ) : playerUpgrades.map(p => {
+            const canAfford = p.affordable;
+            return (
+              <div key={p.id} className="bg-zinc-800/80 border border-zinc-700 rounded-lg p-3 hover:border-yellow-500 transition">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3">
+                      <div className="text-white font-bold uppercase">{p.name}</div>
+                      <div className="text-yellow-400 text-xs font-mono">LVL {p.level}/{p.maxLevel}</div>
+                    </div>
+                    <div className="text-zinc-400 text-[11px] mt-1">{p.description}</div>
+                    <div className="grid grid-cols-2 gap-2 mt-2 text-[11px]">
+                      <Stat
+                        label="CURRENT"
+                        cur={formatUpgradeValue(p.id, p.current)}
+                        next={!p.maxed ? formatUpgradeValue(p.id, p.next) : null}
+                        good={p.id === "shieldRegenDelay" ? "down" : "up"}
+                      />
+                    </div>
+                  </div>
+                  <div className="ml-3 text-right min-w-[120px]">
+                    {p.maxed ? (
+                      <div className="text-emerald-400 font-bold text-sm">MAX LEVEL</div>
+                    ) : (
+                      <>
+                        <div className="text-[10px] text-zinc-400">COST:</div>
+                        <div className={`text-xs ${playerCredits >= p.cost ? "text-yellow-300" : "text-red-400"}`}>{p.cost} credits</div>
+                        <button
+                          disabled={!canAfford}
+                          onClick={() => onUpgradePlayer?.(p.id)}
+                          className={`mt-1 px-3 py-1 rounded text-xs font-bold tracking-wider ${canAfford ? "bg-yellow-400 hover:bg-yellow-300 text-black" : "bg-zinc-700 text-zinc-500 cursor-not-allowed"}`}
+                        >
+                          UPGRADE
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          }))}
+
           {tab === "weapons" && weapons.map(w => {
             const partsHave = partCounts[w.type] ?? 0;
             const cost = w.cost;
