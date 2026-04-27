@@ -43,8 +43,8 @@ export class AerialUnit {
 
     if (kind === "fighter") {
       this.maxHealth = 70;
-      this.speed = 14;
-      this.orbitRadius = 28 + Math.random() * 14;
+      this.speed = 8.5;
+      this.orbitRadius = 32 + Math.random() * 14;
       this.orbitAltitude = 22 + Math.random() * 10;
       this.barWidth = 70;
       this.barHeight = 8;
@@ -314,9 +314,9 @@ export class AerialUnit {
       const targetZ = playerPos.z + Math.sin(this.orbitAngle) * this.orbitRadius;
       const targetY = this.orbitAltitude + Math.sin(performance.now() * 0.001 + this.orbitAngle) * 1.5;
 
-      this.hitbox.position.x += (targetX - this.hitbox.position.x) * Math.min(1, dt * 1.8);
-      this.hitbox.position.y += (targetY - this.hitbox.position.y) * Math.min(1, dt * 1.5);
-      this.hitbox.position.z += (targetZ - this.hitbox.position.z) * Math.min(1, dt * 1.8);
+      this.hitbox.position.x += (targetX - this.hitbox.position.x) * Math.min(1, dt * 1.1);
+      this.hitbox.position.y += (targetY - this.hitbox.position.y) * Math.min(1, dt * 1.0);
+      this.hitbox.position.z += (targetZ - this.hitbox.position.z) * Math.min(1, dt * 1.1);
 
       // Face the player
       const toPlayer = playerPos.subtract(this.hitbox.position);
@@ -325,7 +325,7 @@ export class AerialUnit {
       // Fire periodically
       this.fireCooldown -= dt;
       if (this.fireCooldown <= 0) {
-        this.fireCooldown = 1.6 + Math.random() * 1.0;
+        this.fireCooldown = 2.2 + Math.random() * 1.2;
         damageToPlayer += this.fireAtPlayer(playerPos, 12, 0.6);
       }
     } else {

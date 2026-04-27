@@ -573,7 +573,7 @@ export class EnvironmentPropSystem {
         const current = this.materialFlashState.get(key);
         if (!current) return;
         current.inFlight = Math.max(0, current.inFlight - 1);
-        if (!m || m.isDisposed()) return;
+        if (!m || m.isDisposed) return;
         // Only the latest flash gets to restore — earlier timers no-op.
         if (current.token === myToken) {
           m.emissiveColor = current.original;
@@ -1474,7 +1474,7 @@ export class EnvironmentPropSystem {
     }
     for (const p of this.props) this.disposeProp(p);
     this.props = [];
-    this.materials.forEach(m => { if (!m.isDisposed()) m.dispose(); });
+    this.materials.forEach(m => { if (!m.isDisposed) m.dispose(); });
     this.materials.clear();
     this.materialFlashState.clear();
     console.log("[EnvironmentPropSystem] Disposed");
