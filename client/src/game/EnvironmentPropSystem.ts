@@ -291,6 +291,21 @@ export class EnvironmentPropSystem {
     }));
   }
 
+  /** Returns positions of every "supply cache" open container with its
+   *  current looted state. Open containers are not destroyed when looted —
+   *  they simply mark `alreadyLooted` and stop yielding pickups — so this
+   *  exposes that flag for HUD/minimap consumers that want to fade looted
+   *  caches out instead of removing them. */
+  getOpenContainers(): ReadonlyArray<{ position: BABYLON.Vector3; looted: boolean }> {
+    const out: Array<{ position: BABYLON.Vector3; looted: boolean }> = [];
+    for (const p of this.props) {
+      if (p.kind !== "open_container") continue;
+      if (!p.damageable.isAlive) continue;
+      out.push({ position: p.position, looted: !!p.alreadyLooted });
+    }
+    return out;
+  }
+
   /** Returns mesh hitboxes for all alive props (so vehicle/contact code can iterate them). */
   getHitboxMeshes(): BABYLON.Mesh[] {
     return this.props.filter(p => p.damageable.isAlive).map(p => p.hitbox);

@@ -8,6 +8,16 @@ export interface MapMarker {
   label?: string;
 }
 
+export interface BaseMarker {
+  position: BABYLON.Vector3;
+  alive: boolean;
+}
+
+export interface SupplyCacheMarker {
+  position: BABYLON.Vector3;
+  looted: boolean;
+}
+
 export class MapSystem {
   private scene: BABYLON.Scene;
   private mapCanvas: HTMLCanvasElement;
@@ -21,7 +31,20 @@ export class MapSystem {
   private markers: Map<string, MapMarker> = new Map();
   private shops: ShopDefinition[] = [];
   private gardens: GardenDefinition[] = [];
+  private bases: BaseMarker[] = [];
+  private supplyCaches: SupplyCacheMarker[] = [];
+  /** Player's last known world position — kept so distance-based icon
+   *  fade/scale can be computed without each draw() caller passing it. */
+  private playerWorldPos: BABYLON.Vector3 = new BABYLON.Vector3(0, 0, 0);
   private isVisible: boolean = true;
+
+  /** Distance (world units) at which non-player icons start to shrink/fade.
+   *  Inside this radius they render at full size; beyond it they ramp down
+   *  toward the minimum so the map stays readable when the player is
+   *  surrounded by ~130 lootable props. */
+  private static readonly ICON_FALLOFF_NEAR = 80;
+  /** Distance beyond which icons reach their minimum scale/opacity. */
+  private static readonly ICON_FALLOFF_FAR = 320;
 
   constructor(scene: BABYLON.Scene) {
     this.scene = scene;
@@ -165,7 +188,21 @@ export class MapSystem {
     this.gardens = gardens;
   }
 
+  /** Replaces the cached enemy-base positions used for the mini-map icons.
+   *  Cheap to call every frame — we keep the latest snapshot only. */
+  setEnemyBases(bases: ReadonlyArray<{ position: BABYLON.Vector3; alive: boolean }>): void {
+    this.bases = bases.map(b => ({ position: b.position, alive: b.alive }));
+  }
+
+  /** Replaces the cached supply-cache (open container) positions used for
+   *  the mini-map icons. Looted caches stay in the list so they can fade
+   *  out instead of popping. */
+  setSupplyCaches(caches: ReadonlyArray<{ position: BABYLON.Vector3; looted: boolean }>): void {
+    this.supplyCaches = caches.map(c => ({ position: c.position, looted: c.looted }));
+  }
+
   updatePlayerPosition(playerPos: BABYLON.Vector3): void {
+    this.playerWorldPos.copyFrom(playerPos);
     this.markers.set("player", {
       position: playerPos,
       type: "player",
@@ -201,6 +238,22 @@ export class MapSystem {
         type: "chest",
       });
     });
+  }
+
+  /** Compute a `{ scale, alpha }` pair for an icon at `worldPos` based on
+   *  its distance from the player. Icons close to the player render at full
+   *  size; far-off icons shrink and fade so the mini-map stays legible
+   *  even when ~130 props + multiple bases are placed across the world. */
+  private distanceFalloff(worldPos: BABYLON.Vector3): { scale: number; alpha: number } {
+    const dx = worldPos.x - this.playerWorldPos.x;
+    const dz = worldPos.z - this.playerWorldPos.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const near = MapSystem.ICON_FALLOFF_NEAR;
+    const far = MapSystem.ICON_FALLOFF_FAR;
+    if (dist <= near) return { scale: 1, alpha: 1 };
+    if (dist >= far) return { scale: 0.45, alpha: 0.35 };
+    const t = (dist - near) / (far - near);
+    return { scale: 1 - t * 0.55, alpha: 1 - t * 0.65 };
   }
 
   private worldToMapCoords(worldPos: BABYLON.Vector3): { x: number; y: number } {
@@ -262,6 +315,67 @@ export class MapSystem {
         ctx.stroke();
       }
     }
+
+    // Supply caches: small dots that fade out once looted. Drawn before
+    // bases/enemies so those higher-priority icons render on top.
+    for (const cache of this.supplyCaches) {
+      const coords = this.worldToMapCoords(cache.position);
+      if (coords.x < 0 || coords.x > width || coords.y < 0 || coords.y > height) continue;
+      const falloff = this.distanceFalloff(cache.position);
+      // Looted caches fade aggressively but linger briefly so the player can
+      // visually confirm "yep, already grabbed it" rather than the icon
+      // popping out the moment they collect.
+      const lootedMul = cache.looted ? 0.25 : 1.0;
+      const alpha = falloff.alpha * lootedMul;
+      if (alpha < 0.05) continue;
+      const r = Math.max(1.5, 2.6 * falloff.scale);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = cache.looted
+        ? "rgba(140, 130, 110, 1)"
+        : "rgba(255, 215, 110, 1)";
+      ctx.beginPath();
+      ctx.arc(coords.x, coords.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      if (!cache.looted) {
+        ctx.strokeStyle = "rgba(255, 170, 40, 1)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // Enemy bases: bold red diamonds with a black outline. Cleared bases
+    // (vault destroyed) drop to a dim hollow marker so the player can still
+    // see "I've been here" without the icon screaming for attention.
+    for (const base of this.bases) {
+      const coords = this.worldToMapCoords(base.position);
+      if (coords.x < 0 || coords.x > width || coords.y < 0 || coords.y > height) continue;
+      const falloff = this.distanceFalloff(base.position);
+      // Bases stay readable further out than caches — they're the biggest
+      // landmarks on the map, so we floor their scale a bit higher.
+      const scale = Math.max(0.6, falloff.scale);
+      const alpha = base.alive ? Math.max(0.55, falloff.alpha) : 0.35;
+      const size = 6 * scale;
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.moveTo(coords.x, coords.y - size);
+      ctx.lineTo(coords.x + size, coords.y);
+      ctx.lineTo(coords.x, coords.y + size);
+      ctx.lineTo(coords.x - size, coords.y);
+      ctx.closePath();
+      if (base.alive) {
+        ctx.fillStyle = "rgba(255, 60, 60, 1)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      } else {
+        ctx.strokeStyle = "rgba(120, 60, 60, 0.9)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
 
     this.markers.forEach((marker) => {
       const coords = this.worldToMapCoords(marker.position);

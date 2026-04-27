@@ -311,6 +311,13 @@ export class EnemyBaseSystem {
     return out;
   }
 
+  /** Position + alive-state of every base. The `alive` flag tracks the
+   *  vault — once the vault is destroyed the base is essentially "cleared"
+   *  and HUD overlays (mini-map icons, etc.) can dim or drop the marker. */
+  getBasePositions(): ReadonlyArray<{ position: BABYLON.Vector3; alive: boolean }> {
+    return this.bases.map(b => ({ position: b.position, alive: b.vault.alive }));
+  }
+
   /** EnemyLike list for health-bar provider */
   getEnemyLikes(): EnemyLike[] {
     const out: EnemyLike[] = [];

@@ -984,6 +984,12 @@ export const Game: React.FC = () => {
           mapSystem.updatePlayerPosition(playerPos);
           const mapEnemyMeshes = enemySystem.getEnemyMeshes();
           mapSystem.updateEnemies(mapEnemyMeshes.map(m => m.position));
+          // Bases + supply caches: snapshots refreshed each frame so the map
+          // reflects newly-cleared bases and looted caches without any extra
+          // event wiring. Both calls are O(numBases + numOpenContainers) — a
+          // few dozen entries at most — so the per-frame cost is negligible.
+          mapSystem.setEnemyBases(enemyBaseSystem.getBasePositions());
+          mapSystem.setSupplyCaches(propSystem.getOpenContainers());
           mapSystem.draw();
           setRemotePlayerCount(multiplayer.getRemotePlayerCount());
 
