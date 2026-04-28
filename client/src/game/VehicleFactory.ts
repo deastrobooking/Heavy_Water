@@ -97,9 +97,13 @@ export class VehicleFactory {
     const back = box(scene, "atv_back", wid * 0.55, hgt * 0.7, hgt * 0.2, root, matDark);
     back.position.set(0, wheelR + hgt + hgt * 0.45, -len * 0.18);
 
-    // Handlebars
-    const barPost = cyl(scene, "atv_post", hgt * 0.8, 0.08, root, matDark);
-    barPost.position.set(0, wheelR + hgt + hgt * 0.4, len * 0.28);
+    // Handlebars — two side posts (like a bike fork) so the center forward
+    // sightline stays CLEAR for the driver to shoot through. A single
+    // centered post used to block the reticle directly.
+    const barPostL = cyl(scene, "atv_post_l", hgt * 0.8, 0.08, root, matDark);
+    barPostL.position.set(-wid * 0.22, wheelR + hgt + hgt * 0.4, len * 0.28);
+    const barPostR = cyl(scene, "atv_post_r", hgt * 0.8, 0.08, root, matDark);
+    barPostR.position.set(wid * 0.22, wheelR + hgt + hgt * 0.4, len * 0.28);
     const handle = cyl(scene, "atv_handle", wid * 0.7, 0.06, root, matDark);
     handle.rotation.z = Math.PI / 2;
     handle.position.set(0, wheelR + hgt + hgt * 0.85, len * 0.28);
