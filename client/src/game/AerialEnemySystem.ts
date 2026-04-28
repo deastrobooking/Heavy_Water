@@ -100,6 +100,12 @@ export class AerialUnit {
   // not fire. Becomes true once the player attacks an enemy base, mothership
   // or any aerial unit.
   aggro: boolean = false;
+  // Fixed world point a passive unit orbits around (so they don't shadow the
+  // player like soft-aggro). Set at spawn time. When aggro becomes true the
+  // unit switches to player-anchored orbit instead.
+  patrolCenter: BABYLON.Vector3 = BABYLON.Vector3.Zero();
+  // Materials this unit owns and must dispose with itself.
+  private ownedMaterials: BABYLON.Material[] = [];
 
   constructor(scene: BABYLON.Scene, kind: AerialKind, position: BABYLON.Vector3) {
     this.kind = kind;
@@ -161,11 +167,18 @@ export class AerialUnit {
     this.hitbox.metadata = { hitRadius: hitR, aerialUnit: this };
     this.visual.parent = this.hitbox;
 
-    // Track original emissives for red-flash on hit
+    // Track original emissives for red-flash on hit, and remember every
+    // material this unit's visual owns so we can dispose them with the unit
+    // (otherwise StandardMaterials accumulate in the scene over time).
+    const seenMats = new Set<BABYLON.Material>();
     const collect = (n: BABYLON.Node) => {
       const m = (n as BABYLON.AbstractMesh).material as BABYLON.StandardMaterial | null;
-      if (m && m.emissiveColor) {
-        this.originalEmissives.push({ mat: m, color: m.emissiveColor.clone() });
+      if (m && !seenMats.has(m)) {
+        seenMats.add(m);
+        this.ownedMaterials.push(m);
+        if (m.emissiveColor) {
+          this.originalEmissives.push({ mat: m, color: m.emissiveColor.clone() });
+        }
       }
     };
     for (const child of this.visual.getChildMeshes()) collect(child);
@@ -525,15 +538,22 @@ export class AerialUnit {
       }
     } else {
       // Fortress — very slow drift at high altitude, heavy multi-turret fire.
+      // While passive, orbit a fixed world point so they look like neutral
+      // landmarks rather than always shadowing the player. Once aggro'd they
+      // re-anchor on the player's position.
+      const center = this.aggro ? playerPos : this.patrolCenter;
       this.orbitAngle += (this.speed / this.orbitRadius) * dt;
-      const targetX = playerPos.x + Math.cos(this.orbitAngle) * this.orbitRadius;
-      const targetZ = playerPos.z + Math.sin(this.orbitAngle) * this.orbitRadius;
+      const targetX = center.x + Math.cos(this.orbitAngle) * this.orbitRadius;
+      const targetZ = center.z + Math.sin(this.orbitAngle) * this.orbitRadius;
       this.hitbox.position.x += (targetX - this.hitbox.position.x) * Math.min(1, dt * 0.25);
       this.hitbox.position.y += (this.orbitAltitude - this.hitbox.position.y) * Math.min(1, dt * 0.4);
       this.hitbox.position.z += (targetZ - this.hitbox.position.z) * Math.min(1, dt * 0.25);
 
-      const toPlayer = playerPos.subtract(this.hitbox.position);
-      this.visual.rotation.y = Math.atan2(toPlayer.x, toPlayer.z);
+      // Face along travel direction (or toward the player when aggro'd)
+      const facing = this.aggro
+        ? playerPos.subtract(this.hitbox.position)
+        : new BABYLON.Vector3(-Math.sin(this.orbitAngle), 0, Math.cos(this.orbitAngle));
+      this.visual.rotation.y = Math.atan2(facing.x, facing.z);
 
       this.fireCooldown -= dt;
       if (this.fireCooldown <= 0 && this.aggro) {
@@ -621,6 +641,8 @@ export class AerialUnit {
     this.originalEmissives = [];
     if (this.visual) this.visual.dispose();
     if (this.hitbox) this.hitbox.dispose();
+    for (const m of this.ownedMaterials) m.dispose();
+    this.ownedMaterials = [];
   }
 }
 
@@ -707,6 +729,17 @@ export class AerialEnemySystem {
   }
 
   spawnFortress(playerPos: BABYLON.Vector3): AerialUnit {
+    // Fortresses get a fixed world-anchored patrol center so they don't
+    // shadow the player while passive. Centers are spread around the world
+    // so multiple fortresses don't stack on top of each other.
+    const fortIndex = this.units.filter(u => u.kind === "fortress").length;
+    const baseAngle = (fortIndex * (Math.PI * 2 / 3)) + Math.random() * 0.8;
+    const baseDist = 240 + Math.random() * 120;
+    const center = new BABYLON.Vector3(
+      Math.cos(baseAngle) * baseDist,
+      75,
+      Math.sin(baseAngle) * baseDist
+    );
     const angle = Math.random() * Math.PI * 2;
     const dist = 130 + Math.random() * 40;
     const pos = new BABYLON.Vector3(
@@ -717,6 +750,7 @@ export class AerialEnemySystem {
     const u = new AerialUnit(this.scene, "fortress", pos);
     u.walls = this.walls;
     u.aggro = this.aggro;
+    u.patrolCenter = center;
     this.units.push(u);
     this.bus.emit(GameEvents.ENEMY_SPAWNED, { type: "aerial_fortress", position: pos });
     return u;
