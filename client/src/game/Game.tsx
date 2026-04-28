@@ -510,11 +510,17 @@ export const Game: React.FC = () => {
 
         const aerialEnemySystem = new AerialEnemySystem(scene);
         aerialEnemyRef.current = aerialEnemySystem;
-        // Seed initial sky combat
+        // Hand the city wall AABBs to the aerial squadron so it can do
+        // line-of-sight checks before firing — drones never shoot through
+        // buildings.
+        aerialEnemySystem.setWallColliders(cityGenerator.getWallColliders());
+        // Seed a few flying fortresses patrolling overhead. They float in
+        // the sky as silent landmarks until the player attacks an enemy
+        // base or any aerial unit, at which point the squadron engages.
         const initialPos = player.getPosition();
-        aerialEnemySystem.spawnFighter(initialPos);
-        aerialEnemySystem.spawnFighter(initialPos);
-        aerialEnemySystem.spawnBattleship(initialPos);
+        aerialEnemySystem.spawnFortress(initialPos);
+        aerialEnemySystem.spawnFortress(initialPos);
+        aerialEnemySystem.spawnFortress(initialPos);
 
         const miningSystem = new MiningSystem(scene);
         miningRef.current = miningSystem;
@@ -815,10 +821,18 @@ export const Game: React.FC = () => {
               });
               return;
             }
-            // Try mining first (cheap), then enemy bases, then aerial, then ground
+            // Try mining first (cheap), then enemy bases, then aerial, then ground.
+            // Hitting an enemy base or any aerial unit promotes the aerial
+            // squadron to full attack mode.
             if (miningSystem.damageNode(mesh, dmg)) return;
-            if (enemyBaseSystem.damageStructure(mesh, dmg)) return;
-            if (aerialEnemySystem.damageEnemy(mesh as BABYLON.Mesh, dmg)) return;
+            if (enemyBaseSystem.damageStructure(mesh, dmg)) {
+              aerialEnemySystem.engage();
+              return;
+            }
+            if (aerialEnemySystem.damageEnemy(mesh as BABYLON.Mesh, dmg)) {
+              aerialEnemySystem.engage();
+              return;
+            }
             enemySystem.damageEnemy(mesh as BABYLON.Mesh, dmg);
           };
 

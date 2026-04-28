@@ -1,7 +1,64 @@
 import * as BABYLON from "@babylonjs/core";
 import { EventBus, GameEvents } from "./EventBus";
+import type { WallCollider } from "./CityGenerator";
 
-export type AerialKind = "fighter" | "battleship";
+export type AerialKind = "fighter" | "battleship" | "fortress";
+
+/**
+ * Segment-vs-AABB intersection used for line-of-sight checks. Returns true
+ * if the segment p0→p1 enters or passes through the AABB. Used so aerial
+ * enemies cannot hit a player who is hiding inside a building.
+ */
+function segmentHitsAABB(p0: BABYLON.Vector3, p1: BABYLON.Vector3, a: WallCollider): boolean {
+  const dx = p1.x - p0.x, dy = p1.y - p0.y, dz = p1.z - p0.z;
+  let tmin = 0, tmax = 1;
+  const eps = 1e-6;
+  // X
+  if (Math.abs(dx) < eps) {
+    if (p0.x < a.minX || p0.x > a.maxX) return false;
+  } else {
+    let t1 = (a.minX - p0.x) / dx;
+    let t2 = (a.maxX - p0.x) / dx;
+    if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+    if (t1 > tmin) tmin = t1;
+    if (t2 < tmax) tmax = t2;
+    if (tmin > tmax) return false;
+  }
+  // Y
+  if (Math.abs(dy) < eps) {
+    if (p0.y < a.minY || p0.y > a.maxY) return false;
+  } else {
+    let t1 = (a.minY - p0.y) / dy;
+    let t2 = (a.maxY - p0.y) / dy;
+    if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+    if (t1 > tmin) tmin = t1;
+    if (t2 < tmax) tmax = t2;
+    if (tmin > tmax) return false;
+  }
+  // Z
+  if (Math.abs(dz) < eps) {
+    if (p0.z < a.minZ || p0.z > a.maxZ) return false;
+  } else {
+    let t1 = (a.minZ - p0.z) / dz;
+    let t2 = (a.maxZ - p0.z) / dz;
+    if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+    if (t1 > tmin) tmin = t1;
+    if (t2 < tmax) tmax = t2;
+    if (tmin > tmax) return false;
+  }
+  return tmax > 0 && tmin < 1;
+}
+
+/** Cheap world-AABB cull around the segment so we only test nearby walls. */
+function segmentInsideRange(p0: BABYLON.Vector3, p1: BABYLON.Vector3, a: WallCollider): boolean {
+  const minX = Math.min(p0.x, p1.x) - 1, maxX = Math.max(p0.x, p1.x) + 1;
+  if (a.maxX < minX || a.minX > maxX) return false;
+  const minY = Math.min(p0.y, p1.y) - 1, maxY = Math.max(p0.y, p1.y) + 1;
+  if (a.maxY < minY || a.minY > maxY) return false;
+  const minZ = Math.min(p0.z, p1.z) - 1, maxZ = Math.max(p0.z, p1.z) + 1;
+  if (a.maxZ < minZ || a.minZ > maxZ) return false;
+  return true;
+}
 
 interface AerialProjectile {
   mesh: BABYLON.Mesh;
@@ -36,6 +93,13 @@ export class AerialUnit {
   private shakeTimer: number = 0;
   private lastHitFxAt: number = 0;
   private originalEmissives: { mat: BABYLON.StandardMaterial; color: BABYLON.Color3 }[] = [];
+  // Set by AerialEnemySystem each frame so units can LOS-check the player
+  // against city walls (so they cannot shoot through buildings).
+  walls: WallCollider[] = [];
+  // Set by AerialEnemySystem. When false, the unit patrols silently and does
+  // not fire. Becomes true once the player attacks an enemy base, mothership
+  // or any aerial unit.
+  aggro: boolean = false;
 
   constructor(scene: BABYLON.Scene, kind: AerialKind, position: BABYLON.Vector3) {
     this.kind = kind;
@@ -52,7 +116,7 @@ export class AerialUnit {
       this.barAccent = "rgba(255, 140, 60, 0.95)";
       this.barLabel = "FIGHTER";
       this.barMaxDistance = 160;
-    } else {
+    } else if (kind === "battleship") {
       this.maxHealth = 480;
       this.speed = 2.6;
       this.orbitRadius = 60 + Math.random() * 25;
@@ -63,17 +127,31 @@ export class AerialUnit {
       this.barAccent = "rgba(220, 80, 255, 0.95)";
       this.barLabel = "BATTLESHIP";
       this.barMaxDistance = 250;
+    } else {
+      // FORTRESS — slow, massive flying carrier with heavy guns.
+      this.maxHealth = 1500;
+      this.speed = 1.6;
+      this.orbitRadius = 100 + Math.random() * 30;
+      this.orbitAltitude = 70 + Math.random() * 10;
+      this.barWidth = 200;
+      this.barHeight = 14;
+      this.barColor = "linear-gradient(90deg, #ff3322 0%, #ff7733 50%, #ffcc33 100%)";
+      this.barAccent = "rgba(255, 80, 40, 0.95)";
+      this.barLabel = "FORTRESS";
+      this.barMaxDistance = 320;
     }
     this.health = this.maxHealth;
     this.orbitAngle = Math.random() * Math.PI * 2;
 
     const built = kind === "fighter"
       ? this.buildFighter(scene)
-      : this.buildBattleship(scene);
+      : kind === "battleship"
+      ? this.buildBattleship(scene)
+      : this.buildFortress(scene);
     this.visual = built.root;
 
-    const hitR = kind === "fighter" ? 2.4 : 7.5;
-    const hitH = kind === "fighter" ? 2 : 4;
+    const hitR = kind === "fighter" ? 2.4 : kind === "battleship" ? 7.5 : 12;
+    const hitH = kind === "fighter" ? 2 : kind === "battleship" ? 4 : 6;
     this.hitbox = BABYLON.MeshBuilder.CreateCapsule(`aerialHit_${kind}_${Date.now()}_${Math.floor(Math.random()*9999)}`, {
       height: hitH,
       radius: hitR,
@@ -231,6 +309,96 @@ export class AerialUnit {
     return { root };
   }
 
+  private buildFortress(scene: BABYLON.Scene): { root: BABYLON.TransformNode } {
+    const root = new BABYLON.TransformNode(`fortRoot_${Date.now()}_${Math.floor(Math.random()*9999)}`, scene);
+
+    // Massive armored hull
+    const hull = BABYLON.MeshBuilder.CreateBox("forthull", { width: 18, height: 4, depth: 30 }, scene);
+    const hullMat = new BABYLON.StandardMaterial("forthullMat", scene);
+    hullMat.diffuseColor = new BABYLON.Color3(0.18, 0.08, 0.08);
+    hullMat.emissiveColor = new BABYLON.Color3(0.06, 0.02, 0.02);
+    hull.material = hullMat;
+    hull.parent = root;
+
+    // Underside armor plates / wings
+    const plateL = BABYLON.MeshBuilder.CreateBox("fortplateL", { width: 6, height: 1.2, depth: 22 }, scene);
+    plateL.position.set(-10, -1.2, 0);
+    plateL.material = hullMat;
+    plateL.parent = root;
+    const plateR = plateL.clone("fortplateR");
+    plateR.position.x = 10;
+    plateR.parent = root;
+
+    // Stepped command tower
+    const tower1 = BABYLON.MeshBuilder.CreateBox("forttower1", { width: 8, height: 2.2, depth: 9 }, scene);
+    tower1.position.set(0, 3.1, -3);
+    tower1.material = hullMat;
+    tower1.parent = root;
+    const tower2 = BABYLON.MeshBuilder.CreateBox("forttower2", { width: 5, height: 2.0, depth: 5 }, scene);
+    tower2.position.set(0, 5.2, -3);
+    tower2.material = hullMat;
+    tower2.parent = root;
+
+    // Glowing command bridge windows
+    const winMat = new BABYLON.StandardMaterial("fortwinMat", scene);
+    winMat.emissiveColor = new BABYLON.Color3(1.0, 0.25, 0.18);
+    winMat.diffuseColor = new BABYLON.Color3(1.0, 0.25, 0.18);
+    winMat.disableLighting = true;
+    const win = BABYLON.MeshBuilder.CreateBox("fortwin", { width: 5.2, height: 0.32, depth: 5.2 }, scene);
+    win.position.set(0, 5.9, -3);
+    win.material = winMat;
+    win.parent = root;
+
+    // 6 turret blisters around the perimeter
+    const turretMat = new BABYLON.StandardMaterial("fortTurMat", scene);
+    turretMat.diffuseColor = new BABYLON.Color3(0.25, 0.10, 0.10);
+    turretMat.emissiveColor = new BABYLON.Color3(0.10, 0.02, 0.02);
+    const turretPos: [number, number][] = [
+      [-7, 12], [7, 12], [-9, 0], [9, 0], [-7, -12], [7, -12],
+    ];
+    for (let i = 0; i < turretPos.length; i++) {
+      const [x, z] = turretPos[i];
+      const dome = BABYLON.MeshBuilder.CreateSphere(`fortTurD_${i}`, { diameter: 2.4, segments: 8 }, scene);
+      dome.scaling.y = 0.6;
+      dome.position.set(x, 2.1, z);
+      dome.material = turretMat;
+      dome.parent = root;
+
+      const barrel = BABYLON.MeshBuilder.CreateCylinder(`fortTurB_${i}`, { height: 2.6, diameter: 0.42 }, scene);
+      barrel.rotation.x = Math.PI / 2;
+      barrel.position.set(x, 2.3, z + 1.3);
+      barrel.material = turretMat;
+      barrel.parent = root;
+    }
+
+    // Underside thruster grid
+    const thrustMat = new BABYLON.StandardMaterial("fortThrustMat", scene);
+    thrustMat.emissiveColor = new BABYLON.Color3(1.0, 0.35, 0.18);
+    thrustMat.diffuseColor = new BABYLON.Color3(1.0, 0.35, 0.18);
+    thrustMat.disableLighting = true;
+    for (let i = 0; i < 8; i++) {
+      const t = BABYLON.MeshBuilder.CreateSphere(`fortThr_${i}`, { diameter: 0.7 }, scene);
+      const col = i % 2 === 0 ? -3.2 : 3.2;
+      t.position.set(col, -2.0, 12 - Math.floor(i / 2) * 8);
+      t.material = thrustMat;
+      t.parent = root;
+    }
+
+    // Massive rear engine glows
+    const engMat = new BABYLON.StandardMaterial("fortEngMat", scene);
+    engMat.emissiveColor = new BABYLON.Color3(1.0, 0.55, 0.18);
+    engMat.diffuseColor = new BABYLON.Color3(1.0, 0.55, 0.18);
+    engMat.disableLighting = true;
+    for (let i = 0; i < 4; i++) {
+      const e = BABYLON.MeshBuilder.CreateSphere(`fortEng_${i}`, { diameter: 2.0 }, scene);
+      e.position.set(-3 + i * 2, 0, -15.5);
+      e.material = engMat;
+      e.parent = root;
+    }
+
+    return { root };
+  }
+
   takeDamage(amount: number, hitPoint?: BABYLON.Vector3): boolean {
     if (!this.isAlive) return false;
     this.health = Math.max(0, this.health - amount);
@@ -274,19 +442,25 @@ export class AerialUnit {
     if (!this.isAlive) return;
     this.isAlive = false;
 
-    const credits = this.kind === "battleship" ? 250 : 60;
-    const exp = this.kind === "battleship" ? 200 : 45;
+    const credits = this.kind === "fortress" ? 800 : this.kind === "battleship" ? 250 : 60;
+    const exp = this.kind === "fortress" ? 600 : this.kind === "battleship" ? 200 : 45;
+    const explosionScale = this.kind === "fortress" ? 6.0 : this.kind === "battleship" ? 4.0 : 2.0;
+    const enemyType = this.kind === "fortress"
+      ? "aerial_fortress"
+      : this.kind === "battleship"
+      ? "aerial_battleship"
+      : "aerial_fighter";
 
     // Big explosion
     this.bus.emit("effect:hitImpact", {
       position: this.hitbox.position.clone(),
       color: new BABYLON.Color3(1.0, 0.55, 0.1),
-      scale: this.kind === "battleship" ? 4.0 : 2.0,
+      scale: explosionScale,
     });
 
     // Loot drops via EnemyKilled event so PickupSystem handles them
     this.bus.emit(GameEvents.ENEMY_KILLED, {
-      type: this.kind === "battleship" ? "aerial_battleship" : "aerial_fighter",
+      type: enemyType,
       credits,
       experience: exp,
       position: this.hitbox.position.clone(),
@@ -322,13 +496,15 @@ export class AerialUnit {
       const toPlayer = playerPos.subtract(this.hitbox.position);
       this.visual.rotation.y = Math.atan2(toPlayer.x, toPlayer.z);
 
-      // Fire periodically
+      // Fire periodically — only when engaged AND with clear line of sight.
       this.fireCooldown -= dt;
-      if (this.fireCooldown <= 0) {
+      if (this.fireCooldown <= 0 && this.aggro) {
         this.fireCooldown = 2.2 + Math.random() * 1.2;
-        damageToPlayer += this.fireAtPlayer(playerPos, 12, 0.6);
+        if (this.hasLineOfSight(playerPos)) {
+          damageToPlayer += this.fireAtPlayer(playerPos, 12, 0.6);
+        }
       }
-    } else {
+    } else if (this.kind === "battleship") {
       // Battleship — slow drift
       this.orbitAngle += (this.speed / this.orbitRadius) * dt;
       const targetX = playerPos.x + Math.cos(this.orbitAngle) * this.orbitRadius;
@@ -341,9 +517,33 @@ export class AerialUnit {
       this.visual.rotation.y = Math.atan2(toPlayer.x, toPlayer.z);
 
       this.fireCooldown -= dt;
-      if (this.fireCooldown <= 0) {
+      if (this.fireCooldown <= 0 && this.aggro) {
         this.fireCooldown = 2.4 + Math.random() * 1.5;
-        damageToPlayer += this.fireAtPlayer(playerPos, 28, 1.4);
+        if (this.hasLineOfSight(playerPos)) {
+          damageToPlayer += this.fireAtPlayer(playerPos, 28, 1.4);
+        }
+      }
+    } else {
+      // Fortress — very slow drift at high altitude, heavy multi-turret fire.
+      this.orbitAngle += (this.speed / this.orbitRadius) * dt;
+      const targetX = playerPos.x + Math.cos(this.orbitAngle) * this.orbitRadius;
+      const targetZ = playerPos.z + Math.sin(this.orbitAngle) * this.orbitRadius;
+      this.hitbox.position.x += (targetX - this.hitbox.position.x) * Math.min(1, dt * 0.25);
+      this.hitbox.position.y += (this.orbitAltitude - this.hitbox.position.y) * Math.min(1, dt * 0.4);
+      this.hitbox.position.z += (targetZ - this.hitbox.position.z) * Math.min(1, dt * 0.25);
+
+      const toPlayer = playerPos.subtract(this.hitbox.position);
+      this.visual.rotation.y = Math.atan2(toPlayer.x, toPlayer.z);
+
+      this.fireCooldown -= dt;
+      if (this.fireCooldown <= 0 && this.aggro) {
+        this.fireCooldown = 1.8 + Math.random() * 1.0;
+        if (this.hasLineOfSight(playerPos)) {
+          // Fortress fires a 3-shot turret salvo
+          damageToPlayer += this.fireAtPlayer(playerPos, 22, 1.1);
+          damageToPlayer += this.fireAtPlayer(playerPos, 22, 1.1);
+          damageToPlayer += this.fireAtPlayer(playerPos, 22, 1.1);
+        }
       }
     }
 
@@ -356,6 +556,23 @@ export class AerialUnit {
     }
 
     return damageToPlayer;
+  }
+
+  /**
+   * Returns true if the segment from this unit's gun to the player is not
+   * blocked by any registered city wall. Aerial enemies skip their shot
+   * entirely (no tracer, no damage) when LOS is blocked, so a player who runs
+   * inside a building cannot be hit through the walls.
+   */
+  private hasLineOfSight(playerPos: BABYLON.Vector3): boolean {
+    if (this.walls.length === 0) return true;
+    const p0 = this.hitbox.position;
+    const p1 = playerPos;
+    for (const w of this.walls) {
+      if (!segmentInsideRange(p0, p1, w)) continue;
+      if (segmentHitsAABB(p0, p1, w)) return false;
+    }
+    return true;
   }
 
   // Returns damage that hit the player this frame (immediate hit-scan style for simplicity).
@@ -413,9 +630,19 @@ export class AerialEnemySystem {
   private units: AerialUnit[] = [];
   private spawnCooldown: number = 4;
   private playerPos: BABYLON.Vector3 = BABYLON.Vector3.Zero();
+  private walls: WallCollider[] = [];
+
+  /**
+   * Aggro gate. False at game start — fighters/battleships are not spawned
+   * and existing fortresses patrol silently. Becomes true the first time the
+   * player attacks an enemy base, mothership, fortress, or any aerial unit.
+   * Once raised it stays raised for the rest of the session.
+   */
+  private aggro: boolean = false;
 
   private static readonly MAX_FIGHTERS = 4;
   private static readonly MAX_BATTLESHIPS = 1;
+  private static readonly MAX_FORTRESSES = 3;
 
   constructor(scene: BABYLON.Scene) {
     this.scene = scene;
@@ -427,6 +654,26 @@ export class AerialEnemySystem {
     this.playerPos.copyFrom(pos);
   }
 
+  /** Pass the city's wall AABBs so units can LOS-check the player. */
+  setWallColliders(walls: WallCollider[]): void {
+    this.walls = walls;
+    for (const u of this.units) u.walls = walls;
+  }
+
+  /**
+   * Promote the squadron to attack mode. Called when the player damages an
+   * enemy base, a battleship/fortress, or any aerial fighter. Idempotent.
+   */
+  engage(): void {
+    if (this.aggro) return;
+    this.aggro = true;
+    for (const u of this.units) u.aggro = true;
+    console.log("[AerialEnemySystem] AGGRO engaged — aerial squadron will now attack");
+    this.bus.emit(GameEvents.UI_MESSAGE, "AERIAL THREAT ENGAGED");
+  }
+
+  isAggro(): boolean { return this.aggro; }
+
   spawnFighter(playerPos: BABYLON.Vector3): AerialUnit {
     const angle = Math.random() * Math.PI * 2;
     const dist = 50 + Math.random() * 30;
@@ -436,6 +683,8 @@ export class AerialEnemySystem {
       playerPos.z + Math.sin(angle) * dist
     );
     const u = new AerialUnit(this.scene, "fighter", pos);
+    u.walls = this.walls;
+    u.aggro = this.aggro;
     this.units.push(u);
     this.bus.emit(GameEvents.ENEMY_SPAWNED, { type: "aerial_fighter", position: pos });
     return u;
@@ -450,8 +699,26 @@ export class AerialEnemySystem {
       playerPos.z + Math.sin(angle) * dist
     );
     const u = new AerialUnit(this.scene, "battleship", pos);
+    u.walls = this.walls;
+    u.aggro = this.aggro;
     this.units.push(u);
     this.bus.emit(GameEvents.ENEMY_SPAWNED, { type: "aerial_battleship", position: pos });
+    return u;
+  }
+
+  spawnFortress(playerPos: BABYLON.Vector3): AerialUnit {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 130 + Math.random() * 40;
+    const pos = new BABYLON.Vector3(
+      playerPos.x + Math.cos(angle) * dist,
+      75,
+      playerPos.z + Math.sin(angle) * dist
+    );
+    const u = new AerialUnit(this.scene, "fortress", pos);
+    u.walls = this.walls;
+    u.aggro = this.aggro;
+    this.units.push(u);
+    this.bus.emit(GameEvents.ENEMY_SPAWNED, { type: "aerial_fortress", position: pos });
     return u;
   }
 
@@ -459,15 +726,21 @@ export class AerialEnemySystem {
     this.playerPos.copyFrom(playerPos);
     let totalDamage = 0;
 
-    // Drip-spawn fighters/battleships
+    // Drip-spawn squadron. Fortresses always patrol the skies (a few flying
+    // landmarks). Fighters/battleships only spawn after the player picks a
+    // fight (engages a base, mothership, or any aerial unit).
     this.spawnCooldown -= dt;
     if (this.spawnCooldown <= 0) {
       this.spawnCooldown = 6 + Math.random() * 4;
       const fighters = this.units.filter(u => u.kind === "fighter" && u.isAlive).length;
       const battleships = this.units.filter(u => u.kind === "battleship" && u.isAlive).length;
-      if (fighters < AerialEnemySystem.MAX_FIGHTERS) {
+      const fortresses = this.units.filter(u => u.kind === "fortress" && u.isAlive).length;
+
+      if (fortresses < AerialEnemySystem.MAX_FORTRESSES) {
+        this.spawnFortress(playerPos);
+      } else if (this.aggro && fighters < AerialEnemySystem.MAX_FIGHTERS) {
         this.spawnFighter(playerPos);
-      } else if (battleships < AerialEnemySystem.MAX_BATTLESHIPS && Math.random() < 0.4) {
+      } else if (this.aggro && battleships < AerialEnemySystem.MAX_BATTLESHIPS && Math.random() < 0.4) {
         this.spawnBattleship(playerPos);
       }
     }

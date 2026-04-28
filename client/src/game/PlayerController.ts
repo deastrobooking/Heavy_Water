@@ -502,6 +502,13 @@ export class PlayerController implements IDamageable {
 
     if (!this.isAlive) return;
 
+    // Shield, stamina and cooldown timers tick even while the player is
+    // riding inside a vehicle — sitting in an ATV shouldn't pause your
+    // recharge or cooldowns. Only movement/physics is suppressed.
+    this.updateTimers(deltaTime);
+    this.updateStamina(deltaTime);
+    this.updateShield(deltaTime);
+
     if (this.mountedVehiclePos) {
       this.meshRoot.position.copyFrom(this.mountedVehiclePos);
       this.updateCamera(deltaTime);
@@ -509,9 +516,6 @@ export class PlayerController implements IDamageable {
     }
 
     this.stateMachine.update(deltaTime);
-    this.updateTimers(deltaTime);
-    this.updateStamina(deltaTime);
-    this.updateShield(deltaTime);
 
     if (this.isFlying) {
       this.updateFlight(deltaTime);
