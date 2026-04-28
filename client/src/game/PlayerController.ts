@@ -67,6 +67,10 @@ export class PlayerController implements IDamageable {
   private velocity: BABYLON.Vector3 = BABYLON.Vector3.Zero();
   private isGrounded: boolean = true;
   private wallColliders: WallCollider[] = [];
+  // Wall slide / wall jump state
+  private wallTouchTimer: number = 0;       // seconds remaining where the player counts as "on a wall"
+  private wallNormal: BABYLON.Vector3 = new BABYLON.Vector3(0, 0, 0); // unit vector pointing away from the last wall hit
+  private wallJumpLockoutTimer: number = 0; // brief lockout after a wall-jump so we don't immediately re-stick
 
   private walkSpeed: number = 0.3;
   private sprintSpeed: number = 0.55;
@@ -384,6 +388,22 @@ export class PlayerController implements IDamageable {
       return;
     }
 
+    // Wall jump — when airborne and stuck on a wall, leap away + up.
+    // Refunds the air-jump count so the player can still double-jump after.
+    if (!this.isGrounded && this.wallTouchTimer > 0) {
+      const pushAway = 0.45;
+      this.velocity.y = this.jumpForce;
+      this.velocity.x = this.wallNormal.x * pushAway;
+      this.velocity.z = this.wallNormal.z * pushAway;
+      this.airMomentumX = this.velocity.x;
+      this.airMomentumZ = this.velocity.z;
+      this.wallTouchTimer = 0;
+      this.wallJumpLockoutTimer = 0.25; // quarter-second so we don't re-stick
+      this.jumpCount = 1; // refresh so the player gets their full air-jump set
+      console.log("[PlayerController] Wall jump");
+      return;
+    }
+
     if (!this.isGrounded && this.jumpCount < this.maxJumpCount) {
       this.jumpCount++;
 
@@ -691,8 +711,23 @@ export class PlayerController implements IDamageable {
   }
 
   private updatePhysics(dt: number): void {
+    // Tick wall-touch + wall-jump-lockout timers
+    if (this.wallTouchTimer > 0) this.wallTouchTimer = Math.max(0, this.wallTouchTimer - dt);
+    if (this.wallJumpLockoutTimer > 0) this.wallJumpLockoutTimer = Math.max(0, this.wallJumpLockoutTimer - dt);
+    // Touching a wall in mid-air resets after landing
+    if (this.isGrounded) this.wallTouchTimer = 0;
+
     if (!this.isGrounded && !this.isJetpacking) {
       this.velocity.y -= this.gravity;
+    }
+
+    // Wall slide: while airborne, falling, and stuck against a wall, cap the
+    // descent speed so the player gently slides down instead of free-falling.
+    const isWallSliding = !this.isGrounded && !this.isJetpacking && !this.isFlying &&
+                          this.wallTouchTimer > 0 && this.velocity.y < 0;
+    if (isWallSliding) {
+      const wallSlideMaxFall = 0.08; // very gentle slide
+      if (this.velocity.y < -wallSlideMaxFall) this.velocity.y = -wallSlideMaxFall;
     }
 
     const maxFallSpeed = 0.8;
@@ -756,6 +791,8 @@ export class PlayerController implements IDamageable {
     const py = this.meshRoot.position.y;
     let px = px0;
     let pz = pz0;
+    let nx = 0; // wall normal X (pointing away from wall toward player)
+    let nz = 0; // wall normal Z
     // Use velocity to decide push-out direction so the player gets pushed
     // back along the axis they came in on (prevents tunnelling on thin walls).
     const vx = this.velocity.x;
@@ -782,21 +819,30 @@ export class PlayerController implements IDamageable {
       const useX = ax > az + 0.001;
       const useZ = az > ax + 0.001;
       if (useX) {
-        if (vx > 0) px = minX - 0.001; else px = maxX + 0.001;
+        if (vx > 0) { px = minX - 0.001; nx = -1; nz = 0; }
+        else { px = maxX + 0.001; nx = 1; nz = 0; }
       } else if (useZ) {
-        if (vz > 0) pz = minZ - 0.001; else pz = maxZ + 0.001;
+        if (vz > 0) { pz = minZ - 0.001; nx = 0; nz = -1; }
+        else { pz = maxZ + 0.001; nx = 0; nz = 1; }
       } else {
         // No clear direction — fall back to shortest axis
         const m = Math.min(dxL, dxR, dzB, dzF);
-        if (m === dxL) px = minX - 0.001;
-        else if (m === dxR) px = maxX + 0.001;
-        else if (m === dzB) pz = minZ - 0.001;
-        else pz = maxZ + 0.001;
+        if (m === dxL)      { px = minX - 0.001; nx = -1; nz = 0; }
+        else if (m === dxR) { px = maxX + 0.001; nx = 1;  nz = 0; }
+        else if (m === dzB) { pz = minZ - 0.001; nx = 0;  nz = -1; }
+        else                { pz = maxZ + 0.001; nx = 0;  nz = 1; }
       }
     }
 
     if (px !== px0) this.meshRoot.position.x = px;
     if (pz !== pz0) this.meshRoot.position.z = pz;
+
+    // If we were pushed out and we're airborne, mark the player as
+    // touching a wall — feeds the wall-slide and wall-jump systems.
+    if ((nx !== 0 || nz !== 0) && !this.isGrounded && this.wallJumpLockoutTimer <= 0) {
+      this.wallNormal.set(nx, 0, nz);
+      this.wallTouchTimer = 0.18; // ~10 frames at 60fps
+    }
   }
 
   setBuildingColliders(colliders: WallCollider[]): void {

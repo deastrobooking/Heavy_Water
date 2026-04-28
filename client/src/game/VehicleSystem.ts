@@ -2,6 +2,7 @@ import * as BABYLON from "@babylonjs/core";
 import { VehicleFactory, VehicleMeshes } from "./VehicleFactory";
 import { VehicleDescriptor, VehicleKind, VEHICLE_PRESETS } from "./VehicleDesigner";
 import { EventBus } from "./EventBus";
+import type { WallCollider } from "./CityGenerator";
 
 export interface VehicleInstance {
   id: string;
@@ -42,6 +43,69 @@ export class VehicleSystem {
   private getGroundHeight: ((x: number, z: number) => number) | null = null;
   private input: VehicleInputState = { forward: false, back: false, left: false, right: false, up: false, down: false, boost: false };
   private nextId: number = 0;
+  private wallColliders: WallCollider[] = [];
+
+  setBuildingColliders(colliders: WallCollider[]): void {
+    this.wallColliders = colliders;
+  }
+
+  /**
+   * Resolve horizontal AABB collisions between a vehicle and the city wall
+   * colliders. Uses velocity direction to push the vehicle back along the
+   * incoming axis (prevents tunnelling through thin walls at high speed).
+   */
+  private resolveVehicleWallCollisions(v: VehicleInstance, radius: number): void {
+    if (this.wallColliders.length === 0) return;
+    const headroom = 2.5;
+    const px0 = v.position.x;
+    const pz0 = v.position.z;
+    const py = v.position.y;
+    let px = px0;
+    let pz = pz0;
+    const vx = v.velocity.x;
+    const vz = v.velocity.z;
+
+    for (let i = 0; i < this.wallColliders.length; i++) {
+      const w = this.wallColliders[i];
+      // Vertical overlap check — vehicle ignores walls it's flying high above
+      if (py + headroom < w.minY || py - 0.5 > w.maxY) continue;
+      const minX = w.minX - radius;
+      const maxX = w.maxX + radius;
+      const minZ = w.minZ - radius;
+      const maxZ = w.maxZ + radius;
+      if (px < minX || px > maxX || pz < minZ || pz > maxZ) continue;
+
+      const dxL = px - minX;
+      const dxR = maxX - px;
+      const dzB = pz - minZ;
+      const dzF = maxZ - pz;
+      const ax = Math.abs(vx);
+      const az = Math.abs(vz);
+      const useX = ax > az + 0.001;
+      const useZ = az > ax + 0.001;
+      if (useX) {
+        if (vx > 0) px = minX - 0.001; else px = maxX + 0.001;
+        v.velocity.x = 0;
+      } else if (useZ) {
+        if (vz > 0) pz = minZ - 0.001; else pz = maxZ + 0.001;
+        v.velocity.z = 0;
+      } else {
+        const m = Math.min(dxL, dxR, dzB, dzF);
+        if (m === dxL) { px = minX - 0.001; v.velocity.x = 0; }
+        else if (m === dxR) { px = maxX + 0.001; v.velocity.x = 0; }
+        else if (m === dzB) { pz = minZ - 0.001; v.velocity.z = 0; }
+        else { pz = maxZ + 0.001; v.velocity.z = 0; }
+      }
+    }
+
+    if (px !== px0) v.position.x = px;
+    if (pz !== pz0) v.position.z = pz;
+    if (px !== px0 || pz !== pz0) {
+      // Bleed off forward speed when bumping into a wall so the ATV doesn't
+      // grind helplessly into it.
+      v.speed *= 0.4;
+    }
+  }
 
   constructor(scene: BABYLON.Scene, getCameraYaw: () => number, getCameraPitch: () => number) {
     this.scene = scene;
@@ -203,6 +267,9 @@ export class VehicleSystem {
     v.position.x += v.velocity.x * dt;
     v.position.z += v.velocity.z * dt;
 
+    // Bump against building walls
+    this.resolveVehicleWallCollisions(v, 2.5);
+
     // Stick to ground
     const groundY = this.getGroundHeight ? this.getGroundHeight(v.position.x, v.position.z) : 0;
     const targetY = groundY + ATV_GROUND_HEIGHT;
@@ -251,6 +318,9 @@ export class VehicleSystem {
     if (this.input.down) v.velocity.y -= 18;
 
     v.position.addInPlace(v.velocity.scale(dt));
+
+    // Bump against building walls when flying low
+    this.resolveVehicleWallCollisions(v, 3.0);
 
     // Soft floor & ceiling
     const groundY = this.getGroundHeight ? this.getGroundHeight(v.position.x, v.position.z) : 0;

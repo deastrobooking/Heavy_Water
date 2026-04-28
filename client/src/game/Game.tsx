@@ -553,6 +553,7 @@ export const Game: React.FC = () => {
           () => player.getCameraPitch(),
         );
         vehicleSystem.setGroundHeightFn((_x, _z) => 0);
+        vehicleSystem.setBuildingColliders(cityGenerator.getWallColliders());
         vehicleRef.current = vehicleSystem;
         vehicleSystem.spawnPreset("RaiderATV", new BABYLON.Vector3(-6, 0.6, -10));
         vehicleSystem.spawnPreset("CometFighter", new BABYLON.Vector3(8, 1.2, -10));

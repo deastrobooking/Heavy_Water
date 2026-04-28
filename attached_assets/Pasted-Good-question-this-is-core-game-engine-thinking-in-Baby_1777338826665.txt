@@ -1,0 +1,225 @@
+Good question—this is **core game-engine thinking** in Babylon.js.
+
+In Babylon, making a mesh “solid” really means:
+
+👉 **It can block movement (collision detection)**
+👉 Not just visible, but physically interactable
+
+---
+
+# 🧠 The 3 levels of “solid” in Babylon.js
+
+## 1. Enable collisions on meshes (most common)
+
+This is the simplest and what you want for buildings, ground, etc.
+
+```ts
+mesh.checkCollisions = true;
+```
+
+But this alone does NOTHING unless the scene and camera also support collisions 👇
+
+---
+
+## 2. Enable collisions in the scene + camera
+
+### Scene:
+
+```ts
+scene.collisionsEnabled = true;
+```
+
+### Camera (player):
+
+```ts
+camera.checkCollisions = true;
+camera.applyGravity = true;
+
+// Important: size of your player
+camera.ellipsoid = new BABYLON.Vector3(1, 2, 1);
+```
+
+Now your camera behaves like a **capsule collider**.
+
+---
+
+## 🔥 Example (this is the minimum working setup)
+
+```ts
+scene.collisionsEnabled = true;
+
+// Player camera
+camera.checkCollisions = true;
+camera.applyGravity = true;
+camera.ellipsoid = new BABYLON.Vector3(1, 2, 1);
+
+// Ground
+ground.checkCollisions = true;
+
+// Building
+building.checkCollisions = true;
+```
+
+Now:
+
+✅ You can walk on ground
+✅ You can’t walk through buildings
+✅ Gravity pulls you down
+
+---
+
+# ⚠️ Important concept: Babylon collisions ≠ physics engine
+
+Babylon has **two systems**:
+
+### ✔️ Built-in collision system (what you’re using above)
+
+* Fast
+* Simple
+* Used for FPS / character movement
+* No forces, no bouncing
+
+### ✔️ Physics engine (Havok, Cannon, Ammo)
+
+* Real physics (mass, forces, friction)
+* Needed for ragdolls, falling objects, etc.
+
+---
+
+# 🧱 For your city generator specifically
+
+You should add this when creating meshes:
+
+### Ground
+
+```ts
+ground.checkCollisions = true;
+```
+
+### Buildings
+
+Inside your generator:
+
+```ts
+this.buildings.push(building);
+building.checkCollisions = true;
+```
+
+### Platforms
+
+```ts
+rooftop.checkCollisions = true;
+```
+
+---
+
+# 🧠 Why some meshes still feel “not solid”
+
+Common mistakes:
+
+### ❌ Forgot scene collisions
+
+```ts
+scene.collisionsEnabled = false;
+```
+
+### ❌ Camera collisions disabled
+
+```ts
+camera.checkCollisions = false;
+```
+
+### ❌ Ellipsoid too small or too big
+
+```ts
+camera.ellipsoid = new BABYLON.Vector3(0.1, 0.1, 0.1); // BAD
+```
+
+### ❌ Moving meshes incorrectly
+
+If you use:
+
+```ts
+mesh.position.x += 1;
+```
+
+It **bypasses collision checks**
+
+Instead use:
+
+```ts
+mesh.moveWithCollisions(directionVector);
+```
+
+---
+
+# 🚀 Advanced: mesh vs mesh collision (not just player)
+
+Babylon’s built-in system is mainly:
+
+👉 **camera vs world**
+
+If you want:
+
+* enemies colliding with buildings
+* objects hitting each other
+
+You’ll want physics:
+
+```ts
+scene.enablePhysics();
+```
+
+Then:
+
+```ts
+mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+  mesh,
+  BABYLON.PhysicsImpostor.BoxImpostor,
+  { mass: 0 }, // 0 = static
+  scene
+);
+```
+
+---
+
+# 🧠 Mental model
+
+Think of it like this:
+
+```txt
+Mesh = visual shape
+checkCollisions = can be hit
+Camera ellipsoid = player body
+Scene collisions = turn system ON
+```
+
+---
+
+# 💡 For your game (Babylon city / humanoid system)
+
+You likely want:
+
+### ✔️ Buildings = solid
+
+### ✔️ Ground = solid
+
+### ✔️ Platforms = solid
+
+### ✔️ Player = ellipsoid collider
+
+### ❌ No physics engine (yet)
+
+---
+
+# If you want next step
+
+I can help you build:
+
+* Full **FPS movement controller**
+* **Jump system**
+* **Wall collision smoothing**
+* **Enemy collision system**
+* Or **Havok physics integration** for your robots
+
+Just tell me 👍
