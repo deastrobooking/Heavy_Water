@@ -13,10 +13,20 @@ function seededRandom(seed: number): number {
   return x - Math.floor(x);
 }
 
+export interface WallCollider {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  minY: number;
+  maxY: number;
+}
+
 export class CityGenerator {
   private scene: BABYLON.Scene;
   private buildings: BABYLON.Mesh[] = [];
   private platforms: BABYLON.Mesh[] = [];
+  private wallColliders: WallCollider[] = [];
   private cellShadeMaterial: BABYLON.ShaderMaterial | null = null;
 
   constructor(scene: BABYLON.Scene) {
@@ -89,6 +99,257 @@ export class CityGenerator {
     material.setColor3("glowColor", glowColor);
     material.backFaceCulling = true;
     return material;
+  }
+
+  /**
+   * Creates a hollow building shell at (x, z) with footprint width × depth and given height.
+   * The shell has solid floor + roof + 4 walls. The +Z (front) wall has a door cutout
+   * so the player can walk in. For tall buildings, an additional door + external ramp can
+   * be placed on the +X side at mid-height. All wall pieces register AABB colliders so the
+   * player physically bumps into them on foot.
+   */
+  private createHollowShell(
+    name: string,
+    x: number,
+    z: number,
+    width: number,
+    depth: number,
+    height: number,
+    material: BABYLON.Material,
+    addSideRamp: boolean = false,
+    baseY: number = 0,
+  ): void {
+    const wt = 0.4; // wall thickness
+    const doorW = 4;
+    const doorH = 5;
+    const halfW = width / 2;
+    const halfD = depth / 2;
+    const safeDoorW = Math.min(doorW, Math.max(2, width - 2));
+    const halfDoor = safeDoorW / 2;
+
+    // Floor (thin slab just above the base so player walks onto it cleanly)
+    const floor = BABYLON.MeshBuilder.CreateBox(
+      `${name}_floor`,
+      { height: 0.2, width, depth },
+      this.scene,
+    );
+    floor.position = new BABYLON.Vector3(x, baseY + 0.1, z);
+    floor.material = material;
+    floor.freezeWorldMatrix();
+    this.buildings.push(floor);
+
+    // Roof
+    const roof = BABYLON.MeshBuilder.CreateBox(
+      `${name}_roof`,
+      { height: 0.4, width, depth },
+      this.scene,
+    );
+    roof.position = new BABYLON.Vector3(x, baseY + height - 0.2, z);
+    roof.material = material;
+    roof.freezeWorldMatrix();
+    this.buildings.push(roof);
+
+    const pushWall = (
+      n: string,
+      cx: number,
+      cy: number,
+      cz: number,
+      w: number,
+      h: number,
+      d: number,
+    ) => {
+      const wy = baseY + cy;
+      const wall = BABYLON.MeshBuilder.CreateBox(n, { width: w, height: h, depth: d }, this.scene);
+      wall.position = new BABYLON.Vector3(cx, wy, cz);
+      wall.material = material;
+      wall.isPickable = false;
+      wall.freezeWorldMatrix();
+      this.buildings.push(wall);
+      this.wallColliders.push({
+        minX: cx - w / 2,
+        maxX: cx + w / 2,
+        minZ: cz - d / 2,
+        maxZ: cz + d / 2,
+        minY: wy - h / 2,
+        maxY: wy + h / 2,
+      });
+    };
+
+    // Back wall (-Z, full)
+    pushWall(`${name}_wallBack`, x, height / 2, z - halfD + wt / 2, width, height, wt);
+
+    // Side ramp + door on +X side (only for tall buildings)
+    const sideDoorY = Math.min(Math.max(height * 0.45, 12), height - doorH - 4);
+    const enableSideDoor = addSideRamp && sideDoorY > 6;
+
+    // Left wall (-X, full)
+    pushWall(`${name}_wallLeft`, x - halfW + wt / 2, height / 2, z, wt, height, depth);
+
+    // Right wall (+X) — split if side door present
+    if (enableSideDoor) {
+      const sdwHalf = halfDoor;
+      // bottom slab below door
+      pushWall(
+        `${name}_wallR_bot`,
+        x + halfW - wt / 2,
+        sideDoorY / 2,
+        z,
+        wt,
+        sideDoorY,
+        depth,
+      );
+      // top slab above door
+      const topH = height - (sideDoorY + doorH);
+      if (topH > 0) {
+        pushWall(
+          `${name}_wallR_top`,
+          x + halfW - wt / 2,
+          sideDoorY + doorH + topH / 2,
+          z,
+          wt,
+          topH,
+          depth,
+        );
+      }
+      // back-of-door strip (toward -Z)
+      const backStripD = halfD - sdwHalf;
+      if (backStripD > 0) {
+        pushWall(
+          `${name}_wallR_back`,
+          x + halfW - wt / 2,
+          sideDoorY + doorH / 2,
+          z - halfD + backStripD / 2,
+          wt,
+          doorH,
+          backStripD,
+        );
+      }
+      // front-of-door strip (toward +Z)
+      const frontStripD = halfD - sdwHalf;
+      if (frontStripD > 0) {
+        pushWall(
+          `${name}_wallR_front`,
+          x + halfW - wt / 2,
+          sideDoorY + doorH / 2,
+          z + halfD - frontStripD / 2,
+          wt,
+          doorH,
+          frontStripD,
+        );
+      }
+    } else {
+      pushWall(`${name}_wallRight`, x + halfW - wt / 2, height / 2, z, wt, height, depth);
+    }
+
+    // Front wall (+Z) split into 3 pieces around the ground door
+    const frontZ = z + halfD - wt / 2;
+    const sideStripW = (width - safeDoorW) / 2;
+    if (sideStripW > 0) {
+      pushWall(
+        `${name}_wallFL`,
+        x - halfW + sideStripW / 2,
+        height / 2,
+        frontZ,
+        sideStripW,
+        height,
+        wt,
+      );
+      pushWall(
+        `${name}_wallFR`,
+        x + halfW - sideStripW / 2,
+        height / 2,
+        frontZ,
+        sideStripW,
+        height,
+        wt,
+      );
+    }
+    const topPieceH = height - doorH;
+    if (topPieceH > 0) {
+      pushWall(`${name}_wallFT`, x, doorH + topPieceH / 2, frontZ, safeDoorW, topPieceH, wt);
+    }
+
+    // Door frame trim (cosmetic) on the front door
+    const frameMat = new BABYLON.StandardMaterial(`${name}_frameMat`, this.scene);
+    frameMat.emissiveColor = new BABYLON.Color3(0.2, 0.9, 1.2);
+    frameMat.diffuseColor = new BABYLON.Color3(0.05, 0.2, 0.3);
+    frameMat.freeze();
+    const frameTop = BABYLON.MeshBuilder.CreateBox(
+      `${name}_doorFrameTop`,
+      { width: safeDoorW + 0.4, height: 0.25, depth: 0.5 },
+      this.scene,
+    );
+    frameTop.position = new BABYLON.Vector3(x, baseY + doorH, frontZ + 0.05);
+    frameTop.material = frameMat;
+    frameTop.freezeWorldMatrix();
+
+    // Side ramp + landing if requested
+    if (enableSideDoor) {
+      this.addExteriorRamp(x + halfW, baseY + sideDoorY, z, safeDoorW, material, frameMat);
+
+      const sideFrame = BABYLON.MeshBuilder.CreateBox(
+        `${name}_sideDoorFrame`,
+        { width: 0.5, height: 0.25, depth: safeDoorW + 0.4 },
+        this.scene,
+      );
+      sideFrame.position = new BABYLON.Vector3(x + halfW + 0.05, baseY + sideDoorY + doorH, z);
+      sideFrame.material = frameMat;
+      sideFrame.freezeWorldMatrix();
+    }
+  }
+
+  /**
+   * Adds an external ramp leading up the +X side of a building to a landing platform
+   * at door height (doorBaseY). Ramp pitches gently so the player can walk up.
+   */
+  private addExteriorRamp(
+    doorX: number,
+    doorBaseY: number,
+    doorZ: number,
+    doorW: number,
+    bodyMat: BABYLON.Material,
+    accentMat: BABYLON.Material,
+  ): void {
+    const landingW = doorW + 2;
+    const landingD = 4;
+    const landing = BABYLON.MeshBuilder.CreateBox(
+      `extRampLanding`,
+      { width: landingD, height: 0.4, depth: landingW },
+      this.scene,
+    );
+    landing.position = new BABYLON.Vector3(doorX + landingD / 2 - 0.2, doorBaseY - 0.2, doorZ);
+    landing.material = bodyMat;
+    landing.freezeWorldMatrix();
+    this.platforms.push(landing);
+
+    const rampLength = doorBaseY * 1.8;
+    const slabL = Math.sqrt(rampLength * rampLength + doorBaseY * doorBaseY);
+    const ramp = BABYLON.MeshBuilder.CreateBox(
+      `extRampSlab`,
+      { width: slabL, height: 0.4, depth: landingW },
+      this.scene,
+    );
+    const rampMidX = doorX + landingD + rampLength / 2;
+    ramp.position = new BABYLON.Vector3(rampMidX, doorBaseY / 2, doorZ);
+    ramp.rotation.z = Math.atan2(doorBaseY, rampLength);
+    ramp.material = bodyMat;
+    ramp.freezeWorldMatrix();
+    this.platforms.push(ramp);
+
+    // Glow strip along ramp edge
+    const strip = BABYLON.MeshBuilder.CreateBox(
+      `extRampGlow`,
+      { width: slabL, height: 0.15, depth: 0.3 },
+      this.scene,
+    );
+    strip.position = new BABYLON.Vector3(rampMidX, doorBaseY / 2 + 0.25, doorZ + landingW / 2 - 0.15);
+    strip.rotation.z = Math.atan2(doorBaseY, rampLength);
+    strip.material = accentMat;
+    strip.freezeWorldMatrix();
+  }
+
+  getWallColliders(): WallCollider[] {
+    return this.wallColliders;
   }
 
   generateCity(): void {
@@ -271,25 +532,25 @@ export class CityGenerator {
         const width = 8 + seededRandom(seed + 1000) * 12;
         const depth = 8 + seededRandom(seed + 2000) * 12;
 
-        const building = BABYLON.MeshBuilder.CreateBox(
-          `downtown_${x}_${z}`,
-          { height, width, depth },
-          this.scene
-        );
-        building.position = new BABYLON.Vector3(
-          x + (seededRandom(seed + 3000) - 0.5) * 10,
-          height / 2,
-          z + (seededRandom(seed + 4000) - 0.5) * 10
-        );
+        const bx = x + (seededRandom(seed + 3000) - 0.5) * 10;
+        const bz = z + (seededRandom(seed + 4000) - 0.5) * 10;
+
+        // Keep a clear ring around the player spawn (0,0,-15) so the player
+        // never wakes up inside a wall.
+        const dxs = bx - 0;
+        const dzs = bz - -15;
+        const halfW = Math.max(width, depth) / 2;
+        if (dxs * dxs + dzs * dzs < (halfW + 18) * (halfW + 18)) continue;
 
         const colorSet = colors[Math.floor(seededRandom(seed + 5000) * colors.length)];
-        building.material = this.createBuildingMaterial(colorSet.base, colorSet.glow);
-        this.buildings.push(building);
+        const mat = this.createBuildingMaterial(colorSet.base, colorSet.glow);
 
-        this.addRooftopPlatform(building.position.x, height, building.position.z, width, depth);
+        this.createHollowShell(`downtown_${x}_${z}`, bx, bz, width, depth, height, mat, height > 40);
+        this.addRooftopPlatform(bx, height, bz, width, depth);
 
         if (height > 80) {
-          this.addBuildingDetails(building, height, width, depth);
+          const proxy = { position: new BABYLON.Vector3(bx, height / 2, bz) } as BABYLON.Mesh;
+          this.addBuildingDetails(proxy, height, width, depth);
         }
       }
     }
@@ -370,19 +631,11 @@ export class CityGenerator {
       for (let z = -150; z <= 50; z += 40) {
         seed++;
         const height = 20 + seededRandom(seed) * 15;
-        const factory = BABYLON.MeshBuilder.CreateBox(
-          `factory_${x}_${z}`,
-          { height, width: 30, depth: 30 },
-          this.scene
-        );
-        factory.position = new BABYLON.Vector3(x, height / 2, z);
-        
         const factoryMat = this.createBuildingMaterial(
           new BABYLON.Color3(0.2, 0.15, 0.1),
           new BABYLON.Color3(1, 0.5, 0)
         );
-        factory.material = factoryMat;
-        this.buildings.push(factory);
+        this.createHollowShell(`factory_${x}_${z}`, x, z, 30, 30, height, factoryMat, false);
         this.addRooftopPlatform(x, height, z, 30, 30);
 
         const chimneyCount = 2 + Math.floor(seededRandom(seed + 500) * 3);
@@ -414,19 +667,11 @@ export class CityGenerator {
       for (let z = -100; z <= 100; z += 20) {
         seed++;
         const height = 15 + seededRandom(seed) * 25;
-        const building = BABYLON.MeshBuilder.CreateBox(
-          `residential_${x}_${z}`,
-          { height, width: 12, depth: 12 },
-          this.scene
-        );
-        building.position = new BABYLON.Vector3(x, height / 2, z);
-        
         const material = this.createBuildingMaterial(
           new BABYLON.Color3(0.15, 0.18, 0.2),
           new BABYLON.Color3(0, 0.8, 1)
         );
-        building.material = material;
-        this.buildings.push(building);
+        this.createHollowShell(`residential_${x}_${z}`, x, z, 12, 12, height, material, height > 30);
         this.addRooftopPlatform(x, height, z, 12, 12);
       }
     }
@@ -1664,17 +1909,8 @@ export class CityGenerator {
           const bHeight = 10 + seededRandom(seed + 200) * 30;
           const bWidth = 5 + seededRandom(seed + 300) * 8;
 
-          const skyBuilding = BABYLON.MeshBuilder.CreateBox(
-            `skyBld_${plat.label}_${b}`,
-            { height: bHeight, width: bWidth, depth: bWidth },
-            this.scene
-          );
-          skyBuilding.position = new BABYLON.Vector3(
-            plat.x + Math.cos(bAngle) * bDist,
-            plat.y + 2 + bHeight / 2,
-            plat.z + Math.sin(bAngle) * bDist
-          );
-
+          const sbX = plat.x + Math.cos(bAngle) * bDist;
+          const sbZ = plat.z + Math.sin(bAngle) * bDist;
           const skyBldMat = this.createBuildingMaterial(
             new BABYLON.Color3(0.1, 0.12, 0.18),
             new BABYLON.Color3(
@@ -1683,8 +1919,17 @@ export class CityGenerator {
               1
             )
           );
-          skyBuilding.material = skyBldMat;
-          this.buildings.push(skyBuilding);
+          this.createHollowShell(
+            `skyBld_${plat.label}_${b}`,
+            sbX,
+            sbZ,
+            bWidth,
+            bWidth,
+            bHeight,
+            skyBldMat,
+            false,
+            plat.y + 2,
+          );
         }
 
         const towerHeight = 20 + seededRandom(seed + 600) * 20;
@@ -1905,16 +2150,9 @@ export class CityGenerator {
         const height = 10 + seededRandom(seed + 200) * 40;
         const width = 6 + seededRandom(seed + 300) * 10;
 
-        const building = BABYLON.MeshBuilder.CreateBox(
-          `outer_${dist.label}_${b}`,
-          { height, width, depth: width },
-          this.scene
-        );
-        building.position = new BABYLON.Vector3(bx, height / 2, bz);
-
         const colorSet = outerColors[Math.floor(seededRandom(seed + 400) * outerColors.length)];
-        building.material = this.createBuildingMaterial(colorSet.base, colorSet.glow);
-        this.buildings.push(building);
+        const mat = this.createBuildingMaterial(colorSet.base, colorSet.glow);
+        this.createHollowShell(`outer_${dist.label}_${b}`, bx, bz, width, width, height, mat, height > 35);
         this.addRooftopPlatform(bx, height, bz, width, width);
       }
     }

@@ -6,6 +6,7 @@ import { AnimationSystem, AnimationState } from "./AnimationSystem";
 import { HumanoidCharacter } from "./HumanoidCharacter";
 import { HUMANOID_PRESETS } from "./HumanoidPresets";
 import { equipArmorSet, deserializeArmorSet, EquippedArmor, ArmorSetSerialized } from "./RobotArmorSystem";
+import type { WallCollider } from "./CityGenerator";
 
 export type PlayerState = "idle" | "moving" | "sprinting" | "dodging" | "attacking" | "stunned" | "dead" | "jetpack" | "flying" | "hovering";
 
@@ -65,6 +66,7 @@ export class PlayerController implements IDamageable {
   private meshRoot!: BABYLON.TransformNode | BABYLON.Mesh;
   private velocity: BABYLON.Vector3 = BABYLON.Vector3.Zero();
   private isGrounded: boolean = true;
+  private wallColliders: WallCollider[] = [];
 
   private walkSpeed: number = 0.3;
   private sprintSpeed: number = 0.55;
@@ -170,8 +172,8 @@ export class PlayerController implements IDamageable {
       maxArmor: 100,
       shield: 75,
       maxShield: 75,
-      shieldRegenRate: 15,
-      shieldRegenDelay: 3,
+      shieldRegenRate: 30,
+      shieldRegenDelay: 1.2,
       stamina: 100,
       maxStamina: 100,
       credits: 0,
@@ -699,6 +701,7 @@ export class PlayerController implements IDamageable {
     }
 
     this.meshRoot.position.addInPlace(this.velocity);
+    this.resolveWallCollisions();
 
     let surfaceY = this.groundY;
     const rayLength = Math.max(8, Math.abs(this.velocity.y) * 20 + 5);
@@ -712,7 +715,8 @@ export class PlayerController implements IDamageable {
       const n = mesh.name;
       return n === "ground" || n.startsWith("skyPlat_") || n.startsWith("bridge_seg") ||
         n.startsWith("step_") || n.startsWith("rooftop_") || n === "mainHighway" ||
-        n === "crossHighway" || n === "spaceport";
+        n === "crossHighway" || n === "spaceport" ||
+        n.startsWith("extRamp") || n.endsWith("_floor") || n.endsWith("_roof");
     });
 
     if (hit && hit.hit && hit.pickedPoint) {
@@ -734,6 +738,69 @@ export class PlayerController implements IDamageable {
     if (this.isGrounded && this.armorEnergy < this.maxArmorEnergy) {
       this.armorEnergy = Math.min(this.maxArmorEnergy, this.armorEnergy + this.armorEnergyRegen * dt);
     }
+  }
+
+  /**
+   * Pushes the player out of any building wall AABBs. Called every frame after
+   * vertical movement is applied so the player can't walk through hollow-shell
+   * building walls. Door cutouts are naturally permitted because no collider is
+   * registered in those gap regions.
+   */
+  private resolveWallCollisions(): void {
+    if (this.wallColliders.length === 0) return;
+    if (this.isMounted()) return; // vehicles handle their own collision
+    const r = 0.5; // player radius
+    const headroom = 1.8;
+    const px0 = this.meshRoot.position.x;
+    const pz0 = this.meshRoot.position.z;
+    const py = this.meshRoot.position.y;
+    let px = px0;
+    let pz = pz0;
+    // Use velocity to decide push-out direction so the player gets pushed
+    // back along the axis they came in on (prevents tunnelling on thin walls).
+    const vx = this.velocity.x;
+    const vz = this.velocity.z;
+
+    for (let i = 0; i < this.wallColliders.length; i++) {
+      const w = this.wallColliders[i];
+      // Vertical-range filter: only walls overlapping the player's body height
+      if (py + headroom < w.minY || py - 0.2 > w.maxY) continue;
+      const minX = w.minX - r;
+      const maxX = w.maxX + r;
+      const minZ = w.minZ - r;
+      const maxZ = w.maxZ + r;
+      if (px < minX || px > maxX || pz < minZ || pz > maxZ) continue;
+
+      const dxL = px - minX;
+      const dxR = maxX - px;
+      const dzB = pz - minZ;
+      const dzF = maxZ - pz;
+      // Prefer push-out opposite to travel direction — this corrects for
+      // fast crossings that would otherwise pop the player to the far side.
+      const ax = Math.abs(vx);
+      const az = Math.abs(vz);
+      const useX = ax > az + 0.001;
+      const useZ = az > ax + 0.001;
+      if (useX) {
+        if (vx > 0) px = minX - 0.001; else px = maxX + 0.001;
+      } else if (useZ) {
+        if (vz > 0) pz = minZ - 0.001; else pz = maxZ + 0.001;
+      } else {
+        // No clear direction — fall back to shortest axis
+        const m = Math.min(dxL, dxR, dzB, dzF);
+        if (m === dxL) px = minX - 0.001;
+        else if (m === dxR) px = maxX + 0.001;
+        else if (m === dzB) pz = minZ - 0.001;
+        else pz = maxZ + 0.001;
+      }
+    }
+
+    if (px !== px0) this.meshRoot.position.x = px;
+    if (pz !== pz0) this.meshRoot.position.z = pz;
+  }
+
+  setBuildingColliders(colliders: WallCollider[]): void {
+    this.wallColliders = colliders;
   }
 
   private updateCamera(dt: number = 1 / 60): void {
@@ -964,8 +1031,8 @@ export class PlayerController implements IDamageable {
       case "maxHealth": return 250;
       case "maxArmor": return 100;
       case "maxShield": return 75;
-      case "shieldRegenRate": return 15;
-      case "shieldRegenDelay": return 3;
+      case "shieldRegenRate": return 30;
+      case "shieldRegenDelay": return 1.2;
       default: return 0;
     }
   }

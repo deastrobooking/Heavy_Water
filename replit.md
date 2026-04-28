@@ -54,7 +54,7 @@ The MiningSystem scatters destructible glowing resource nodes across the open wo
 ProgressSync.ts handles saving and loading player progress to a database, including stats, weapon levels, inventory, and captured creatures. Auto-save occurs periodically and on key game events, ensuring progression is preserved. A "friendly respawn" mechanism allows players to revive at a default location after death without losing progress, enhancing multiplayer-friendliness.
 
 ### Environment and World
-A CityGenerator creates a massive 1200x1200 open world featuring a central city and four distinct biomes. The SkySystem renders a custom-shader gradient skybox and drives a full day/night cycle, interpolating environmental lighting and fog, and supports weather modes.
+A CityGenerator creates a massive 1200x1200 open world featuring a central city and four distinct biomes. The SkySystem renders a custom-shader gradient skybox and drives a full day/night cycle, interpolating environmental lighting and fog, and supports weather modes. All major buildings (downtown, factories, residential, outer districts, sky-city blocks) are now generated as hollow shells with a front door and solid walls — players on foot can enter and hide inside. Tall buildings (>40m) get an external side ramp leading to a second door at mid-height. Wall AABBs are exposed via `getWallColliders()` and PlayerController resolves horizontal collisions against them every frame so the player physically bumps into walls but walks through door cutouts.
 
 ### Multiplayer
 A MultiplayerSystem provides client-side WebSocket integration for real-time multiplayer, supporting room management, position synchronization, chat, and enemy damage syncing for up to 4 players.

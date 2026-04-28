@@ -128,8 +128,8 @@ export const Game: React.FC = () => {
     maxArmor: 100,
     shield: 75,
     maxShield: 75,
-    shieldRegenRate: 15,
-    shieldRegenDelay: 3,
+    shieldRegenRate: 30,
+    shieldRegenDelay: 1.2,
     stamina: 100,
     maxStamina: 100,
     credits: 0,
@@ -266,6 +266,7 @@ export const Game: React.FC = () => {
         skyRef.current = sky;
 
         const player = new PlayerController(scene, engine.getCamera());
+        player.setBuildingColliders(cityGenerator.getWallColliders());
         playerRef.current = player;
 
         const weapons = new WeaponsSystem(scene, engine.getCamera());
@@ -937,9 +938,9 @@ export const Game: React.FC = () => {
 
               // Garbage-collect cooldown entries older than 5 s
               if (cooldownMap.size > 64) {
-                for (const [k, t] of cooldownMap) {
+                cooldownMap.forEach((t, k) => {
                   if (nowMs - t > 5000) cooldownMap.delete(k);
-                }
+                });
               }
 
               // ATV vs. props — ram destroys crates/barrels/canisters
@@ -1185,7 +1186,7 @@ export const Game: React.FC = () => {
     EventBus.getInstance().clear();
     setStats({
       health: 250, maxHealth: 250, armor: 100, maxArmor: 100,
-      shield: 75, maxShield: 75, shieldRegenRate: 15, shieldRegenDelay: 3,
+      shield: 75, maxShield: 75, shieldRegenRate: 30, shieldRegenDelay: 1.2,
       stamina: 100, maxStamina: 100, credits: 0, experience: 0, level: 1,
     });
     setPlayerUpgradeInfo([]);
