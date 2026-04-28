@@ -110,6 +110,18 @@ export class PlayerController implements IDamageable {
   private parryCooldown: number = 1.0;
   private parryCooldownTimer: number = 0;
 
+  // Boost dash — a forward camera-direction burst with brief invuln frames.
+  // Distinct from the standard Q dodge: dashing right before a beam-sabre
+  // slash triggers an instant energy wave (LB → LT chain).
+  private isBoostDashing: boolean = false;
+  private boostDashTimer: number = 0;
+  private boostDashDuration: number = 0.22;
+  private boostDashCooldown: number = 0.6;
+  private boostDashCooldownTimer: number = 0;
+  private boostDashSpeed: number = 2.4;
+  private boostDashDirection: BABYLON.Vector3 = BABYLON.Vector3.Zero();
+  private lastBoostDashAt: number = 0;
+
   private isJetpacking: boolean = false;
   private jetpackFuel: number = 200;
   private maxJetpackFuel: number = 200;
@@ -323,6 +335,10 @@ export class PlayerController implements IDamageable {
         this.startDodge();
       }
 
+      if (e.code === "KeyL" && !this.isBoostDashing && this.boostDashCooldownTimer <= 0) {
+        this.startBoostDash();
+      }
+
       if (e.code === "KeyF" && !this.isParrying && this.parryCooldownTimer <= 0) {
         this.startParry();
       }
@@ -488,6 +504,40 @@ export class PlayerController implements IDamageable {
     this.bus.emit(GameEvents.PLAYER_DODGE);
   }
 
+  private startBoostDash(): void {
+    if (this.stateMachine.isInState("stunned", "dead")) return;
+    if (this.mountedVehiclePos) return;
+
+    this.isBoostDashing = true;
+    this.boostDashTimer = this.boostDashDuration;
+    this.isInvulnerable = true;
+    this.lastBoostDashAt = performance.now();
+
+    // Forward camera direction (or input direction if WASD held).
+    const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
+    const right = this.camera.getDirection(BABYLON.Vector3.Right());
+    forward.y = 0; right.y = 0;
+    forward.normalize(); right.normalize();
+
+    const dir = BABYLON.Vector3.Zero();
+    if (this.keys["KeyW"]) dir.addInPlace(forward);
+    if (this.keys["KeyS"]) dir.addInPlace(forward.scale(-1));
+    if (this.keys["KeyA"]) dir.addInPlace(right.scale(-1));
+    if (this.keys["KeyD"]) dir.addInPlace(right);
+    if (dir.length() < 0.1) dir.copyFrom(forward);
+    dir.normalize();
+
+    this.boostDashDirection = dir;
+    this.bus.emit(GameEvents.PLAYER_DODGE);
+  }
+
+  /** Milliseconds since the last boost-dash trigger. Used by the Beam Sabre to
+   *  recognize a "dash → slash" chain and fire an instant energy wave. */
+  getMsSinceLastBoostDash(): number {
+    if (this.lastBoostDashAt === 0) return Number.POSITIVE_INFINITY;
+    return performance.now() - this.lastBoostDashAt;
+  }
+
   private startParry(): void {
     if (this.stateMachine.isInState("stunned", "dead", "dodging")) return;
 
@@ -528,6 +578,8 @@ export class PlayerController implements IDamageable {
 
     if (this.isDodging) {
       this.updateDodge(deltaTime);
+    } else if (this.isBoostDashing) {
+      this.updateBoostDash(deltaTime);
     } else {
       this.updateMovement(deltaTime);
     }
@@ -537,8 +589,23 @@ export class PlayerController implements IDamageable {
     this.updateAnimations(deltaTime);
   }
 
+  private updateBoostDash(dt: number): void {
+    this.boostDashTimer -= dt;
+    if (this.boostDashTimer <= 0) {
+      this.isBoostDashing = false;
+      this.isInvulnerable = false;
+      this.boostDashCooldownTimer = this.boostDashCooldown;
+      return;
+    }
+    // Apply horizontal dash velocity; preserve gravity on Y.
+    const step = this.boostDashDirection.scale(this.boostDashSpeed);
+    this.velocity.x = step.x;
+    this.velocity.z = step.z;
+  }
+
   private updateTimers(dt: number): void {
     if (this.dodgeCooldownTimer > 0) this.dodgeCooldownTimer -= dt;
+    if (this.boostDashCooldownTimer > 0) this.boostDashCooldownTimer -= dt;
     if (this.parryCooldownTimer > 0) this.parryCooldownTimer -= dt;
     if (this.staminaRegenDelay > 0) this.staminaRegenDelay -= dt;
 
@@ -947,6 +1014,7 @@ export class PlayerController implements IDamageable {
       this.velocity.setAll(0);
       this.isFlying = false;
       this.isDodging = false;
+      this.isBoostDashing = false;
       this.stateMachine.changeState("idle");
       if (this.humanoid) {
         const root = this.humanoid.getRoot();
@@ -1075,6 +1143,7 @@ export class PlayerController implements IDamageable {
     this.isFlying = false;
     this.isJetpacking = false;
     this.isDodging = false;
+    this.isBoostDashing = false;
     this.isParrying = false;
     this.velocity.setAll(0);
     this.meshRoot.position.copyFrom(spawnPosition);

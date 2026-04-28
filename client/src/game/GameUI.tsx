@@ -34,7 +34,7 @@ interface GameUIProps {
   playerState?: string;
   comboInfo?: { name: string; index: number } | null;
   specialWeapons?: { slot: number; name: string; ammo: number; maxAmmo: number; cooldownRemaining: number; level: number }[];
-  elementalSpecials?: { kind: string; name: string; category: string; key: string; level: number; maxLevel: number; cooldownMs: number; cooldownRemaining: number; damagePerHit: number; radius: number; maxTargets: number }[];
+  elementalSpecials?: { kind: string; name: string; category: string; key: string; level: number; maxLevel: number; cooldownMs: number; cooldownRemaining: number; damagePerHit: number; radius: number; maxTargets: number; isCurrent?: boolean }[];
   beamSabreActive?: boolean;
   beamSabreLevel?: number;
   activeElement?: string | null;
@@ -499,10 +499,13 @@ export const GameUI: React.FC<GameUIProps> = ({
               };
               const cls = colorMap[sp.kind] ?? "border-white text-white";
               const keyLabel = sp.key.startsWith("Key") ? sp.key.replace("Key", "") : sp.key;
+              // Highlight the currently-selected elemental (controller RB
+              // fires this one, D-pad Up/Down cycle through the row).
+              const selectedRing = sp.isCurrent ? "ring-2 ring-yellow-300 shadow-[0_0_12px_rgba(253,224,71,0.7)]" : "";
               return (
                 <div
                   key={sp.kind}
-                  className={`relative w-20 h-16 border-2 rounded p-1 ${cls} ${ready ? "bg-black/60" : "bg-black/80 opacity-60"}`}
+                  className={`relative w-20 h-16 border-2 rounded p-1 ${cls} ${ready ? "bg-black/60" : "bg-black/80 opacity-60"} ${selectedRing}`}
                   title={`${sp.name} — ${sp.category === "tracking" ? `tracks ${sp.maxTargets} targets` : `dome AoE r${sp.radius.toFixed(0)}`}, ${sp.damagePerHit} dmg`}
                 >
                   <div className="text-[9px] font-bold leading-tight">{sp.name}</div>
@@ -548,13 +551,16 @@ export const GameUI: React.FC<GameUIProps> = ({
           <div>WASD - Move | SHIFT - Sprint</div>
           <div>MOUSE - Look | LMB - Fire</div>
           <div>1-6 - Weapons | P - Hunter Missile</div>
+          <div>, / .  - Cycle Weapon (D-Pad ◀▶)</div>
           <div>7-0 - Special Arsenal | R - Reload</div>
           <div>SPACE - Jump (x3 = Fly) | X - Flight</div>
-          <div>Q - Dodge | F - Parry | E - Interact</div>
+          <div>Q - Dodge | <span className="text-yellow-300">L - Boost Dash</span> | F - Parry</div>
+          <div>E - Interact | G - Build</div>
           <div>V - Melee | B - Heavy Melee</div>
-          <div>Y - Beam Sabre | G - Sabre Slash</div>
+          <div>Y - Beam Sabre | <span className="text-yellow-300">J - Slash</span> (L→J = wave!)</div>
           <div className="text-cyan-300">Z/I/N - Lightning/Ice/Fire (track)</div>
           <div className="text-cyan-300">U/T/M - Inferno/Wind/Psychic (dome)</div>
+          <div className="text-yellow-300">K - Cast Selected | O / . - Cycle</div>
         </div>
       </div>
 

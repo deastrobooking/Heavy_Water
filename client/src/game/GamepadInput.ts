@@ -4,21 +4,36 @@ interface ButtonMap {
   [buttonIndex: number]: { code: string; key?: string };
 }
 
+// Controller bindings (Xbox-style indices):
+//  0 (A) → Space (jump / fly)
+//  1 (B) → KeyE (interact: enter vehicle, talk, mount)
+//  2 (X) → KeyV (capture)
+//  3 (Y) → KeyB (sabre toggle synonym; KeyY remains the keyboard binding)
+//  4 (LB) → KeyL (boost dash with i-frames)
+//  5 (RB) → KeyK (cast currently-selected elemental special)
+//  8 (Select / View) → Tab (upgrade menu)
+//  9 (Start / Menu) → KeyG (build mode)
+// 10 (L3) → ShiftLeft (sprint)
+// 11 (R3) → KeyC (toggle 1st/3rd person)
+// 12 (D-Pad Up) → KeyO (cycle current elemental special UP)
+// 13 (D-Pad Down) → Period (cycle current elemental special DOWN)
+// 14 (D-Pad Left) → Comma (cycle weapon LEFT)
+// 15 (D-Pad Right) → Slash (cycle weapon RIGHT)
 const BUTTON_TO_KEY: ButtonMap = {
   0: { code: "Space", key: " " },
-  1: { code: "KeyF", key: "f" },
+  1: { code: "KeyE", key: "e" },
   2: { code: "KeyV", key: "v" },
   3: { code: "KeyB", key: "b" },
-  4: { code: "KeyQ", key: "q" },
-  5: { code: "KeyR", key: "r" },
-  8: { code: "KeyM", key: "m" },
+  4: { code: "KeyL", key: "l" },
+  5: { code: "KeyK", key: "k" },
+  8: { code: "Tab", key: "Tab" },
   9: { code: "KeyG", key: "g" },
   10: { code: "ShiftLeft", key: "Shift" },
   11: { code: "KeyC", key: "c" },
-  12: { code: "KeyX", key: "x" },
-  13: { code: "KeyT", key: "t" },
-  14: { code: "KeyE", key: "e" },
-  15: { code: "KeyP", key: "p" },
+  12: { code: "KeyO", key: "o" },
+  13: { code: "Period", key: "." },
+  14: { code: "Comma", key: "," },
+  15: { code: "Slash", key: "/" },
 };
 
 const TRIGGER_THRESHOLD = 0.5;
@@ -130,10 +145,14 @@ export class GamepadInput {
     const rtVal = activePad.buttons[7]?.value ?? (activePad.buttons[7]?.pressed ? 1 : 0);
     const ltDown = ltVal >= TRIGGER_THRESHOLD;
     const rtDown = rtVal >= TRIGGER_THRESHOLD;
+    // RT (right trigger): primary fire — emulate left mouse button.
     if (rtDown && !this.prevTriggers.rt) this.dispatchMouseButton(true, 0);
     else if (!rtDown && this.prevTriggers.rt) this.dispatchMouseButton(false, 0);
-    if (ltDown && !this.prevTriggers.lt) this.dispatchMouseButton(true, 2);
-    else if (!ltDown && this.prevTriggers.lt) this.dispatchMouseButton(false, 2);
+    // LT (left trigger): beam-sabre slash — synthesize KeyJ instead of right
+    // mouse, so the slash works on foot, in vehicles, and in flight without
+    // colliding with browser context-menu / aim-down-sights wiring.
+    if (ltDown && !this.prevTriggers.lt) this.dispatchKeyDown("KeyJ", "j");
+    else if (!ltDown && this.prevTriggers.lt) this.dispatchKeyUp("KeyJ", "j");
     this.prevTriggers.lt = ltDown;
     this.prevTriggers.rt = rtDown;
 
@@ -181,7 +200,7 @@ export class GamepadInput {
       }
     }
     if (this.prevTriggers.rt) { this.dispatchMouseButton(false, 0); this.prevTriggers.rt = false; }
-    if (this.prevTriggers.lt) { this.dispatchMouseButton(false, 2); this.prevTriggers.lt = false; }
+    if (this.prevTriggers.lt) { this.dispatchKeyUp("KeyJ", "j"); this.prevTriggers.lt = false; }
     this.prevButtons.forEach((prev, padIndex) => {
       for (let i = 0; i < prev.length; i++) {
         const map = BUTTON_TO_KEY[i];

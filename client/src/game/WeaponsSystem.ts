@@ -421,7 +421,7 @@ export class WeaponsSystem {
     }
   }
 
-  private cycleWeapon(direction: number): void {
+  cycleWeapon(direction: number): void {
     const types: WeaponType[] = ["pistol", "rifle", "shotgun", "rocket", "laser", "grenade", "tracking_missile"];
     const currentIndex = types.indexOf(this.currentWeapon);
     const newIndex = (currentIndex + direction + types.length) % types.length;

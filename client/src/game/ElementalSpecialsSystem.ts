@@ -33,7 +33,17 @@ export interface ElementalDisplay {
   damagePerHit: number;
   radius: number;
   maxTargets: number;
+  isCurrent: boolean;
 }
+
+const ELEMENT_ORDER: ElementalKind[] = [
+  "lightning",
+  "ice",
+  "fireball",
+  "inferno",
+  "windstorm",
+  "psychic",
+];
 
 const MAX_LEVEL = 5;
 
@@ -152,6 +162,12 @@ export class ElementalSpecialsSystem {
   private pendingTimeouts: Set<number> = new Set();
   private pendingRafs: Set<number> = new Set();
   private disposed: boolean = false;
+  private currentIndex: number = 0;
+  // Throttle UI notifications. Cooldown ticks every frame would otherwise
+  // re-render the React HUD ~60 times/sec, which is wasteful and contributed
+  // to the prior sluggish feel.
+  private notifyAccumMs: number = 0;
+  private notifyIntervalMs: number = 100;
 
   constructor(
     scene: BABYLON.Scene,
@@ -207,8 +223,11 @@ export class ElementalSpecialsSystem {
 
   getDisplays(): ElementalDisplay[] {
     const out: ElementalDisplay[] = [];
-    const list = Array.from(this.specials.values());
-    for (const sp of list) {
+    // Iterate in canonical ELEMENT_ORDER so D-pad cycling and the HUD line up.
+    for (let i = 0; i < ELEMENT_ORDER.length; i++) {
+      const kind = ELEMENT_ORDER[i];
+      const sp = this.specials.get(kind);
+      if (!sp) continue;
       const def = ELEMENT_DEFS[sp.kind];
       out.push({
         kind: sp.kind,
@@ -222,9 +241,27 @@ export class ElementalSpecialsSystem {
         damagePerHit: this.scaledDamage(def, sp.level),
         radius: this.scaledRadius(def, sp.level),
         maxTargets: this.scaledTargets(def, sp.level),
+        isCurrent: i === this.currentIndex,
       });
     }
     return out;
+  }
+
+  /** Cycle the currently-selected elemental (for RB-style "fire current"). */
+  cycleCurrent(direction: number): void {
+    const n = ELEMENT_ORDER.length;
+    this.currentIndex = ((this.currentIndex + direction) % n + n) % n;
+    this.notifyChange();
+  }
+
+  /** Cast whichever elemental is currently selected. Used by RB on controller. */
+  castCurrent(): void {
+    const kind = ELEMENT_ORDER[this.currentIndex];
+    if (kind) this.cast(kind);
+  }
+
+  getCurrentKind(): ElementalKind {
+    return ELEMENT_ORDER[this.currentIndex];
   }
 
   private scaledDamage(def: typeof ELEMENT_DEFS[ElementalKind], level: number): number {
@@ -479,11 +516,23 @@ export class ElementalSpecialsSystem {
 
     // tick cooldowns
     const cdList = Array.from(this.specials.values());
+    let anyOnCooldown = false;
     for (const sp of cdList) {
       if (sp.cooldownRemaining > 0) {
         sp.cooldownRemaining = Math.max(0, sp.cooldownRemaining - dtMs);
+        anyOnCooldown = true;
+      }
+    }
+    // Throttle UI updates: only notify ~10 times/sec when something is on
+    // cooldown. Avoids per-frame React re-renders of the elemental HUD.
+    if (anyOnCooldown) {
+      this.notifyAccumMs += dtMs;
+      if (this.notifyAccumMs >= this.notifyIntervalMs) {
+        this.notifyAccumMs = 0;
         cooldownChanged = true;
       }
+    } else {
+      this.notifyAccumMs = 0;
     }
 
     // trackers

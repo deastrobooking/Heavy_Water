@@ -67,6 +67,15 @@ export class BeamSabreSystem {
     this.damageRouter = fn;
   }
 
+  // Optional checker that returns ms-since-last-boost-dash. When set and
+  // the player slashes within the chain window, we instantly fire an energy
+  // wave (LB → LT chain) without waiting for a full multi-slash combo.
+  private dashChecker: (() => number) | null = null;
+  private dashChainWindowMs: number = 600;
+  setDashChecker(fn: () => number): void {
+    this.dashChecker = fn;
+  }
+
   private isHittable(mesh: BABYLON.AbstractMesh): boolean {
     if (!mesh.metadata) return false;
     const m = mesh.metadata as any;
@@ -179,6 +188,28 @@ export class BeamSabreSystem {
 
   attack(): void {
     if (!this.sabre.isActive || this.isSlashing || this.cooldownTimer > 0) return;
+
+    // Dash → slash chain: if the player just boost-dashed, fire the energy
+    // wave immediately, do a single satisfying slash, and put the sabre on
+    // cooldown. This is the LB → LT signature combo.
+    if (this.dashChecker) {
+      const sinceMs = this.dashChecker();
+      if (sinceMs <= this.dashChainWindowMs) {
+        this.isSlashing = true;
+        this.currentSlash = 0;
+        this.performSlashHit();
+        this.animateSlash();
+        this.launchEnergyWave();
+        this.cooldownTimer = this.sabre.cooldown;
+        // Release the slash lock after the visual finishes.
+        const t = window.setTimeout(() => {
+          this.isSlashing = false;
+          this.currentSlash = 0;
+        }, 220);
+        this.slashTimers.push(t);
+        return;
+      }
+    }
 
     this.isSlashing = true;
     this.currentSlash = 0;
@@ -452,6 +483,10 @@ export class BeamSabreSystem {
       clearTimeout(t);
     }
     this.slashTimers = [];
+    // Reset slash state so a fresh re-init won't be locked out if a chain
+    // attack was mid-flight when dispose() ran.
+    this.isSlashing = false;
+    this.currentSlash = 0;
 
     if (this.sabreMesh) {
       this.sabreMesh.dispose();

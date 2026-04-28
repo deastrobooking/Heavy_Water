@@ -327,6 +327,13 @@ export const Game: React.FC = () => {
         // is reassigned every frame inside the render loop, where all the
         // enemy-tracking systems are available).
         beamSabre.setDamageRouter(() => { /* replaced once render loop starts */ });
+        // Wire the dash → slash chain. The Beam Sabre asks the player how
+        // long ago the boost-dash button was pressed; if it's recent, the
+        // attack short-circuits to fire an energy wave immediately.
+        beamSabre.setDashChecker(() => {
+          const p = playerRef.current;
+          return p ? p.getMsSinceLastBoostDash() : Number.POSITIVE_INFINITY;
+        });
 
         const aimOrigin = () => player.getAimOrigin();
         weapons.setAimOriginProvider(aimOrigin);
@@ -1537,19 +1544,45 @@ export const Game: React.FC = () => {
           setGardenOpen(true);
           if (document.pointerLockElement) document.exitPointerLock();
         }
-      } else if (e.code === "KeyY") {
-        // Toggle the on-foot Beam Sabre.
+      } else if (e.code === "KeyY" || e.code === "KeyB") {
+        // Toggle the on-foot Beam Sabre. KeyY is the canonical keyboard
+        // binding; KeyB is the controller's Y-button synonym.
         if (beamSabreRef.current) {
           beamSabreRef.current.toggle();
           setBeamSabreActive(beamSabreRef.current.active);
         }
-      } else if (e.code === "KeyG") {
+      } else if (e.code === "KeyJ") {
         // Slash combo + energy wave finisher. The signature on-foot move.
+        // (KeyG is reserved for build mode.)
         if (beamSabreRef.current && beamSabreRef.current.active) {
           beamSabreRef.current.attack();
         } else if (beamSabreRef.current) {
-          // Helpful nudge if the player tries to slash with the sabre off.
           showMessage("PRESS Y TO ACTIVATE BEAM SABRE", 1200);
+        }
+      } else if (e.code === "KeyK") {
+        // Cast the currently-selected elemental special (controller RB).
+        if (elementalSpecialsRef.current) {
+          elementalSpecialsRef.current.castCurrent();
+        }
+      } else if (e.code === "KeyO") {
+        // Cycle currently-selected elemental UP (D-pad up).
+        if (elementalSpecialsRef.current) {
+          elementalSpecialsRef.current.cycleCurrent(-1);
+        }
+      } else if (e.code === "Period") {
+        // Cycle currently-selected elemental DOWN (D-pad down).
+        if (elementalSpecialsRef.current) {
+          elementalSpecialsRef.current.cycleCurrent(1);
+        }
+      } else if (e.code === "Comma") {
+        // Cycle equipped weapon LEFT (D-pad left).
+        if (weaponsRef.current) {
+          weaponsRef.current.cycleWeapon(-1);
+        }
+      } else if (e.code === "Slash") {
+        // Cycle equipped weapon RIGHT (D-pad right).
+        if (weaponsRef.current) {
+          weaponsRef.current.cycleWeapon(1);
         }
       } else if (e.code === "Escape") {
         if (upgradeMenuOpen) setUpgradeMenuOpen(false);
