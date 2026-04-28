@@ -41,10 +41,10 @@ The Beam Sabre is always equipped — pressing Y (keyboard) or controller-Y trig
 The unlock API is `unlockSpinAttack()` / `unlockTwinWave()` / `unlockGiantBlade()` plus `startCharge()` / `releaseCharge()` for hold-to-spin input.
 
 ### Music and Sound
-A singleton MusicSystem manages dynamic music loading, playback, and includes an in-game UI.
+A singleton MusicSystem manages dynamic music loading, playback, and includes an in-game UI. Game music auto-pauses on death (one-shot guard `deathHandledRef` so the per-frame death check doesn't repeatedly pause) and resumes from `handleRestart` via `MusicSystem.startGameMusic()`.
 
 ### Vehicles
-A parametric vehicle pipeline generates ATVs and space fighters. VehicleFactory builds meshes, and VehicleSystem manages instances and physics for ground and aerial vehicles, including respawn.
+A parametric vehicle pipeline generates ATVs and space fighters. VehicleFactory builds meshes, and VehicleSystem manages instances and physics for ground and aerial vehicles, including respawn. The factory's `matCacheByScene` is keyed per Babylon scene (with a `clearVehicleMaterialCache(scene)` hook called from `VehicleSystem.dispose`) so cached materials never outlive their scene — fixes the "transparent vehicles after death+restart" bug.
 
 ### Loot and Pickups
 The PickupSystem spawns physical glowing world meshes from defeated enemies, which magnetize towards the player for collection. Drop tables are enemy-specific. **Drop rates are doubled** vs. the original baseline so progression keeps up with the new high-cost specials. The optional **Auto-Loot Drones** SPECIALS unlock turns every active companion into a secondary collector — `setCompanionPositionsProvider(fn)` feeds live companion positions and `setAutoLootEnabled(true)` extends both magnet (×1.4) and collect (×1.6) radii to the nearest companion as well as the player.
@@ -62,7 +62,7 @@ The BuildingSystem enables Minecraft-style mining and building with grid-snapped
 A ShopSystem manages 5 shop locations with dynamic pricing. The GardenSystem and CompanionSystem manage digital companions with leveling and bonding. A MapSystem provides a real-time minimap. Companions are aggressive assistants — combat allies engage at 32m range with ~0.85s cooldowns and faster, larger projectiles. Even MedicDrones now contribute light support fire while healing. The premium **Robot Dragon** ally (`RoboDragon` hybrid preset, scale 1.6, winged with cannons) is gated behind a SPECIALS-tab unlock and bumps the companion cap by 1 if the lab is full so it always slots in.
 
 ### Enemy Systems
-The EnemySystem features a wave spawner for distinct enemy types, including Commanders. The Robot Shape Engine generates all robots (enemies, allies, pets) using parametric descriptors. Aerial enemies (fighters, battleships, Fortresses) have specialized behaviors and are initially passive, engaging upon player aggression towards any aerial unit or enemy base. Aerial unit shots are line-of-sight tested against city buildings. Hostile Enemy Bases include turrets and destructible loot vaults.
+The EnemySystem features a wave spawner for distinct enemy types, including Commanders. The Robot Shape Engine generates all robots (enemies, allies, pets) using parametric descriptors. Aerial enemies (fighters, battleships, Fortresses) have specialized behaviors and are initially passive, engaging upon player aggression towards any aerial unit or enemy base. Aerial unit shots are line-of-sight tested against city buildings. Hostile Enemy Bases include turrets and destructible loot vaults. **Flying Fortresses** use a 5-minute regroup lockout (`FORTRESS_REGROUP_SECONDS = 300`) — once the player wipes out every fortress, none respawn until the timer elapses (a `FLYING FORTRESSES ROUTED — REGROUPING` UI message announces it). Fighters and battleships continue to drip-spawn during the lockout (when aggro).
 
 ### Resource Nodes
 The MiningSystem scatters destructible glowing resource nodes that respawn after a delay.

@@ -1,5 +1,5 @@
 import * as BABYLON from "@babylonjs/core";
-import { VehicleFactory, VehicleMeshes } from "./VehicleFactory";
+import { VehicleFactory, VehicleMeshes, clearVehicleMaterialCache } from "./VehicleFactory";
 import { VehicleDescriptor, VehicleKind, VEHICLE_PRESETS } from "./VehicleDesigner";
 import { EventBus } from "./EventBus";
 import type { WallCollider } from "./CityGenerator";
@@ -341,5 +341,9 @@ export class VehicleSystem {
       try { v.meshes.root.dispose(); } catch {}
     }
     this.vehicles = [];
+    // Drop the per-scene material cache so the next session rebuilds materials
+    // fresh — a stale cached material on a disposed scene rendered as fully
+    // transparent vehicle meshes after death+restart.
+    try { clearVehicleMaterialCache(this.scene); } catch {}
   }
 }

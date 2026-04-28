@@ -674,6 +674,14 @@ export class AerialEnemySystem {
   private static readonly MAX_FIGHTERS = 4;
   private static readonly MAX_BATTLESHIPS = 1;
   private static readonly MAX_FORTRESSES = 3;
+  // Once the player wipes out every Flying Fortress, the squadron stays away
+  // for this long before any can respawn (5 minutes). Prevents the fortresses
+  // from re-appearing seconds after a hard-fought victory.
+  private static readonly FORTRESS_REGROUP_SECONDS = 300;
+  /** Counts down after the last live fortress dies; while > 0, no fortress respawn. */
+  private fortressRegroupTimer: number = 0;
+  /** Tracks whether at least one fortress was alive last tick, so we know when "all" just died. */
+  private fortressesEverAlive: boolean = false;
 
   constructor(scene: BABYLON.Scene) {
     this.scene = scene;
@@ -773,13 +781,29 @@ export class AerialEnemySystem {
     // landmarks). Fighters/battleships only spawn after the player picks a
     // fight (engages a base, mothership, or any aerial unit).
     this.spawnCooldown -= dt;
+    // Tick down the post-victory regroup timer regardless of the spawn cooldown.
+    if (this.fortressRegroupTimer > 0) this.fortressRegroupTimer -= dt;
+
+    // Detect the "last fortress just died" transition: when we previously had
+    // any fortresses alive and now have zero, start the 5-minute lockout.
+    const liveFortresses = this.units.filter(u => u.kind === "fortress" && u.isAlive).length;
+    if (liveFortresses > 0) {
+      this.fortressesEverAlive = true;
+    } else if (this.fortressesEverAlive && this.fortressRegroupTimer <= 0) {
+      this.fortressRegroupTimer = AerialEnemySystem.FORTRESS_REGROUP_SECONDS;
+      this.fortressesEverAlive = false;
+      console.log("[AerialEnemySystem] All fortresses defeated — regrouping for 5 minutes");
+      this.bus.emit(GameEvents.UI_MESSAGE, "FLYING FORTRESSES ROUTED — REGROUPING");
+    }
+
     if (this.spawnCooldown <= 0) {
       this.spawnCooldown = 6 + Math.random() * 4;
       const fighters = this.units.filter(u => u.kind === "fighter" && u.isAlive).length;
       const battleships = this.units.filter(u => u.kind === "battleship" && u.isAlive).length;
-      const fortresses = this.units.filter(u => u.kind === "fortress" && u.isAlive).length;
+      const fortresses = liveFortresses;
 
-      if (fortresses < AerialEnemySystem.MAX_FORTRESSES) {
+      // Fortresses only respawn after the regroup lockout expires.
+      if (fortresses < AerialEnemySystem.MAX_FORTRESSES && this.fortressRegroupTimer <= 0) {
         this.spawnFortress(playerPos);
       } else if (this.aggro && fighters < AerialEnemySystem.MAX_FIGHTERS) {
         this.spawnFighter(playerPos);

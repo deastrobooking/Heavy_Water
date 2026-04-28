@@ -199,6 +199,8 @@ export class WeaponsSystem {
         case "Digit4": this.selectWeapon("rocket"); break;
         case "Digit5": this.selectWeapon("laser"); break;
         case "Digit6": this.selectWeapon("grenade"); break;
+        // Hunter Missile uses KeyP because Digit7-Digit0 are taken by the
+        // Special Arsenal (elemental) bindings.
         case "KeyP": this.selectWeapon("tracking_missile"); break;
         case "KeyR": this.reload(); break;
       }

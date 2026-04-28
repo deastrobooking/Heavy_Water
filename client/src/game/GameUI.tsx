@@ -600,25 +600,39 @@ export const GameUI: React.FC<GameUIProps> = ({
         </div>
       )}
 
-      <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2">
+      {/*
+        Weapon hotbar lives above the elemental specials panel (which sits at
+        bottom-4 with ~110px tall icons). bottom-32 keeps it clear of overlap.
+        "MISSILE" is the Hunter Missile (`tracking_missile`) — special-cased
+        because the label and weapon-type id don't share a stem.
+      */}
+      <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2">
         <div className="flex gap-2">
-          {["1:PISTOL", "2:RIFLE", "3:SHOTGUN", "4:ROCKET", "5:LASER", "6:GRENADE"].map((w, i) => (
+          {[
+            { label: "1:PISTOL",   type: "pistol" },
+            { label: "2:RIFLE",    type: "rifle" },
+            { label: "3:SHOTGUN",  type: "shotgun" },
+            { label: "4:ROCKET",   type: "rocket" },
+            { label: "5:LASER",    type: "laser" },
+            { label: "6:GRENADE",  type: "grenade" },
+            { label: "P:MISSILE",  type: "tracking_missile" },
+          ].map((w) => (
             <div
-              key={i}
+              key={w.type}
               className={`px-2 py-1 text-xs border rounded ${
-                weapon?.type === w.split(":")[1].toLowerCase()
+                weapon?.type === w.type
                   ? "border-cyan-400 text-cyan-400 bg-cyan-900/50"
                   : "border-gray-600 text-gray-500"
               }`}
             >
-              {w}
+              {w.label}
             </div>
           ))}
         </div>
       </div>
 
       {planMode && prefabHotbar && prefabHotbar.length > 0 && (
-        <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2">
+        <div className="absolute bottom-44 left-1/2 transform -translate-x-1/2">
           <div className="bg-black/85 border-2 border-fuchsia-400/70 rounded-lg px-3 py-2 shadow-lg shadow-fuchsia-500/30 max-w-[90vw]">
             <div className="text-fuchsia-300 text-xs text-center mb-1.5 font-bold tracking-wider">
               PLAN MODE — Wheel/[ ] cycles · LMB Place · RMB Remove · R Rotate · P Exit

@@ -79,6 +79,9 @@ export const Game: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<BabylonEngine | null>(null);
   const initializingRef = useRef(false);
+  // One-shot guard so we only pause music once per death (the death check
+  // runs every render frame). Reset on initializeGame / handleRestart.
+  const deathHandledRef = useRef(false);
   const playerRef = useRef<PlayerController | null>(null);
   const weaponsRef = useRef<WeaponsSystem | null>(null);
   const enemySystemRef = useRef<EnemySystem | null>(null);
@@ -270,6 +273,8 @@ export const Game: React.FC = () => {
       return;
     }
     initializingRef.current = true;
+    // Reset death-music guard so the next death can pause music again.
+    deathHandledRef.current = false;
 
     setGamePhase("playing");
 
@@ -1162,8 +1167,11 @@ export const Game: React.FC = () => {
             setCapturedCreatures(bioSystem.getCaptured());
           }
 
-          if (player.getStats().health <= 0) {
+          if (player.getStats().health <= 0 && !deathHandledRef.current) {
+            deathHandledRef.current = true;
             setGamePhase("gameover");
+            // Pause music so the menu/game-over screen isn't drowned in track audio.
+            try { MusicSystem.pause(); } catch {}
           }
 
           waveTimer += deltaTime;
@@ -1261,6 +1269,8 @@ export const Game: React.FC = () => {
   }, [showMessage]);
 
   const handleRestart = useCallback(() => {
+    // Restart in-game music — it was paused on death by the gameover guard.
+    try { void MusicSystem.init().then(() => MusicSystem.startGameMusic()); } catch {}
     // CRITICAL: dispose player FIRST to remove window keydown/keyup listeners.
     // Without this, the stale PlayerController keeps responding to input
     // against disposed Babylon meshes, causing the post-restart freeze.

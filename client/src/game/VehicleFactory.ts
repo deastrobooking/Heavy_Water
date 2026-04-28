@@ -1,19 +1,40 @@
 import * as BABYLON from "@babylonjs/core";
 import { VehicleDescriptor, VehicleStyle, RGB } from "./VehicleDesigner";
 
-const matCache = new Map<string, BABYLON.StandardMaterial>();
+// Per-scene material cache. The previous implementation used a single global
+// cache, which left disposed materials lingering after a restart and caused
+// vehicle meshes to render fully transparent on respawn (the cached
+// StandardMaterial belonged to the disposed scene). Keying by scene means
+// each new scene gets fresh materials, and the dispose hook below clears
+// entries when their scene goes away.
+const matCacheByScene = new WeakMap<BABYLON.Scene, Map<string, BABYLON.StandardMaterial>>();
 
 function getMat(scene: BABYLON.Scene, color: RGB, emissive: RGB = [0, 0, 0], glossy: boolean = false): BABYLON.StandardMaterial {
   const key = `vehmat_${color.join("_")}_${emissive.join("_")}_${glossy ? 1 : 0}`;
-  const cached = matCache.get(key);
-  if (cached) return cached;
+  let cache = matCacheByScene.get(scene);
+  if (!cache) {
+    cache = new Map();
+    matCacheByScene.set(scene, cache);
+    // Drop the cache when this scene is disposed so we never hand out a
+    // material from a dead scene on the next vehicle build.
+    scene.onDisposeObservable.add(() => matCacheByScene.delete(scene));
+  }
+  const cached = cache.get(key);
+  // isDisposed guard handles the rarer case of a single material being
+  // disposed while its scene is still alive.
+  if (cached && !(cached as any).isDisposed?.()) return cached;
   const m = new BABYLON.StandardMaterial(key, scene);
   m.diffuseColor = new BABYLON.Color3(color[0], color[1], color[2]);
   m.emissiveColor = new BABYLON.Color3(emissive[0] * 0.4, emissive[1] * 0.4, emissive[2] * 0.4);
   m.specularColor = glossy ? new BABYLON.Color3(0.6, 0.6, 0.6) : new BABYLON.Color3(0.05, 0.05, 0.05);
   m.specularPower = glossy ? 64 : 16;
-  matCache.set(key, m);
+  cache.set(key, m);
   return m;
+}
+
+/** Drop the per-scene vehicle material cache (called from VehicleSystem.dispose). */
+export function clearVehicleMaterialCache(scene: BABYLON.Scene): void {
+  matCacheByScene.delete(scene);
 }
 
 function box(scene: BABYLON.Scene, name: string, w: number, h: number, d: number, parent: BABYLON.TransformNode, mat: BABYLON.Material): BABYLON.Mesh {
