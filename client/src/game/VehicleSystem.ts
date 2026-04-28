@@ -40,7 +40,7 @@ export class VehicleSystem {
   private active: VehicleInstance | null = null;
   private getCameraYaw: () => number;
   private getCameraPitch: () => number;
-  private getGroundHeight: ((x: number, z: number) => number) | null = null;
+  private getGroundHeight: ((x: number, z: number, currentY?: number) => number) | null = null;
   private input: VehicleInputState = { forward: false, back: false, left: false, right: false, up: false, down: false, boost: false };
   private nextId: number = 0;
   private wallColliders: WallCollider[] = [];
@@ -115,7 +115,7 @@ export class VehicleSystem {
     console.log("[VehicleSystem] Initialized");
   }
 
-  setGroundHeightFn(fn: (x: number, z: number) => number): void {
+  setGroundHeightFn(fn: (x: number, z: number, currentY?: number) => number): void {
     this.getGroundHeight = fn;
   }
 
@@ -270,8 +270,11 @@ export class VehicleSystem {
     // Bump against building walls
     this.resolveVehicleWallCollisions(v, 2.5);
 
-    // Stick to ground
-    const groundY = this.getGroundHeight ? this.getGroundHeight(v.position.x, v.position.z) : 0;
+    // Stick to ground (queries ramps + sky-track + city ground via the
+    // closure provided by Game.tsx).
+    const groundY = this.getGroundHeight
+      ? this.getGroundHeight(v.position.x, v.position.z, v.position.y)
+      : 0;
     const targetY = groundY + ATV_GROUND_HEIGHT;
     v.position.y += (targetY - v.position.y) * Math.min(1, dt * 12);
 

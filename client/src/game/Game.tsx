@@ -267,6 +267,7 @@ export const Game: React.FC = () => {
 
         const player = new PlayerController(scene, engine.getCamera());
         player.setBuildingColliders(cityGenerator.getWallColliders());
+        player.setFloorPlatforms(cityGenerator.getFloorPlatforms());
         playerRef.current = player;
 
         const weapons = new WeaponsSystem(scene, engine.getCamera());
@@ -552,7 +553,12 @@ export const Game: React.FC = () => {
           () => player.getCameraYaw(),
           () => player.getCameraPitch(),
         );
-        vehicleSystem.setGroundHeightFn((_x, _z) => 0);
+        // Vehicles drive on the ground, on the racetrack ramp (tilted slab),
+        // and on the sky racetrack ring — the city generator's analytic
+        // surface query handles all three.
+        vehicleSystem.setGroundHeightFn((x, z, currentY) =>
+          cityGenerator.getDriveableHeight(x, z, currentY ?? Infinity),
+        );
         vehicleSystem.setBuildingColliders(cityGenerator.getWallColliders());
         vehicleRef.current = vehicleSystem;
         vehicleSystem.spawnPreset("RaiderATV", new BABYLON.Vector3(-6, 0.6, -10));

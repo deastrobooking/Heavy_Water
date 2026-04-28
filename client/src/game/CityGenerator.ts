@@ -22,11 +22,35 @@ export interface WallCollider {
   maxY: number;
 }
 
+/**
+ * A flat horizontal surface (building floor, roof, ramp landing, etc.) that
+ * the player can stand on. Faster to query analytically than to raycast against
+ * thousands of pickable meshes — see PlayerController.getBuildingFloorYAt().
+ */
+export interface FloorPlatform {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  y: number; // top surface Y
+}
+
 export class CityGenerator {
   private scene: BABYLON.Scene;
   private buildings: BABYLON.Mesh[] = [];
   private platforms: BABYLON.Mesh[] = [];
   private wallColliders: WallCollider[] = [];
+  private floorPlatforms: FloorPlatform[] = [];
+  // Sky-racetrack ramp parameters — saved so getDriveableHeight() can sample
+  // the ramp's tilted surface analytically (much faster + reliable than
+  // raycasting against a rotated box).
+  private rampParams: {
+    minX: number;
+    maxX: number;
+    zLow: number;     // world Z at the ramp's low end (y=0)
+    zHigh: number;    // world Z at the ramp's high end (y=rise)
+    rise: number;     // total Y rise from low end to high end
+  } | null = null;
   private cellShadeMaterial: BABYLON.ShaderMaterial | null = null;
 
   constructor(scene: BABYLON.Scene) {
@@ -127,7 +151,9 @@ export class CityGenerator {
     const safeDoorW = Math.min(doorW, Math.max(2, width - 2));
     const halfDoor = safeDoorW / 2;
 
-    // Floor (thin slab just above the base so player walks onto it cleanly)
+    // Floor (thin slab just above the base so player walks onto it cleanly).
+    // Marked non-pickable; ground detection uses an analytic AABB lookup
+    // (see floorPlatforms below) for speed.
     const floor = BABYLON.MeshBuilder.CreateBox(
       `${name}_floor`,
       { height: 0.2, width, depth },
@@ -135,10 +161,18 @@ export class CityGenerator {
     );
     floor.position = new BABYLON.Vector3(x, baseY + 0.1, z);
     floor.material = material;
+    floor.isPickable = false;
     floor.freezeWorldMatrix();
     this.buildings.push(floor);
+    this.floorPlatforms.push({
+      minX: x - halfW,
+      maxX: x + halfW,
+      minZ: z - halfD,
+      maxZ: z + halfD,
+      y: baseY + 0.2,
+    });
 
-    // Roof
+    // Roof — non-pickable; rooftop platform (added separately) covers walking on top.
     const roof = BABYLON.MeshBuilder.CreateBox(
       `${name}_roof`,
       { height: 0.4, width, depth },
@@ -146,8 +180,12 @@ export class CityGenerator {
     );
     roof.position = new BABYLON.Vector3(x, baseY + height - 0.2, z);
     roof.material = material;
+    roof.isPickable = false;
     roof.freezeWorldMatrix();
     this.buildings.push(roof);
+    // Roof underside doesn't need a floor platform entry; player can't stand
+    // on the inside of the roof. The exterior rooftop platform (where added)
+    // remains pickable as before.
 
     const pushWall = (
       n: string,
@@ -321,6 +359,13 @@ export class CityGenerator {
     landing.material = bodyMat;
     landing.freezeWorldMatrix();
     this.platforms.push(landing);
+    this.floorPlatforms.push({
+      minX: landing.position.x - landingD / 2,
+      maxX: landing.position.x + landingD / 2,
+      minZ: landing.position.z - landingW / 2,
+      maxZ: landing.position.z + landingW / 2,
+      y: doorBaseY,
+    });
 
     const rampLength = doorBaseY * 1.8;
     const slabL = Math.sqrt(rampLength * rampLength + doorBaseY * doorBaseY);
@@ -352,6 +397,41 @@ export class CityGenerator {
     return this.wallColliders;
   }
 
+  getFloorPlatforms(): FloorPlatform[] {
+    return this.floorPlatforms;
+  }
+
+  /**
+   * Returns the highest driveable Y at (x, z) for a vehicle whose chassis is
+   * currently at `currentY`. Used by VehicleSystem to keep ATVs sticking to
+   * the ground, the racetrack ramp, and the sky-track segments. The
+   * `currentY + headroom` filter prevents a vehicle on the ground from being
+   * yanked up onto a building rooftop just because its (x,z) happens to be
+   * inside the rooftop's footprint.
+   */
+  getDriveableHeight(x: number, z: number, currentY: number = Infinity): number {
+    let best = 0;
+    const headroom = 3.0;
+
+    // Sky-racetrack ramp (tilted plane). Linear in z between zHigh (top) and
+    // zLow (bottom); +Z end of ramp is the LOW end (see createSkyRacetrack).
+    const rp = this.rampParams;
+    if (rp && x >= rp.minX && x <= rp.maxX && z >= rp.zHigh && z <= rp.zLow) {
+      const t = (rp.zLow - z) / (rp.zLow - rp.zHigh);
+      const rampY = t * rp.rise;
+      if (rampY <= currentY + headroom && rampY > best) best = rampY;
+    }
+
+    // Floor platforms (track segments, ramp landing pad, building roofs/floors).
+    for (let i = 0; i < this.floorPlatforms.length; i++) {
+      const f = this.floorPlatforms[i];
+      if (f.y > currentY + headroom) continue;
+      if (x < f.minX || x > f.maxX || z < f.minZ || z > f.maxZ) continue;
+      if (f.y > best) best = f.y;
+    }
+    return best;
+  }
+
   generateCity(): void {
     this.createGround();
     this.createRiver();
@@ -369,6 +449,244 @@ export class CityGenerator {
     this.createSkyCities();
     this.createSkyBridges();
     this.createOuterDistricts();
+    this.createSkyRacetrack();
+  }
+
+  /**
+   * Builds a giant sky racetrack — a flat ring at high altitude encircling the
+   * downtown core — and a long ramp leading up to it from the south. The track
+   * is segmented (so cars can lean into the curve) with low neon barriers and a
+   * boost-pad runway entry. Both the ramp slab and the track segments are
+   * registered as floor platforms so ATVs and players cleanly land on them.
+   */
+  private createSkyRacetrack(): void {
+    const trackY = 80;
+    const trackRadius = 280;
+    const trackWidth = 22;
+    const segments = 56;
+
+    const trackMat = new BABYLON.StandardMaterial("racetrackMat", this.scene);
+    trackMat.diffuseColor = new BABYLON.Color3(0.08, 0.08, 0.12);
+    trackMat.emissiveColor = new BABYLON.Color3(0.05, 0.05, 0.08);
+    trackMat.freeze();
+
+    const lineMat = new BABYLON.StandardMaterial("racetrackLineMat", this.scene);
+    lineMat.diffuseColor = new BABYLON.Color3(0.05, 0.4, 0.5);
+    lineMat.emissiveColor = new BABYLON.Color3(0.1, 1.2, 1.6);
+    lineMat.freeze();
+
+    const barrierMat = new BABYLON.StandardMaterial("racetrackBarrierMat", this.scene);
+    barrierMat.diffuseColor = new BABYLON.Color3(0.4, 0.05, 0.3);
+    barrierMat.emissiveColor = new BABYLON.Color3(1.6, 0.2, 1.2);
+    barrierMat.freeze();
+
+    const segmentArc = (Math.PI * 2) / segments;
+    const segmentLen = 2 * trackRadius * Math.tan(segmentArc / 2);
+
+    for (let i = 0; i < segments; i++) {
+      const theta = i * segmentArc + segmentArc / 2;
+      const cx = Math.cos(theta) * trackRadius;
+      const cz = Math.sin(theta) * trackRadius;
+      // outward normal yaw — segment's depth axis points inward/outward, width axis is tangent
+      const yaw = -theta + Math.PI / 2;
+
+      const slab = BABYLON.MeshBuilder.CreateBox(
+        `rt_seg_${i}`,
+        { width: segmentLen + 0.5, height: 0.6, depth: trackWidth },
+        this.scene,
+      );
+      slab.position = new BABYLON.Vector3(cx, trackY, cz);
+      slab.rotation.y = yaw;
+      slab.material = trackMat;
+      slab.freezeWorldMatrix();
+      this.platforms.push(slab);
+
+      // Inner + outer neon barriers (low, so vehicles bump back)
+      const barrierH = 1.5;
+      const innerR = trackRadius - trackWidth / 2 + 0.3;
+      const outerR = trackRadius + trackWidth / 2 - 0.3;
+      const inner = BABYLON.MeshBuilder.CreateBox(
+        `rt_barIn_${i}`,
+        { width: segmentLen + 0.5, height: barrierH, depth: 0.5 },
+        this.scene,
+      );
+      inner.position = new BABYLON.Vector3(
+        Math.cos(theta) * innerR,
+        trackY + barrierH / 2 + 0.3,
+        Math.sin(theta) * innerR,
+      );
+      inner.rotation.y = yaw;
+      inner.material = barrierMat;
+      inner.isPickable = false;
+      inner.freezeWorldMatrix();
+
+      const outer = BABYLON.MeshBuilder.CreateBox(
+        `rt_barOut_${i}`,
+        { width: segmentLen + 0.5, height: barrierH, depth: 0.5 },
+        this.scene,
+      );
+      outer.position = new BABYLON.Vector3(
+        Math.cos(theta) * outerR,
+        trackY + barrierH / 2 + 0.3,
+        Math.sin(theta) * outerR,
+      );
+      outer.rotation.y = yaw;
+      outer.material = barrierMat;
+      outer.isPickable = false;
+      outer.freezeWorldMatrix();
+
+      // Wall colliders for the barriers — subdivide the curve into many
+      // SHORT chord pieces so each AABB tightly hugs the rotated barrier. A
+      // single big AABB per segment over-approximates badly at diagonal
+      // angles (an at-45° box has a √2× AABB swelling), causing vehicles to
+      // ricochet from empty air. With 6 sub-pieces per segment, each piece's
+      // AABB stays under ~5u even at the worst rotation.
+      const subDivs = 6;
+      const subArc = segmentArc / subDivs;
+      for (let s = 0; s < subDivs; s++) {
+        const subTheta = (i * segmentArc) + (s + 0.5) * subArc;
+        const subChord = 2 * trackRadius * Math.tan(subArc / 2) + 0.3;
+        const inX = Math.cos(subTheta) * innerR;
+        const inZ = Math.sin(subTheta) * innerR;
+        const outX = Math.cos(subTheta) * outerR;
+        const outZ = Math.sin(subTheta) * outerR;
+        // Tangent direction (unit): perpendicular to radial.
+        const tX = -Math.sin(subTheta);
+        const tZ = Math.cos(subTheta);
+        const halfChord = subChord / 2;
+        // Inner barrier sub-piece
+        const inMinX = Math.min(inX - tX * halfChord, inX + tX * halfChord);
+        const inMaxX = Math.max(inX - tX * halfChord, inX + tX * halfChord);
+        const inMinZ = Math.min(inZ - tZ * halfChord, inZ + tZ * halfChord);
+        const inMaxZ = Math.max(inZ - tZ * halfChord, inZ + tZ * halfChord);
+        this.wallColliders.push({
+          minX: inMinX - 0.25,
+          maxX: inMaxX + 0.25,
+          minZ: inMinZ - 0.25,
+          maxZ: inMaxZ + 0.25,
+          minY: trackY,
+          maxY: trackY + barrierH + 0.5,
+        });
+        // Outer barrier sub-piece
+        const outMinX = Math.min(outX - tX * halfChord, outX + tX * halfChord);
+        const outMaxX = Math.max(outX - tX * halfChord, outX + tX * halfChord);
+        const outMinZ = Math.min(outZ - tZ * halfChord, outZ + tZ * halfChord);
+        const outMaxZ = Math.max(outZ - tZ * halfChord, outZ + tZ * halfChord);
+        this.wallColliders.push({
+          minX: outMinX - 0.25,
+          maxX: outMaxX + 0.25,
+          minZ: outMinZ - 0.25,
+          maxZ: outMaxZ + 0.25,
+          minY: trackY,
+          maxY: trackY + barrierH + 0.5,
+        });
+      }
+
+      // Neon center line every other segment for a sense of speed.
+      if (i % 2 === 0) {
+        const line = BABYLON.MeshBuilder.CreateBox(
+          `rt_line_${i}`,
+          { width: segmentLen * 0.55, height: 0.1, depth: 0.6 },
+          this.scene,
+        );
+        line.position = new BABYLON.Vector3(cx, trackY + 0.4, cz);
+        line.rotation.y = yaw;
+        line.material = lineMat;
+        line.isPickable = false;
+        line.freezeWorldMatrix();
+      }
+
+      // Segment AABB floor entry (over-approximation; adjacent segments
+      // overlap slightly so the player never falls through a seam).
+      const halfDiag = Math.max(segmentLen, trackWidth) / 2;
+      this.floorPlatforms.push({
+        minX: cx - halfDiag,
+        maxX: cx + halfDiag,
+        minZ: cz - halfDiag,
+        maxZ: cz + halfDiag,
+        y: trackY + 0.3,
+      });
+    }
+
+    // ─── Giant ramp from ground up to the south side of the ring ───
+    // Ring south point is at (0, trackY, trackRadius). Ramp lands just south
+    // of it so vehicles roll directly onto the track.
+    const rampWidth = 18;
+    const rampRise = trackY;
+    const rampRun = 220; // ~20° incline
+    const rampLen = Math.sqrt(rampRise * rampRise + rampRun * rampRun);
+    const rampMidZ = trackRadius + 8 + rampRun / 2;
+    const rampMidY = rampRise / 2;
+    const rampAngle = Math.atan2(rampRise, rampRun);
+
+    const rampMat = new BABYLON.StandardMaterial("racetrackRampMat", this.scene);
+    rampMat.diffuseColor = new BABYLON.Color3(0.1, 0.1, 0.14);
+    rampMat.emissiveColor = new BABYLON.Color3(0.04, 0.06, 0.1);
+    rampMat.freeze();
+
+    const ramp = BABYLON.MeshBuilder.CreateBox(
+      `rt_ramp`,
+      { width: rampWidth, height: 0.6, depth: rampLen },
+      this.scene,
+    );
+    ramp.position = new BABYLON.Vector3(0, rampMidY, rampMidZ);
+    ramp.rotation.x = rampAngle;
+    ramp.material = rampMat;
+    ramp.freezeWorldMatrix();
+    this.platforms.push(ramp);
+
+    // Save ramp footprint + slope so vehicles (and the analytic ground-height
+    // function) can sample the tilted surface without any raycast cost.
+    // The ramp's +Z (depth) end is the LOW end (y=0), -Z is the HIGH end (y=rise).
+    this.rampParams = {
+      minX: -rampWidth / 2,
+      maxX: rampWidth / 2,
+      zHigh: rampMidZ - rampRun / 2,  // top of ramp (small z)
+      zLow: rampMidZ + rampRun / 2,   // bottom of ramp (large z)
+      rise: rampRise,
+    };
+
+    // Glow strips along ramp sides
+    for (const side of [-1, 1]) {
+      const strip = BABYLON.MeshBuilder.CreateBox(
+        `rt_rampGlow`,
+        { width: 0.4, height: 0.2, depth: rampLen },
+        this.scene,
+      );
+      strip.position = new BABYLON.Vector3(side * (rampWidth / 2 - 0.3), rampMidY + 0.5, rampMidZ);
+      strip.rotation.x = rampAngle;
+      strip.material = barrierMat;
+      strip.isPickable = false;
+      strip.freezeWorldMatrix();
+    }
+
+    // Pad at bottom of ramp so vehicles can drive on without a step.
+    const pad = BABYLON.MeshBuilder.CreateBox(
+      `rt_rampPad`,
+      { width: rampWidth + 4, height: 0.4, depth: 12 },
+      this.scene,
+    );
+    pad.position = new BABYLON.Vector3(0, 0.2, trackRadius + rampRun + 14);
+    pad.material = rampMat;
+    pad.freezeWorldMatrix();
+    this.platforms.push(pad);
+    this.floorPlatforms.push({
+      minX: -rampWidth / 2 - 2,
+      maxX: rampWidth / 2 + 2,
+      minZ: trackRadius + rampRun + 8,
+      maxZ: trackRadius + rampRun + 20,
+      y: 0.4,
+    });
+
+    // Beacon pylon next to the pad so players can spot the entry from far away.
+    const beacon = BABYLON.MeshBuilder.CreateCylinder(
+      `rt_beacon`,
+      { height: 30, diameter: 1.5 },
+      this.scene,
+    );
+    beacon.position = new BABYLON.Vector3(rampWidth / 2 + 6, 15, trackRadius + rampRun + 14);
+    beacon.material = barrierMat;
+    beacon.freezeWorldMatrix();
   }
 
   private createGround(): void {
@@ -522,18 +840,20 @@ export class CityGenerator {
       { base: new BABYLON.Color3(0.1, 0.15, 0.2), glow: new BABYLON.Color3(0, 1, 0.5) },
     ];
 
+    // Wider grid + smaller jitter + slightly smaller footprints than before so
+    // there are real road-width gaps between downtown buildings (~14-18u clear).
     let seed = 100;
-    for (let x = -100; x <= 100; x += 25) {
-      for (let z = -80; z <= 80; z += 25) {
+    for (let x = -130; x <= 130; x += 32) {
+      for (let z = -100; z <= 100; z += 32) {
         if (Math.abs(z) > 150) continue;
-        
+
         seed++;
         const height = 30 + seededRandom(seed) * 120;
-        const width = 8 + seededRandom(seed + 1000) * 12;
-        const depth = 8 + seededRandom(seed + 2000) * 12;
+        const width = 8 + seededRandom(seed + 1000) * 8;
+        const depth = 8 + seededRandom(seed + 2000) * 8;
 
-        const bx = x + (seededRandom(seed + 3000) - 0.5) * 10;
-        const bz = z + (seededRandom(seed + 4000) - 0.5) * 10;
+        const bx = x + (seededRandom(seed + 3000) - 0.5) * 4;
+        const bz = z + (seededRandom(seed + 4000) - 0.5) * 4;
 
         // Keep a clear ring around the player spawn (0,0,-15) so the player
         // never wakes up inside a wall.
@@ -627,8 +947,9 @@ export class CityGenerator {
 
   private createIndustrialZone(): void {
     let seed = 200;
-    for (let x = 120; x <= 220; x += 40) {
-      for (let z = -150; z <= 50; z += 40) {
+    // Wider step leaves ~15u road gap between 30u-wide factories.
+    for (let x = 130; x <= 230; x += 45) {
+      for (let z = -150; z <= 50; z += 45) {
         seed++;
         const height = 20 + seededRandom(seed) * 15;
         const factoryMat = this.createBuildingMaterial(
@@ -663,8 +984,9 @@ export class CityGenerator {
 
   private createResidentialBlocks(): void {
     let seed = 300;
-    for (let x = -220; x <= -120; x += 20) {
-      for (let z = -100; z <= 100; z += 20) {
+    // Wider step leaves ~12u road gap between 12u-wide residential towers.
+    for (let x = -230; x <= -120; x += 24) {
+      for (let z = -108; z <= 108; z += 24) {
         seed++;
         const height = 15 + seededRandom(seed) * 25;
         const material = this.createBuildingMaterial(
