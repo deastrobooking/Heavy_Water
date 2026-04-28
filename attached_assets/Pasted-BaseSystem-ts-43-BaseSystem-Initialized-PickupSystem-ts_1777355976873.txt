@@ -1,0 +1,63 @@
+BaseSystem.ts:43 [BaseSystem] Initialized
+PickupSystem.ts:147 [PickupSystem] Initialized
+BioCreatureSystem.ts:131 [BioCreatureSystem] Initialized
+EffectsSystem.ts:66 [EffectsSystem] Initialized
+PropAudioSystem.ts:101 [PropAudioSystem] Initialized
+SoundSystem.ts:31 [SoundSystem] Initialized
+AerialEnemySystem.ts:681 [AerialEnemySystem] Initialized
+MiningSystem.ts:105 [MiningSystem] Initialized
+EnemyBaseSystem.ts:81 [EnemyBaseSystem] Initialized
+VehicleSystem.ts:115 [VehicleSystem] Initialized
+EnvironmentPropSystem.ts:269 [EnvironmentPropSystem] Initialized
+Game.tsx:680 [Game] Environment props placed: 129 (cap 220)
+31WebGL: INVALID_VALUE: texImage2D: bad image dataUnderstand this warning
+31[.WebGL-0x13c004dc600] GL_INVALID_OPERATION: glGenerateMipmap: Texture format does not support mipmap generation.Understand this warning
+PlayerController.ts:413 [PlayerController] Jump 1 - Normal jump
+PlayerController.ts:438 [PlayerController] Jump 2 - Double jump
+4PlayerController.ts:413 [PlayerController] Jump 1 - Normal jump
+PlayerController.ts:438 [PlayerController] Jump 2 - Double jump
+3PlayerController.ts:413 [PlayerController] Jump 1 - Normal jump
+PlayerController.ts:438 [PlayerController] Jump 2 - Double jump
+2PlayerController.ts:413 [PlayerController] Jump 1 - Normal jump
+PlayerController.ts:438 [PlayerController] Jump 2 - Double jump
+PlayerController.ts:413 [PlayerController] Jump 1 - Normal jump
+PlayerController.ts:438 [PlayerController] Jump 2 - Double jump
+AerialEnemySystem.ts:702 [AerialEnemySystem] AGGRO engaged — aerial squadron will now attack
+PlayerController.ts:413 [PlayerController] Jump 1 - Normal jump
+PlayerController.ts:438 [PlayerController] Jump 2 - Double jump
+PlayerController.ts:403 [PlayerController] Disposed
+BuildingSystem.ts:994 [BuildingSystem] Disposed
+PrefabSystem.ts:990 [PrefabSystem] Disposed
+PickupSystem.ts:366 [PickupSystem] Disposed
+EnvironmentPropSystem.ts:1480 [EnvironmentPropSystem] Disposed
+chunk-J4DZ2XK7.js?v=3b046f60:45 BJS - [01:58:09]: Babylon.js v8.42.0 - WebGL2 - Parallel shader compilation
+SkySystem.ts:89 [SkySystem] Initialized at hour 8.0
+PlayerController.ts:285 [PlayerController] Loaded saved character
+PlayerController.ts:308 [PlayerController] Equipped robot armor set
+BuildingSystem.ts:280 [BuildingSystem] Initialized
+PrefabSystem.ts:711 [PrefabSystem] Initialized with 16 prefabs
+BaseSystem.ts:43 [BaseSystem] Initialized
+PickupSystem.ts:147 [PickupSystem] Initialized
+BioCreatureSystem.ts:131 [BioCreatureSystem] Initialized
+EffectsSystem.ts:66 [EffectsSystem] Initialized
+PropAudioSystem.ts:101 [PropAudioSystem] Initialized
+SoundSystem.ts:31 [SoundSystem] Initialized
+AerialEnemySystem.ts:681 [AerialEnemySystem] Initialized
+MiningSystem.ts:105 [MiningSystem] Initialized
+EnemyBaseSystem.ts:81 [EnemyBaseSystem] Initialized
+VehicleSystem.ts:115 [VehicleSystem] Initialized
+EnvironmentPropSystem.ts:269 [EnvironmentPropSystem] Initialized
+Game.tsx:680 [Game] Environment props placed: 129 (cap 220)
+chunk-25Z4P2YD.js?v=3b046f60:3003 Uncaught TypeError: Cannot read properties of null (reading 'program')
+    at _Engine.bindSamplers (chunk-25Z4P2YD.js?v=3b046f60:3003:43)
+    at _Engine.enableEffect (chunk-25Z4P2YD.js?v=3b046f60:1862:10)
+    at _StandardMaterial._preBind (chunk-LPOAJZU7.js?v=3b046f60:940:12)
+    at _Mesh.render (chunk-EQCIUWG3.js?v=3b046f60:3764:67)
+    at _SubMesh.render (chunk-EZNPAE2S.js?v=3b046f60:1000:25)
+    at _RenderingGroup._RenderSorted (chunk-2FTK3FZH.js?v=3b046f60:1073:15)
+    at _RenderingGroup._renderOpaqueSorted (chunk-2FTK3FZH.js?v=3b046f60:1018:21)
+    at _RenderingGroup.render (chunk-2FTK3FZH.js?v=3b046f60:972:12)
+    at _RenderingManager.render (chunk-2FTK3FZH.js?v=3b046f60:1380:22)
+    at _Scene._renderForCamera (chunk-VILKT5KS.js?v=3b046f60:14380:28)Understand this error
+PlayerController.ts:413 [PlayerController] Jump 1 - Normal jump
+(index):1 Uncaught (in promise) SecurityError: Pointer lock cannot be acquired immediately after the user has exited the lock.Understand this error
