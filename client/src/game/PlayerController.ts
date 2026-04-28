@@ -1007,8 +1007,14 @@ export class PlayerController implements IDamageable {
       }
       if (typeof snap.stats.maxArmor === "number") this.stats.maxArmor = snap.stats.maxArmor;
       if (typeof snap.stats.maxShield === "number") this.stats.maxShield = snap.stats.maxShield;
-      if (typeof snap.stats.shieldRegenRate === "number") this.stats.shieldRegenRate = snap.stats.shieldRegenRate;
-      if (typeof snap.stats.shieldRegenDelay === "number") this.stats.shieldRegenDelay = snap.stats.shieldRegenDelay;
+      // Migrate legacy slow shield-regen values from older saves: never go
+      // below the current defaults (30/sec, 1.2s delay).
+      if (typeof snap.stats.shieldRegenRate === "number") {
+        this.stats.shieldRegenRate = Math.max(snap.stats.shieldRegenRate, 30);
+      }
+      if (typeof snap.stats.shieldRegenDelay === "number") {
+        this.stats.shieldRegenDelay = Math.min(snap.stats.shieldRegenDelay, 1.2);
+      }
       if (typeof snap.stats.maxStamina === "number") this.stats.maxStamina = snap.stats.maxStamina;
       if (typeof snap.stats.credits === "number") this.stats.credits = snap.stats.credits;
       if (typeof snap.stats.experience === "number") this.stats.experience = snap.stats.experience;

@@ -246,7 +246,7 @@ export const GameUI: React.FC<GameUIProps> = ({
       )}
       <div
         className="absolute top-4 left-4 bg-black/85 border-[3px] border-cyan-400 p-5 rounded-xl"
-        style={{ boxShadow: "0 0 18px rgba(34,211,238,0.45), 0 4px 24px rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+        style={{ boxShadow: "0 0 18px rgba(34,211,238,0.45), 0 4px 24px rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", transform: "scale(0.75)", transformOrigin: "top left" }}
       >
         <div className="text-cyan-300 text-sm font-bold mb-3 tracking-widest" style={{ textShadow: "0 0 8px rgba(34,211,238,0.7)" }}>
           HEAVY WATER

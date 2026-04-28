@@ -718,7 +718,9 @@ export const Game: React.FC = () => {
             respawnTimeoutRef.current = null;
             const cur = playerRef.current;
             if (!cur) return;
-            const spawn = new BABYLON.Vector3(0, 2, 0);
+            // Respawn at the safe initial spawn area (cleared of buildings),
+            // not (0,0,0) which can be inside a downtown building.
+            const spawn = new BABYLON.Vector3(0, 2, -15);
             cur.respawn(spawn);
             showMessage("RESPAWNED — YOUR PROGRESS IS SAFE", 2500);
           }, 3000);
