@@ -25,12 +25,14 @@ interface EnergyWave {
   hitEnemies: Set<BABYLON.AbstractMesh>;
 }
 
+// Beam Sabre is the on-foot signature weapon — damage is intentionally
+// massive so foot combat feels every bit as exciting as flying or driving.
 const LEVEL_CONFIGS: Omit<BeamSabre, "isActive">[] = [
-  { level: 1, damage: 25, energyWaveDamage: 40, slashCount: 2, energyWaveWidth: 3, energyWaveSpeed: 30, cooldown: 0.8 },
-  { level: 2, damage: 35, energyWaveDamage: 60, slashCount: 2, energyWaveWidth: 4, energyWaveSpeed: 35, cooldown: 0.7 },
-  { level: 3, damage: 50, energyWaveDamage: 80, slashCount: 3, energyWaveWidth: 5, energyWaveSpeed: 40, cooldown: 0.6 },
-  { level: 4, damage: 65, energyWaveDamage: 100, slashCount: 4, energyWaveWidth: 6, energyWaveSpeed: 45, cooldown: 0.5 },
-  { level: 5, damage: 85, energyWaveDamage: 150, slashCount: 5, energyWaveWidth: 8, energyWaveSpeed: 50, cooldown: 0.4 },
+  { level: 1, damage: 120, energyWaveDamage: 220, slashCount: 2, energyWaveWidth: 3, energyWaveSpeed: 35, cooldown: 0.7 },
+  { level: 2, damage: 170, energyWaveDamage: 320, slashCount: 2, energyWaveWidth: 4, energyWaveSpeed: 40, cooldown: 0.6 },
+  { level: 3, damage: 240, energyWaveDamage: 460, slashCount: 3, energyWaveWidth: 5, energyWaveSpeed: 45, cooldown: 0.55 },
+  { level: 4, damage: 320, energyWaveDamage: 620, slashCount: 4, energyWaveWidth: 6, energyWaveSpeed: 50, cooldown: 0.5 },
+  { level: 5, damage: 450, energyWaveDamage: 900, slashCount: 5, energyWaveWidth: 8, energyWaveSpeed: 55, cooldown: 0.4 },
 ];
 
 export class BeamSabreSystem {
@@ -55,6 +57,40 @@ export class BeamSabreSystem {
   private cooldownTimer: number = 0;
   private slashTimers: number[] = [];
   private bladeMaterial: BABYLON.StandardMaterial | null = null;
+
+  // Optional external router. When set, the sabre delegates damage to the
+  // game's central routeHit (so it correctly hurts aerial fortresses, enemy
+  // bases, mining nodes, props, etc.). When null, falls back to the local
+  // metadata.damageable handler that only works on ground enemies.
+  private damageRouter: ((mesh: BABYLON.AbstractMesh, dmg: number) => void) | null = null;
+  setDamageRouter(fn: (mesh: BABYLON.AbstractMesh, dmg: number) => void): void {
+    this.damageRouter = fn;
+  }
+
+  private isHittable(mesh: BABYLON.AbstractMesh): boolean {
+    if (!mesh.metadata) return false;
+    const m = mesh.metadata as any;
+    if (this.damageRouter) {
+      // Match the actual metadata flags used by each system:
+      //   EnemySystem      → isEnemy + damageable
+      //   AerialEnemySystem → aerialUnit
+      //   EnemyBaseSystem  → isTurret / isVault
+      //   MiningSystem     → miningNodeId
+      //   EnvironmentPropSystem → isProp
+      return !!(m.isEnemy || m.aerialUnit || m.isTurret || m.isVault || m.miningNodeId || m.isProp);
+    }
+    return !!(m.isEnemy && m.damageable);
+  }
+
+  private dealDamage(mesh: BABYLON.AbstractMesh, amount: number, info: DamageInfo): number {
+    if (this.damageRouter) {
+      this.damageRouter(mesh, amount);
+      return amount;
+    }
+    const damageable = (mesh.metadata as any).damageable as IDamageable;
+    const result = applyDamage(damageable, info);
+    return result.damageAmount;
+  }
 
   constructor(scene: BABYLON.Scene, camera: BABYLON.FreeCamera) {
     this.scene = scene;
@@ -169,17 +205,19 @@ export class BeamSabreSystem {
     this.slashTimers.push(timer);
   }
 
-  private performSlashHit(): void {
+  private performSlashHit(targets?: BABYLON.AbstractMesh[]): void {
     const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
     const origin = this.getAimOrigin().add(forward.scale(2.5));
-    const hitRadius = 3.5;
+    // Slightly larger reach so the sword feels satisfying.
+    const hitRadius = 5;
 
-    for (const mesh of this.scene.meshes) {
-      if (!mesh.metadata?.isEnemy || !mesh.metadata?.damageable) continue;
+    const list = targets && targets.length ? targets : this.scene.meshes;
+    for (const mesh of list) {
+      if (!this.isHittable(mesh)) continue;
 
       const dist = BABYLON.Vector3.Distance(origin, mesh.position);
-      if (dist < hitRadius) {
-        const damageable = mesh.metadata.damageable as IDamageable;
+      const meshHitR = (mesh.metadata as any)?.hitRadius ?? 1.5;
+      if (dist < hitRadius + meshHitR) {
         const info: DamageInfo = {
           amount: this.sabre.damage,
           hitPoint: mesh.position.clone(),
@@ -187,11 +225,11 @@ export class BeamSabreSystem {
           damageType: DamageType.Melee,
           knockbackForce: 5,
         };
-        const result = applyDamage(damageable, info);
+        const dealt = this.dealDamage(mesh, this.sabre.damage, info);
 
         this.bus.emit(GameEvents.UI_DAMAGE_NUMBER, {
           position: mesh.position.clone(),
-          damage: result.damageAmount,
+          damage: dealt,
           isCritical: false,
         });
       }
@@ -328,24 +366,28 @@ export class BeamSabreSystem {
 
       wave.mesh.position.addInPlace(wave.direction.scale(wave.speed * dt));
 
-      const targets = enemies || this.scene.meshes.filter(m => m.metadata?.isEnemy);
+      const targets = enemies && enemies.length
+        ? enemies
+        : this.scene.meshes.filter(m => this.isHittable(m));
+
+      let consumed = false;
       for (const mesh of targets) {
-        if (!mesh.metadata?.isEnemy || !mesh.metadata?.damageable) continue;
-        if (!wave.piercing && wave.hitEnemies.has(mesh)) continue;
+        if (!this.isHittable(mesh)) continue;
         if (wave.hitEnemies.has(mesh)) continue;
 
+        const meshHitR = (mesh.metadata as any)?.hitRadius ?? 1.5;
         const dist = BABYLON.Vector3.Distance(wave.mesh.position, mesh.position);
-        if (dist < wave.hitRadius) {
-          const damageable = mesh.metadata.damageable as IDamageable;
-
+        if (dist < wave.hitRadius + meshHitR) {
           const isAoE = this.sabre.level >= 5;
           if (isAoE) {
             const aoeDamage = wave.damage * 0.6;
             for (const otherMesh of targets) {
-              if (!otherMesh.metadata?.isEnemy || !otherMesh.metadata?.damageable) continue;
+              if (otherMesh === mesh) continue;
+              if (!this.isHittable(otherMesh)) continue;
+              if (wave.hitEnemies.has(otherMesh)) continue;
+              const otherR = (otherMesh.metadata as any)?.hitRadius ?? 1.5;
               const aoeDist = BABYLON.Vector3.Distance(mesh.position, otherMesh.position);
-              if (aoeDist < wave.hitRadius * 1.5 && !wave.hitEnemies.has(otherMesh)) {
-                const aoeTarget = otherMesh.metadata.damageable as IDamageable;
+              if (aoeDist < wave.hitRadius * 1.5 + otherR) {
                 const aoeInfo: DamageInfo = {
                   amount: aoeDamage,
                   hitPoint: otherMesh.position.clone(),
@@ -353,12 +395,12 @@ export class BeamSabreSystem {
                   damageType: DamageType.Melee,
                   knockbackForce: 8,
                 };
-                const aoeResult = applyDamage(aoeTarget, aoeInfo);
+                const aoeDealt = this.dealDamage(otherMesh, aoeDamage, aoeInfo);
                 wave.hitEnemies.add(otherMesh);
 
                 this.bus.emit(GameEvents.UI_DAMAGE_NUMBER, {
                   position: otherMesh.position.clone(),
-                  damage: aoeResult.damageAmount,
+                  damage: aoeDealt,
                   isCritical: false,
                 });
               }
@@ -372,22 +414,24 @@ export class BeamSabreSystem {
             damageType: DamageType.Melee,
             knockbackForce: 10,
           };
-          const result = applyDamage(damageable, info);
+          const dealt = this.dealDamage(mesh, wave.damage, info);
           wave.hitEnemies.add(mesh);
 
           this.bus.emit(GameEvents.UI_DAMAGE_NUMBER, {
             position: mesh.position.clone(),
-            damage: result.damageAmount,
+            damage: dealt,
             isCritical: false,
           });
 
           if (!wave.piercing) {
             wave.mesh.dispose();
             this.energyWaves.splice(i, 1);
+            consumed = true;
             break;
           }
         }
       }
+      if (consumed) continue;
     }
   }
 

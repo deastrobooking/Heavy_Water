@@ -23,6 +23,9 @@ The ArmorMaterialFactory produces reusable material types. The RobotArmorParts s
 ### Combat, Inventory, and Crafting
 Combat features light and heavy melee combo chains with input buffering. An InventorySystem offers a 24-slot grid. The CraftingSystem supports recipe-based crafting for weapons, armor, and base components. All ranged weapons have unlimited ammo.
 
+### Beam Sabre (On-Foot Signature Weapon)
+The BeamSabreSystem is the player's massive-damage on-foot weapon — a glowing energy blade rendered in front of the camera that performs multi-hit slash combos and finishes each combo with a forward-launching energy wave. Slash damage scales from 120 (L1) up to 450 (L5) per hit and energy waves from 220 up to 900 per pass; level 5 waves pierce and apply 60% AoE splash. Players toggle the sabre on/off with **Y** and trigger a slash combo with **G**; pressing G while it's off shows a hint to activate. The sabre routes all damage through Game.tsx's central `routeHit`, so slashes and waves correctly damage every hostile category — ground enemies (`isEnemy`), aerial fighters/battleships/fortresses (`aerialUnit`), enemy base turrets and vaults (`isTurret`/`isVault`), mining nodes (`miningNodeId`), and destructible props (`isProp`) — and each hit on an aerial unit also triggers `AerialEnemySystem.engage()` like any other weapon.
+
 ### Music and Sound
 A singleton MusicSystem manages menu and in-game music, supporting dynamic track loading and playback controls. It includes an in-game UI (MusicPlayerUI) with track selection, volume control, and keyboard shortcuts.
 

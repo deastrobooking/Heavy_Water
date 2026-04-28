@@ -156,8 +156,11 @@ export class AerialUnit {
       : this.buildFortress(scene);
     this.visual = built.root;
 
-    const hitR = kind === "fighter" ? 2.4 : kind === "battleship" ? 7.5 : 12;
-    const hitH = kind === "fighter" ? 2 : kind === "battleship" ? 4 : 6;
+    // Fortress hull is 18×4×30, so a sphere/capsule of r≈12 leaves the long
+    // axis poking out the front and back — bullets often whiff. Bump the hit
+    // radius so projectiles consistently register against the big silhouette.
+    const hitR = kind === "fighter" ? 2.4 : kind === "battleship" ? 7.5 : 16;
+    const hitH = kind === "fighter" ? 2 : kind === "battleship" ? 4 : 8;
     this.hitbox = BABYLON.MeshBuilder.CreateCapsule(`aerialHit_${kind}_${Date.now()}_${Math.floor(Math.random()*9999)}`, {
       height: hitH,
       radius: hitR,
@@ -639,9 +642,15 @@ export class AerialUnit {
   dispose(): void {
     this.isAlive = false;
     this.originalEmissives = [];
+    // NOTE: Disposing materials here while the engine may still hold a bound
+    // effect/program for the just-disposed meshes was causing a crash:
+    //   `Cannot read properties of null (reading 'program')` inside
+    //   _Engine.bindSamplers → _StandardMaterial._preBind.
+    // The materials are released by Babylon when the scene is torn down;
+    // for in-game disposal we leave them alone (matches the long-standing
+    // pattern used by the rest of the game).
     if (this.visual) this.visual.dispose();
     if (this.hitbox) this.hitbox.dispose();
-    for (const m of this.ownedMaterials) m.dispose();
     this.ownedMaterials = [];
   }
 }

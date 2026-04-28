@@ -305,6 +305,11 @@ export const Game: React.FC = () => {
 
         const beamSabre = new BeamSabreSystem(scene, engine.getCamera());
         beamSabreRef.current = beamSabre;
+        // Initial no-op router so that even an attack pressed before the
+        // first render frame uses the routed code path (the real router
+        // is reassigned every frame inside the render loop, where all the
+        // enemy-tracking systems are available).
+        beamSabre.setDamageRouter(() => { /* replaced once render loop starts */ });
 
         const aimOrigin = () => player.getAimOrigin();
         weapons.setAimOriginProvider(aimOrigin);
@@ -846,6 +851,10 @@ export const Game: React.FC = () => {
             routeHit(hit.hitEnemy, hit.damage);
           }
 
+          // Beam Sabre damage flows through the same router so slashes and
+          // energy waves correctly hurt aerial fortresses, enemy bases,
+          // mining nodes and props (not just ground enemies).
+          beamSabre.setDamageRouter(routeHit);
           beamSabre.update(dt, enemyMeshes);
 
           const companionResult = companionSystem.update(dt, playerPos, enemyMeshes);
@@ -1498,6 +1507,20 @@ export const Game: React.FC = () => {
           setGardenStructure(garden);
           setGardenOpen(true);
           if (document.pointerLockElement) document.exitPointerLock();
+        }
+      } else if (e.code === "KeyY") {
+        // Toggle the on-foot Beam Sabre.
+        if (beamSabreRef.current) {
+          beamSabreRef.current.toggle();
+          setBeamSabreActive(beamSabreRef.current.active);
+        }
+      } else if (e.code === "KeyG") {
+        // Slash combo + energy wave finisher. The signature on-foot move.
+        if (beamSabreRef.current && beamSabreRef.current.active) {
+          beamSabreRef.current.attack();
+        } else if (beamSabreRef.current) {
+          // Helpful nudge if the player tries to slash with the sabre off.
+          showMessage("PRESS Y TO ACTIVATE BEAM SABRE", 1200);
         }
       } else if (e.code === "Escape") {
         if (upgradeMenuOpen) setUpgradeMenuOpen(false);
