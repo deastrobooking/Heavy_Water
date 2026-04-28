@@ -1350,6 +1350,12 @@ export class PlayerController implements IDamageable {
     this.stats.credits += amount;
   }
 
+  spendCredits(amount: number): boolean {
+    if (this.stats.credits < amount) return false;
+    this.stats.credits -= amount;
+    return true;
+  }
+
   addExperience(amount: number): void {
     this.stats.experience += amount;
     const expNeeded = this.stats.level * 100;

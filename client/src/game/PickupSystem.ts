@@ -161,6 +161,12 @@ export class PickupSystem {
   private enemyKilledHandler: (data: any) => void;
   private spawnHandler: (data: any) => void;
 
+  // Auto-loot: when enabled, dropped items also magnetize toward and are
+  // collected at any companion position returned by the supplied provider.
+  // The provider is queried each tick; positions are live references.
+  private autoLootEnabled: boolean = false;
+  private companionProvider: (() => BABYLON.Vector3[]) | null = null;
+
   private static readonly MAGNET_RANGE = 6;
   private static readonly COLLECT_RANGE = 1.4;
   private static readonly MAGNET_SPEED = 14;
@@ -189,6 +195,22 @@ export class PickupSystem {
 
   setPlayerPosition(pos: BABYLON.Vector3): void {
     this.playerPos.copyFrom(pos);
+  }
+
+  /** Plug in a callback that returns live companion positions. The list is
+   *  re-queried each tick so it stays in sync as bots move. */
+  setCompanionPositionsProvider(provider: (() => BABYLON.Vector3[]) | null): void {
+    this.companionProvider = provider;
+  }
+
+  /** Toggle auto-loot. While enabled, pickups also magnetize/collect at any
+   *  companion position. */
+  setAutoLootEnabled(enabled: boolean): void {
+    this.autoLootEnabled = enabled;
+  }
+
+  isAutoLootEnabled(): boolean {
+    return this.autoLootEnabled;
   }
 
   private onEnemyKilled(data: any): void {
@@ -312,6 +334,12 @@ export class PickupSystem {
   private tick(dt: number): void {
     if (this.active.length === 0) return;
     const ppos = this.playerPos;
+    // Auto-loot widens both magnet and collect ranges so companions sweep
+    // dropped items efficiently as they orbit.
+    const autoLoot = this.autoLootEnabled && !!this.companionProvider;
+    const companionPositions = autoLoot ? this.companionProvider!() : [];
+    const autoMagnetR = PickupSystem.MAGNET_RANGE * 1.4;
+    const autoCollectR = PickupSystem.COLLECT_RANGE * 1.6;
 
     for (let i = this.active.length - 1; i >= 0; i--) {
       const p = this.active[i];
@@ -326,6 +354,7 @@ export class PickupSystem {
       p.mesh.rotation.y += dt * 2.2;
       const bob = Math.sin(p.age * 3 + p.bobOffset) * 0.18;
 
+      // Player attractor first.
       const dx = ppos.x - p.mesh.position.x;
       const dy = ppos.y + 1 - p.mesh.position.y;
       const dz = ppos.z - p.mesh.position.z;
@@ -338,12 +367,39 @@ export class PickupSystem {
         continue;
       }
 
-      if (dist < PickupSystem.MAGNET_RANGE) {
-        const speed = PickupSystem.MAGNET_SPEED * (1 - dist / PickupSystem.MAGNET_RANGE) + 4;
-        const inv = 1 / Math.max(0.001, dist);
-        p.mesh.position.x += dx * inv * speed * dt;
-        p.mesh.position.y += dy * inv * speed * dt;
-        p.mesh.position.z += dz * inv * speed * dt;
+      // Pick the best attractor: player vs nearest companion (when auto-loot
+      // is on). The closer one wins so a pickup never tugs toward both at once.
+      let bestDx = dx, bestDy = dy, bestDz = dz, bestDist = dist;
+      let bestSource: "player" | "companion" = "player";
+      if (autoLoot) {
+        for (const cp of companionPositions) {
+          const cdx = cp.x - p.mesh.position.x;
+          const cdy = cp.y + 0.6 - p.mesh.position.y;
+          const cdz = cp.z - p.mesh.position.z;
+          const cd = Math.sqrt(cdx * cdx + cdy * cdy + cdz * cdz);
+          if (cd < bestDist) {
+            bestDist = cd;
+            bestDx = cdx; bestDy = cdy; bestDz = cdz;
+            bestSource = "companion";
+          }
+        }
+      }
+
+      // Companion-side collection (player path already handled above).
+      if (bestSource === "companion" && bestDist < autoCollectR) {
+        this.collect(p);
+        this.disposePickup(p);
+        this.active.splice(i, 1);
+        continue;
+      }
+
+      const magnetR = bestSource === "companion" ? autoMagnetR : PickupSystem.MAGNET_RANGE;
+      if (bestDist < magnetR) {
+        const speed = PickupSystem.MAGNET_SPEED * (1 - bestDist / magnetR) + 4;
+        const inv = 1 / Math.max(0.001, bestDist);
+        p.mesh.position.x += bestDx * inv * speed * dt;
+        p.mesh.position.y += bestDy * inv * speed * dt;
+        p.mesh.position.z += bestDz * inv * speed * dt;
       } else {
         p.mesh.position.y = p.bobBase + bob;
       }

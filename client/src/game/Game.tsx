@@ -52,6 +52,29 @@ import AuthUI from "./AuthUI";
 
 type GamePhase = "auth" | "menu" | "playing" | "paused" | "gameover";
 
+// One source of truth for the SPECIALS-tab unlocks. Used both for
+// affordability checks in `specialsList` and for charging in
+// `handleUnlockSpecial`, so prices can never drift between the two.
+type SpecialId = "sabreSpin" | "sabreTwin" | "sabreGiant" | "autoLoot" | "roboDragon";
+interface SpecialDef {
+  id: SpecialId;
+  name: string;
+  description: string;
+  cost: { gears: number; cores: number; nanofiber: number; circuits?: number; credits?: number };
+}
+const SPECIALS_DEFS: readonly SpecialDef[] = [
+  { id: "sabreSpin",  name: "Spinning Blade",   description: "Hold sabre slash for ~0.5s, release for a 360° spin AoE.",
+    cost: { gears: 80,  cores: 12, nanofiber: 8 } },
+  { id: "sabreTwin",  name: "Twin Wave",        description: "Every arc wave is shadowed by a much larger trailing red wave.",
+    cost: { gears: 100, cores: 18, nanofiber: 12 } },
+  { id: "sabreGiant", name: "Giant Blade",      description: "Sabre grows 1.6× longer, +50% damage and reach.",
+    cost: { gears: 120, cores: 25, nanofiber: 18 } },
+  { id: "autoLoot",   name: "Auto-Loot Drones", description: "Companions vacuum nearby pickups in addition to you.",
+    cost: { gears: 60,  cores: 10, nanofiber: 6 } },
+  { id: "roboDragon", name: "Robot Dragon",     description: "Summon the elite Robot Dragon companion (third slot).",
+    cost: { gears: 250, cores: 60, nanofiber: 35, circuits: 30, credits: 1500 } },
+];
+
 export const Game: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<BabylonEngine | null>(null);
@@ -113,6 +136,13 @@ export const Game: React.FC = () => {
   const [upgradeMenuOpen, setUpgradeMenuOpen] = useState(false);
   const [weaponUpgradeInfo, setWeaponUpgradeInfo] = useState<WeaponUpgradeInfo[]>([]);
   const [companionUpgradeInfo, setCompanionUpgradeInfo] = useState<CompanionUpgradeInfo[]>([]);
+  // Helper-bot weapon-tier rows for the SPECIALS / HELPER ROBOTS tabs.
+  const [companionWeaponInfo, setCompanionWeaponInfo] = useState<{ id: string; name: string; weaponLevel: number; maxLevel: number; cost: { gears: number; cores: number } | null; affordable: boolean }[]>([]);
+  // Persisted owned-flags for one-time SPECIALS unlocks.
+  const [specialsOwned, setSpecialsOwned] = useState<{
+    sabreSpin: boolean; sabreTwin: boolean; sabreGiant: boolean;
+    autoLoot: boolean; roboDragon: boolean;
+  }>({ sabreSpin: false, sabreTwin: false, sabreGiant: false, autoLoot: false, roboDragon: false });
   const [resourceCounts, setResourceCounts] = useState({ gears: 0, scrap: 0, cores: 0, circuits: 0, nanofiber: 0, bioEssence: 0 });
   const [partCounts, setPartCounts] = useState<Record<string, number>>({});
   const [labOpen, setLabOpen] = useState(false);
@@ -425,6 +455,10 @@ export const Game: React.FC = () => {
 
         const pickupSystem = new PickupSystem(scene, inventory);
         pickupRef.current = pickupSystem;
+        // Live companion-position provider for the auto-loot magnet.
+        pickupSystem.setCompanionPositionsProvider(() =>
+          companionRef.current ? companionRef.current.getCompanionPositions() : []
+        );
 
         const bioSystem = new BioCreatureSystem(scene, inventory);
         bioRef.current = bioSystem;
@@ -1120,6 +1154,11 @@ export const Game: React.FC = () => {
             });
             setWeaponUpgradeInfo(weapons.getAllUpgradeInfo());
             setCompanionUpgradeInfo(companionSystem.getAllUpgradeInfo(() => gears, () => cores));
+            // Helper-bot weapon-tier rows must follow companion roster + resource changes.
+            const cwRows = companionSystem.getCompanions()
+              .map(c => companionSystem.getWeaponUpgradeInfo(c.id, () => gears, () => cores))
+              .filter((r): r is NonNullable<typeof r> => !!r);
+            setCompanionWeaponInfo(cwRows);
             setCapturedCreatures(bioSystem.getCaptured());
           }
 
@@ -1395,7 +1434,15 @@ export const Game: React.FC = () => {
       grenade: inv.getItemCount("weapon_part_grenade"),
     });
     if (weapons) setWeaponUpgradeInfo(weapons.getAllUpgradeInfo());
-    if (comp) setCompanionUpgradeInfo(comp.getAllUpgradeInfo(() => gears, () => cores));
+    if (comp) {
+      setCompanionUpgradeInfo(comp.getAllUpgradeInfo(() => gears, () => cores));
+      // Helper-bot weapon-tier rows: one per active companion.
+      const all = comp.getCompanions();
+      const rows = all
+        .map(c => comp.getWeaponUpgradeInfo(c.id, () => gears, () => cores))
+        .filter((r): r is NonNullable<typeof r> => !!r);
+      setCompanionWeaponInfo(rows);
+    }
     if (bio) setCapturedCreatures(bio.getCaptured());
   }, []);
 
@@ -1427,6 +1474,83 @@ export const Game: React.FC = () => {
     else showMessage("ROBOT UPGRADE FAILED", 1500);
     syncResourcesNow();
   }, [showMessage, syncResourcesNow]);
+
+  const handleUpgradeCompanionWeapon = useCallback((id: string) => {
+    if (!companionRef.current || !inventoryRef.current) return;
+    const inv = inventoryRef.current;
+    const ok = companionRef.current.upgradeCompanionWeapon(id, (g, c) => {
+      if (inv.getItemCount("gear") < g || inv.getItemCount("energy_core") < c) return false;
+      if (g > 0) inv.removeItem("gear", g);
+      if (c > 0) inv.removeItem("energy_core", c);
+      return true;
+    });
+    if (ok) showMessage("HELPER WEAPON UPGRADED", 1500);
+    else showMessage("HELPER WEAPON UPGRADE FAILED", 1500);
+    syncResourcesNow();
+  }, [showMessage, syncResourcesNow]);
+
+  // One-time SPECIALS unlocks. Cost source is SPECIALS_DEFS so affordability
+  // and charging stay in lockstep. Side-effects are validated *before* charging
+  // so a missing system never silently consumes resources.
+  const handleUnlockSpecial = useCallback((id: string) => {
+    const inv = inventoryRef.current;
+    const player = playerRef.current;
+    if (!inv || !player) return;
+    if (specialsOwned[id as SpecialId]) return;
+    const def = SPECIALS_DEFS.find(d => d.id === id);
+    if (!def) return;
+    const c = def.cost;
+    // Resource gate.
+    if (inv.getItemCount("gear") < c.gears
+        || inv.getItemCount("energy_core") < c.cores
+        || inv.getItemCount("nano_fiber") < c.nanofiber
+        || (c.circuits != null && inv.getItemCount("circuit_board") < c.circuits)) {
+      showMessage("INSUFFICIENT RESOURCES", 1500);
+      return;
+    }
+    // Credits live on player.stats (combat/shop currency), matching the UI.
+    if (c.credits != null && player.getStats().credits < c.credits) {
+      showMessage("INSUFFICIENT CREDITS", 1500);
+      return;
+    }
+    // Pre-validate side-effect targets so we never charge for a no-op.
+    let runEffect: (() => boolean) | null = null;
+    if (id === "sabreSpin" || id === "sabreTwin" || id === "sabreGiant") {
+      const sabre = beamSabreRef.current;
+      if (!sabre) { showMessage("SABRE OFFLINE", 1500); return; }
+      runEffect = () => {
+        if (id === "sabreSpin")  { sabre.unlockSpinAttack();  showMessage("SPINNING BLADE UNLOCKED", 2000); }
+        if (id === "sabreTwin")  { sabre.unlockTwinWave();    showMessage("TWIN WAVE UNLOCKED",       2000); }
+        if (id === "sabreGiant") { sabre.unlockGiantBlade();  showMessage("GIANT BLADE UNLOCKED",     2000); }
+        return true;
+      };
+    } else if (id === "autoLoot") {
+      const pickup = pickupRef.current;
+      if (!pickup) { showMessage("PICKUP SYSTEM OFFLINE", 1500); return; }
+      runEffect = () => { pickup.setAutoLootEnabled(true); showMessage("AUTO-LOOT ENGAGED", 2000); return true; };
+    } else if (id === "roboDragon") {
+      const comp = companionRef.current;
+      const base = baseRef.current;
+      if (!comp || !base) { showMessage("LAB OFFLINE", 1500); return; }
+      runEffect = () => {
+        const cap = base.getLabCompanionCap();
+        if (comp.getCompanionCount() >= cap) comp.setMaxCompanions(cap + 1);
+        const ok = comp.addCompanion("RoboDragon", player.getPosition(), { allowDuplicate: true });
+        if (!ok) { showMessage("DRAGON SUMMON FAILED", 2000); return false; }
+        showMessage("ROBOT DRAGON DESCENDS", 2400);
+        return true;
+      };
+    }
+    if (!runEffect || !runEffect()) return;
+    // Charge only after the side-effect succeeds.
+    if (c.gears > 0)     inv.removeItem("gear", c.gears);
+    if (c.cores > 0)     inv.removeItem("energy_core", c.cores);
+    if (c.nanofiber > 0) inv.removeItem("nano_fiber", c.nanofiber);
+    if (c.circuits)      inv.removeItem("circuit_board", c.circuits);
+    if (c.credits)       player.spendCredits(c.credits);
+    setSpecialsOwned(prev => ({ ...prev, [id]: true }));
+    syncResourcesNow();
+  }, [specialsOwned, showMessage, syncResourcesNow]);
 
   const handleLabBuild = useCallback((presetName: string) => {
     if (!companionRef.current || !playerRef.current || !inventoryRef.current || !baseRef.current) return;
@@ -1565,8 +1689,10 @@ export const Game: React.FC = () => {
         // The Beam Sabre is always active. Y (keyboard) and J (controller LT)
         // both trigger a slash. KeyB stays reserved for interact / vehicle
         // entry; KeyG stays reserved for build mode.
-        if (beamSabreRef.current) {
-          beamSabreRef.current.attack();
+        // startCharge only matters once the Spinning Blade upgrade is owned —
+        // otherwise it just calls attack() like before.
+        if (beamSabreRef.current && !e.repeat) {
+          beamSabreRef.current.startCharge();
         }
       } else if (e.code === "KeyK") {
         // Cast the currently-selected elemental special (controller RB).
@@ -1599,8 +1725,22 @@ export const Game: React.FC = () => {
         if (gardenOpen) setGardenOpen(false);
       }
     };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "KeyY" || e.code === "KeyJ") {
+        // Resolve a held attack — fires the Spinning Blade if the upgrade is
+        // owned and the key was held long enough; otherwise it's a no-op
+        // (the slash already fired on press).
+        if (beamSabreRef.current) {
+          beamSabreRef.current.releaseCharge();
+        }
+      }
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+    };
   }, [gamePhase, upgradeMenuOpen, labOpen, gardenOpen, showMessage]);
 
   useEffect(() => {
@@ -1679,6 +1819,29 @@ export const Game: React.FC = () => {
       EventBus.getInstance().clear();
     };
   }, []);
+
+  // Build the SPECIALS rows from the single SPECIALS_DEFS source. Affordability
+  // re-evaluates whenever resources or owned-flags change.
+  const specialsList = useMemo(() => {
+    const r = resourceCounts;
+    const credits = playerRef.current?.getStats().credits ?? 0;
+    return SPECIALS_DEFS.map(d => {
+      const c = d.cost;
+      const affordable = r.gears >= c.gears
+        && r.cores >= c.cores
+        && r.nanofiber >= c.nanofiber
+        && (c.circuits == null || r.circuits >= c.circuits)
+        && (c.credits  == null || credits   >= c.credits);
+      return {
+        id: d.id,
+        name: d.name,
+        description: d.description,
+        owned: specialsOwned[d.id],
+        cost: c,
+        affordable,
+      };
+    });
+  }, [resourceCounts, specialsOwned]);
 
   return (
     <div className="w-full h-full bg-black">
@@ -1773,6 +1936,10 @@ export const Game: React.FC = () => {
           onUpgradeWeapon={handleUpgradeWeapon}
           onUpgradeCompanion={handleUpgradeCompanion}
           onUpgradePlayer={handleUpgradePlayer}
+          upgradeMenuSpecials={specialsList}
+          upgradeMenuCompanionWeapons={companionWeaponInfo}
+          onUnlockSpecial={handleUnlockSpecial}
+          onUpgradeCompanionWeapon={handleUpgradeCompanionWeapon}
           onUpgradeMenuClose={() => setUpgradeMenuOpen(false)}
           labOpen={labOpen}
           labLevel={labLevel}

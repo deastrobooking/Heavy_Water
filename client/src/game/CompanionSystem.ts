@@ -37,6 +37,11 @@ interface ActiveCompanion {
   baseHeal: number;
   baseMoveSpeed: number;
   baseMaxHealth: number;
+  // Helper-bot weapon level — separate from base level. Each tier 0→3 doubles
+  // the projectile damage scale, halves the cooldown, and increases the
+  // projectile speed/size visual.
+  weaponLevel: number;
+  baseAttackCooldown: number;
 }
 
 export interface CompanionUpgradeInfo {
@@ -182,6 +187,8 @@ export class CompanionSystem {
       baseHeal: behavior.healAmount,
       baseMoveSpeed: behavior.moveSpeed,
       baseMaxHealth: baseMaxHp,
+      weaponLevel: 0,
+      baseAttackCooldown: behavior.attackCooldown,
     };
 
     this.companions.push(companion);
@@ -243,8 +250,18 @@ export class CompanionSystem {
           }
 
           if (nearestEnemy) {
-            comp.attackTimer = comp.behavior.attackCooldown;
-            this.fireCompanionProjectile(currentPos, nearestEnemy.position, comp.behavior.attackDamage, comp.descriptor.style.colors.emissive);
+            // Helper-bot weapon level scales: cooldown ÷ (1 + 0.4 * lvl),
+            // damage × (1 + 0.6 * lvl), projectile size/speed bumped a touch.
+            const wl = comp.weaponLevel;
+            comp.attackTimer = comp.behavior.attackCooldown / (1 + 0.4 * wl);
+            const dmg = comp.behavior.attackDamage * (1 + 0.6 * wl);
+            this.fireCompanionProjectile(
+              currentPos,
+              nearestEnemy.position,
+              dmg,
+              comp.descriptor.style.colors.emissive,
+              wl,
+            );
           }
         }
       }
@@ -284,8 +301,15 @@ export class CompanionSystem {
     return { healed: totalHealed, attackHits };
   }
 
-  private fireCompanionProjectile(from: BABYLON.Vector3, to: BABYLON.Vector3, damage: number, color: BABYLON.Color3): void {
-    const proj = BABYLON.MeshBuilder.CreateSphere("compProj", { diameter: 0.3, segments: 6 }, this.scene);
+  private fireCompanionProjectile(
+    from: BABYLON.Vector3,
+    to: BABYLON.Vector3,
+    damage: number,
+    color: BABYLON.Color3,
+    weaponLevel: number = 0,
+  ): void {
+    const diameter = 0.3 + 0.12 * weaponLevel;
+    const proj = BABYLON.MeshBuilder.CreateSphere("compProj", { diameter, segments: 6 }, this.scene);
     proj.position.copyFrom(from);
 
     const mat = new BABYLON.StandardMaterial("compProjMat", this.scene);
@@ -294,7 +318,7 @@ export class CompanionSystem {
     proj.material = mat;
 
     const dir = to.subtract(from).normalize();
-    const speed = 38;
+    const speed = 38 + 8 * weaponLevel;
 
     this.projectiles.push({
       mesh: proj,
@@ -413,6 +437,51 @@ export class CompanionSystem {
     if (index >= 0 && index < this.companions.length) {
       this.companions[index].health = Math.max(0, this.companions[index].health - amount);
     }
+  }
+
+  /** Live world positions of every active companion. Used by the auto-loot
+   *  pickup magnet so dropped items also fly toward helper bots. */
+  getCompanionPositions(): BABYLON.Vector3[] {
+    return this.companions.map(c => c.hitbox.position);
+  }
+
+  /** Helper-bot weapon-upgrade tier for a companion. Returns null if missing. */
+  getWeaponUpgradeInfo(
+    id: string,
+    getGearCount: () => number,
+    getCoreCount: () => number,
+  ): { id: string; name: string; weaponLevel: number; maxLevel: number; cost: { gears: number; cores: number } | null; affordable: boolean } | null {
+    const c = this.companions.find(x => x.id === id);
+    if (!c) return null;
+    const maxLvl = 3;
+    const isMax = c.weaponLevel >= maxLvl;
+    const tier = c.weaponLevel + 1;
+    const cost = { gears: 25 * tier, cores: 4 * tier };
+    const affordable = !isMax && getGearCount() >= cost.gears && getCoreCount() >= cost.cores;
+    return {
+      id: c.id,
+      name: c.descriptor.name,
+      weaponLevel: c.weaponLevel,
+      maxLevel: maxLvl,
+      cost: isMax ? null : cost,
+      affordable,
+    };
+  }
+
+  /** Buy the next helper-bot weapon tier for a companion. */
+  upgradeCompanionWeapon(id: string, spend: (gears: number, cores: number) => boolean): boolean {
+    const c = this.companions.find(x => x.id === id);
+    if (!c) return false;
+    if (c.weaponLevel >= 3) return false;
+    const tier = c.weaponLevel + 1;
+    const cost = { gears: 25 * tier, cores: 4 * tier };
+    if (!spend(cost.gears, cost.cores)) return false;
+    c.weaponLevel += 1;
+    this.bus.emit(GameEvents.UI_MESSAGE, {
+      text: `${c.descriptor.name} weapon → tier ${c.weaponLevel}`,
+      duration: 2,
+    });
+    return true;
   }
 
   dispose(): void {

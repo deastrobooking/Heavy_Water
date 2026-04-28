@@ -34,6 +34,12 @@ Each elemental has independent cooldowns and levels (1-5), scaling damage, radiu
 ### Beam Sabre
 The Beam Sabre is always equipped — pressing Y (keyboard) or controller-Y triggers a wide cross-screen slash with a long blade and extended reach (hit radius 7). It performs multi-hit slash combos and launches arc-shaped (crescent) energy waves forward. Damage scales with level, and level-5 waves pierce and apply AoE splash. The "boost-dash → slash" chain (L → J within 600ms) instantly fires an arc wave for the signature combo.
 
+**Sabre specials (one-time SPECIALS-tab unlocks):**
+- **Spinning Blade** — `hasSpinAttack`. Hold Y/J for ~0.5 s and release to perform a 360° spin AoE (12 m radius, 2× damage, 2× cooldown). Short tap still fires a normal slash.
+- **Twin Wave** — `hasTwinWave`. Every arc wave is shadowed by a much larger trailing red wave for double coverage.
+- **Giant Blade** — `hasGiantBlade`. Sabre mesh scales 1.6×, slash hit radius and damage gain +50%, deeper red glow on the blade and arc waves.
+The unlock API is `unlockSpinAttack()` / `unlockTwinWave()` / `unlockGiantBlade()` plus `startCharge()` / `releaseCharge()` for hold-to-spin input.
+
 ### Music and Sound
 A singleton MusicSystem manages dynamic music loading, playback, and includes an in-game UI.
 
@@ -41,10 +47,10 @@ A singleton MusicSystem manages dynamic music loading, playback, and includes an
 A parametric vehicle pipeline generates ATVs and space fighters. VehicleFactory builds meshes, and VehicleSystem manages instances and physics for ground and aerial vehicles, including respawn.
 
 ### Loot and Pickups
-The PickupSystem spawns physical glowing world meshes from defeated enemies, which magnetize towards the player for collection. Drop tables are enemy-specific.
+The PickupSystem spawns physical glowing world meshes from defeated enemies, which magnetize towards the player for collection. Drop tables are enemy-specific. **Drop rates are doubled** vs. the original baseline so progression keeps up with the new high-cost specials. The optional **Auto-Loot Drones** SPECIALS unlock turns every active companion into a secondary collector — `setCompanionPositionsProvider(fn)` feeds live companion positions and `setAutoLootEnabled(true)` extends both magnet (×1.4) and collect (×1.6) radii to the nearest companion as well as the player.
 
 ### Upgrades and Progression
-WeaponsSystem implements per-weapon level progression. The CompanionSystem manages companion upgrades. An in-game UpgradeMenu provides the interface.
+WeaponsSystem implements per-weapon level progression. The CompanionSystem manages companion upgrades — including a separate per-companion **weapon tier** (`weaponLevel` 0–3) that scales `attackCooldown ÷ (1 + 0.4·wl)` and `damage × (1 + 0.6·wl)` independently of the base companion `level`. The in-game UpgradeMenu now has four tabs: **PLAYER**, **WEAPONS**, **ROBOTS** (with a HELPER WEAPONS row per active companion), and **SPECIALS** (one-time premium unlocks: Spinning Blade, Twin Wave, Giant Blade, Auto-Loot Drones, Robot Dragon).
 
 ### Base Structures
 The BaseSystem tracks player-placed, multi-level structures like labs (controlling companion roster and blueprints) and gardens (controlling capture roster and bonuses). These have interactive UIs.
@@ -53,7 +59,7 @@ The BaseSystem tracks player-placed, multi-level structures like labs (controlli
 The BuildingSystem enables Minecraft-style mining and building with grid-snapped placement. The PrefabSystem allows placing pre-designed structures, with both supporting serialization.
 
 ### Commerce and Companions
-A ShopSystem manages 5 shop locations with dynamic pricing. The GardenSystem and CompanionSystem manage digital companions with leveling and bonding. A MapSystem provides a real-time minimap. Companions are aggressive assistants — combat allies engage at 32m range with ~0.85s cooldowns and faster, larger projectiles. Even MedicDrones now contribute light support fire while healing.
+A ShopSystem manages 5 shop locations with dynamic pricing. The GardenSystem and CompanionSystem manage digital companions with leveling and bonding. A MapSystem provides a real-time minimap. Companions are aggressive assistants — combat allies engage at 32m range with ~0.85s cooldowns and faster, larger projectiles. Even MedicDrones now contribute light support fire while healing. The premium **Robot Dragon** ally (`RoboDragon` hybrid preset, scale 1.6, winged with cannons) is gated behind a SPECIALS-tab unlock and bumps the companion cap by 1 if the lab is full so it always slots in.
 
 ### Enemy Systems
 The EnemySystem features a wave spawner for distinct enemy types, including Commanders. The Robot Shape Engine generates all robots (enemies, allies, pets) using parametric descriptors. Aerial enemies (fighters, battleships, Fortresses) have specialized behaviors and are initially passive, engaging upon player aggression towards any aerial unit or enemy base. Aerial unit shots are line-of-sight tested against city buildings. Hostile Enemy Bases include turrets and destructible loot vaults.

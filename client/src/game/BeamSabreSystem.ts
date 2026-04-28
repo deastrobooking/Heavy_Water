@@ -11,6 +11,10 @@ export interface BeamSabre {
   energyWaveSpeed: number;
   isActive: boolean;
   cooldown: number;
+  // Optional one-shot specials, unlocked from the Upgrade Bay > Specials tab.
+  hasSpinAttack: boolean;  // Hold attack ≥0.5s, release for 360° spin slash.
+  hasTwinWave: boolean;    // Each launch also fires a much larger red wave behind.
+  hasGiantBlade: boolean;  // 1.6× blade, +50% damage / hit-radius, deeper red glow.
 }
 
 interface EnergyWave {
@@ -64,6 +68,21 @@ export class BeamSabreSystem {
   private slashAnimTimer: number = 0;
   private slashAnimDuration: number = 0.28;
   private slashSwingDir: number = 1;
+
+  // Spin-blade animation (whole-body 360° sweep around the player). Drives
+  // the blade through a continuous yaw rotation while the timer is positive.
+  private spinAnimTimer: number = 0;
+  private readonly spinAnimDuration: number = 0.55;
+
+  // Charge state for the spin-blade special. `chargeStart` is null when the
+  // attack key is not currently held. We only START a charge when the spin
+  // upgrade is owned — without it, attack() fires immediately on press as
+  // before so the base feel is unchanged.
+  private chargeStart: number | null = null;
+  private readonly spinChargeMs: number = 500;
+  // Owned-as-an-upgrade specials. Defaults match BeamSabre.has* flags.
+  // Mirrored so the live mesh can be re-styled when toggled at runtime.
+  private giantBladeApplied: boolean = false;
 
   // Optional external router. When set, the sabre delegates damage to the
   // game's central routeHit (so it correctly hurts aerial fortresses, enemy
@@ -124,6 +143,9 @@ export class BeamSabreSystem {
       // No more dedicated toggle key.
       isActive: true,
       cooldown: LEVEL_CONFIGS[0].cooldown,
+      hasSpinAttack: false,
+      hasTwinWave: false,
+      hasGiantBlade: false,
     };
 
     this.createBladeMesh();
@@ -171,7 +193,19 @@ export class BeamSabreSystem {
       this.sabreMesh.rotationQuaternion = BABYLON.Quaternion.Identity();
     }
 
-    if (this.slashAnimTimer > 0) {
+    if (this.spinAnimTimer > 0) {
+      // Spin-blade visual: hold the blade out level and yaw it through a
+      // continuous 720° sweep around the world-Y axis so it visibly carves a
+      // ring around the player.
+      const t = 1 - this.spinAnimTimer / this.spinAnimDuration;
+      const reach = this.sabre.hasGiantBlade ? 4.2 : 3.4;
+      const pos = this.getAimOrigin().add(forward.scale(reach * 0.4)).add(up.scale(-0.2));
+      this.sabreMesh.position.copyFrom(pos);
+      const yaw = t * Math.PI * 4; // two full rotations across the duration
+      const yawQ = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Up(), yaw);
+      const tilt = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Forward(), Math.PI / 2);
+      this.sabreMesh.rotationQuaternion = yawQ.multiply(tilt);
+    } else if (this.slashAnimTimer > 0) {
       // Drive the blade through a wide horizontal arc across the screen.
       // t goes 0 → 1 over the full slash duration.
       const t = 1 - this.slashAnimTimer / this.slashAnimDuration;
@@ -252,6 +286,38 @@ export class BeamSabreSystem {
     this.performSlashSequence();
   }
 
+  /** Begin a charge for the spin-blade special. Called on attack-key DOWN.
+   *  Without the spin upgrade owned, behaves like a regular attack press so
+   *  the existing single-tap feel is preserved. With it owned, holding the
+   *  key for ≥ spinChargeMs and then releasing fires the spin attack; a
+   *  short tap fires a normal slash on release.
+   */
+  startCharge(): void {
+    if (!this.sabre.hasSpinAttack) {
+      this.attack();
+      return;
+    }
+    if (this.isSlashing || this.cooldownTimer > 0) return;
+    this.chargeStart = performance.now();
+  }
+
+  /** Resolve a held attack. Called on attack-key UP. */
+  releaseCharge(): void {
+    if (!this.sabre.hasSpinAttack) {
+      // Nothing to do — the slash already fired on the press.
+      return;
+    }
+    const start = this.chargeStart;
+    this.chargeStart = null;
+    if (start === null) return;
+    const heldMs = performance.now() - start;
+    if (heldMs >= this.spinChargeMs) {
+      this.performSpinAttack();
+    } else {
+      this.attack();
+    }
+  }
+
   private performSlashSequence(): void {
     if (this.currentSlash >= this.sabre.slashCount) {
       this.launchEnergyWave();
@@ -276,8 +342,10 @@ export class BeamSabreSystem {
     const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
     // Reach further into the world so the longer blade actually connects with
     // enemies the player can see at the tip of the sweep.
-    const origin = this.getAimOrigin().add(forward.scale(3.2));
-    const hitRadius = 7;
+    const giantMul = this.sabre.hasGiantBlade ? 1.5 : 1.0;
+    const origin = this.getAimOrigin().add(forward.scale(3.2 * giantMul));
+    const hitRadius = 7 * giantMul;
+    const dmg = this.sabre.damage * giantMul;
 
     const list = targets && targets.length ? targets : this.scene.meshes;
     for (const mesh of list) {
@@ -287,13 +355,13 @@ export class BeamSabreSystem {
       const meshHitR = (mesh.metadata as any)?.hitRadius ?? 1.5;
       if (dist < hitRadius + meshHitR) {
         const info: DamageInfo = {
-          amount: this.sabre.damage,
+          amount: dmg,
           hitPoint: mesh.position.clone(),
           hitDirection: mesh.position.subtract(this.getAimOrigin()).normalize(),
           damageType: DamageType.Melee,
           knockbackForce: 5,
         };
-        const dealt = this.dealDamage(mesh, this.sabre.damage, info);
+        const dealt = this.dealDamage(mesh, dmg, info);
 
         this.bus.emit(GameEvents.UI_DAMAGE_NUMBER, {
           position: mesh.position.clone(),
@@ -332,66 +400,186 @@ export class BeamSabreSystem {
         forward.normalize();
       }
 
-      // Arc-shaped slash wave (crescent), built as a tube along a curved path.
-      // The arc opens backward in local space so the convex (bulging) front
-      // leads as the wave travels in +Z.
-      const arcRadius = Math.max(2, this.sabre.energyWaveWidth * 0.7);
-      const arcSpan = Math.PI * 0.85;
-      const segments = 18;
-      const arcPath: BABYLON.Vector3[] = [];
-      for (let s = 0; s <= segments; s++) {
-        const u = s / segments;
-        const angle = -arcSpan / 2 + arcSpan * u;
-        arcPath.push(new BABYLON.Vector3(
-          Math.sin(angle) * arcRadius,
-          0,
-          -(arcRadius - Math.cos(angle) * arcRadius),
-        ));
-      }
-      const tubeRadius = this.sabre.level >= 4 ? 0.28 : 0.22;
-      const waveMesh = BABYLON.MeshBuilder.CreateTube(`energyWave_${Date.now()}_${i}`, {
-        path: arcPath,
-        radius: tubeRadius,
-        tessellation: 10,
-        cap: BABYLON.Mesh.CAP_ALL,
-      }, this.scene);
-
-      const waveMat = new BABYLON.StandardMaterial(`energyWaveMat_${Date.now()}_${i}`, this.scene);
-      waveMat.emissiveColor = new BABYLON.Color3(0, 1, 1);
-      waveMat.diffuseColor = new BABYLON.Color3(0, 0.8, 1);
-      waveMat.alpha = 0.8;
-      waveMesh.material = waveMat;
-      waveMesh.isPickable = false;
-
-      const spawnPos = this.getAimOrigin().add(forward.scale(2));
-      waveMesh.position.copyFrom(spawnPos);
-
-      const lookDir = forward.clone();
-      const upDir = BABYLON.Vector3.Up();
-      waveMesh.rotationQuaternion = BABYLON.Quaternion.FromLookDirectionLH(lookDir, upDir);
-
-      const hitRadius = this.sabre.level >= 5 ? this.sabre.energyWaveWidth * 0.8 : this.sabre.energyWaveWidth * 0.5;
-
-      const wave: EnergyWave = {
-        mesh: waveMesh,
-        direction: forward.clone(),
-        speed: this.sabre.energyWaveSpeed,
-        damage: this.sabre.energyWaveDamage,
-        lifetime: 2,
-        elapsed: 0,
-        hitRadius,
+      this.spawnArcWave(forward, {
+        sizeMul: 1.0,
+        damageMul: 1.0,
+        speedMul: 1.0,
+        spawnForwardOffset: 2,
+        emissive: new BABYLON.Color3(0, 1, 1),
+        diffuse: new BABYLON.Color3(0, 0.8, 1),
         piercing,
-        hitEnemies: new Set(),
-      };
+        index: i,
+      });
+    }
 
-      this.energyWaves.push(wave);
+    // Twin-wave special: chase every blue wave with one big red trailing
+    // wave that does ~60% more damage and is much wider, so it crashes
+    // through anything the lead wave didn't kill.
+    if (this.sabre.hasTwinWave) {
+      const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
+      this.spawnArcWave(forward, {
+        sizeMul: 1.9,
+        damageMul: 1.6,
+        speedMul: 0.78,
+        spawnForwardOffset: -2.4,
+        emissive: new BABYLON.Color3(1.0, 0.18, 0.10),
+        diffuse: new BABYLON.Color3(0.85, 0.10, 0.05),
+        piercing: true,
+        index: 99,
+      });
     }
 
     this.bus.emit(GameEvents.UI_MESSAGE, {
-      text: "Energy Wave!",
+      text: this.sabre.hasTwinWave ? "Twin Wave!" : "Energy Wave!",
       duration: 1,
     });
   }
+
+  private spawnArcWave(
+    forward: BABYLON.Vector3,
+    opts: {
+      sizeMul: number;
+      damageMul: number;
+      speedMul: number;
+      spawnForwardOffset: number;
+      emissive: BABYLON.Color3;
+      diffuse: BABYLON.Color3;
+      piercing: boolean;
+      index: number;
+    },
+  ): void {
+    const giantMul = this.sabre.hasGiantBlade ? 1.5 : 1.0;
+    // Arc-shaped slash wave (crescent), built as a tube along a curved path.
+    // The arc opens backward in local space so the convex (bulging) front
+    // leads as the wave travels in +Z.
+    const arcRadius = Math.max(2, this.sabre.energyWaveWidth * 0.7) * opts.sizeMul * giantMul;
+    const arcSpan = Math.PI * 0.85;
+    const segments = 18;
+    const arcPath: BABYLON.Vector3[] = [];
+    for (let s = 0; s <= segments; s++) {
+      const u = s / segments;
+      const angle = -arcSpan / 2 + arcSpan * u;
+      arcPath.push(new BABYLON.Vector3(
+        Math.sin(angle) * arcRadius,
+        0,
+        -(arcRadius - Math.cos(angle) * arcRadius),
+      ));
+    }
+    const baseTubeRadius = this.sabre.level >= 4 ? 0.28 : 0.22;
+    const tubeRadius = baseTubeRadius * opts.sizeMul * giantMul;
+    const id = `${Date.now()}_${opts.index}`;
+    const waveMesh = BABYLON.MeshBuilder.CreateTube(`energyWave_${id}`, {
+      path: arcPath,
+      radius: tubeRadius,
+      tessellation: 10,
+      cap: BABYLON.Mesh.CAP_ALL,
+    }, this.scene);
+
+    const waveMat = new BABYLON.StandardMaterial(`energyWaveMat_${id}`, this.scene);
+    waveMat.emissiveColor = opts.emissive;
+    waveMat.diffuseColor = opts.diffuse;
+    waveMat.alpha = 0.8;
+    waveMesh.material = waveMat;
+    waveMesh.isPickable = false;
+
+    const spawnPos = this.getAimOrigin().add(forward.scale(opts.spawnForwardOffset));
+    waveMesh.position.copyFrom(spawnPos);
+
+    const upDir = BABYLON.Vector3.Up();
+    waveMesh.rotationQuaternion = BABYLON.Quaternion.FromLookDirectionLH(forward.clone(), upDir);
+
+    const baseHitR = this.sabre.level >= 5
+      ? this.sabre.energyWaveWidth * 0.8
+      : this.sabre.energyWaveWidth * 0.5;
+    const hitRadius = baseHitR * opts.sizeMul * giantMul;
+
+    const wave: EnergyWave = {
+      mesh: waveMesh,
+      direction: forward.clone(),
+      speed: this.sabre.energyWaveSpeed * opts.speedMul,
+      damage: this.sabre.energyWaveDamage * opts.damageMul * giantMul,
+      lifetime: 2.2,
+      elapsed: 0,
+      hitRadius,
+      piercing: opts.piercing,
+      hitEnemies: new Set(),
+    };
+
+    this.energyWaves.push(wave);
+  }
+
+  /** Spin-blade special: 360° AoE around the player. Costs 2× cooldown but
+   *  hits everything in a generous radius for double slash damage. */
+  private performSpinAttack(): void {
+    if (this.isSlashing || this.cooldownTimer > 0) return;
+    const giantMul = this.sabre.hasGiantBlade ? 1.5 : 1.0;
+    const origin = this.getAimOrigin();
+    const hitR = 12 * giantMul;
+    const dmg = this.sabre.damage * 2.0 * giantMul;
+
+    for (const mesh of this.scene.meshes) {
+      if (!this.isHittable(mesh)) continue;
+      const dist = BABYLON.Vector3.Distance(origin, mesh.position);
+      const meshHitR = (mesh.metadata as any)?.hitRadius ?? 1.5;
+      if (dist < hitR + meshHitR) {
+        const info: DamageInfo = {
+          amount: dmg,
+          hitPoint: mesh.position.clone(),
+          hitDirection: mesh.position.subtract(origin).normalize(),
+          damageType: DamageType.Melee,
+          knockbackForce: 14,
+        };
+        const dealt = this.dealDamage(mesh, dmg, info);
+        this.bus.emit(GameEvents.UI_DAMAGE_NUMBER, {
+          position: mesh.position.clone(),
+          damage: dealt,
+          isCritical: true,
+        });
+      }
+    }
+
+    this.spinAnimTimer = this.spinAnimDuration;
+    this.cooldownTimer = this.sabre.cooldown * 2;
+    this.bus.emit("effect:explosion", {
+      position: origin.clone(),
+      color: new BABYLON.Color3(0.2, 1, 1),
+      radius: hitR,
+    });
+    this.bus.emit(GameEvents.UI_MESSAGE, {
+      text: "SPIN BLADE!",
+      duration: 1.2,
+    });
+  }
+
+  /** Unlock the spin-blade special. */
+  unlockSpinAttack(): void {
+    this.sabre.hasSpinAttack = true;
+  }
+
+  /** Unlock the twin-wave (red trailing wave) special. */
+  unlockTwinWave(): void {
+    this.sabre.hasTwinWave = true;
+  }
+
+  /** Unlock the giant-blade special. Restyles the live blade mesh and bumps
+   *  base damage / hit radius. Idempotent. */
+  unlockGiantBlade(): void {
+    this.sabre.hasGiantBlade = true;
+    if (!this.giantBladeApplied) {
+      this.giantBladeApplied = true;
+      if (this.sabreMesh) {
+        this.sabreMesh.scaling.scaleInPlace(1.6);
+      }
+      if (this.bladeMaterial) {
+        this.bladeMaterial.emissiveColor = new BABYLON.Color3(1.0, 0.15, 0.30);
+        this.bladeMaterial.diffuseColor = new BABYLON.Color3(1.0, 0.25, 0.35);
+      }
+    }
+  }
+
+  hasSpinAttack(): boolean { return this.sabre.hasSpinAttack; }
+  hasTwinWave(): boolean { return this.sabre.hasTwinWave; }
+  hasGiantBlade(): boolean { return this.sabre.hasGiantBlade; }
 
   upgrade(): void {
     if (this.sabre.level >= 5) return;
@@ -425,6 +613,10 @@ export class BeamSabreSystem {
     if (this.slashAnimTimer > 0) {
       this.slashAnimTimer -= dt;
       if (this.slashAnimTimer < 0) this.slashAnimTimer = 0;
+    }
+    if (this.spinAnimTimer > 0) {
+      this.spinAnimTimer -= dt;
+      if (this.spinAnimTimer < 0) this.spinAnimTimer = 0;
     }
 
     this.updateBladePosition();

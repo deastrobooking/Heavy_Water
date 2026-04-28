@@ -299,6 +299,36 @@ export const ALLY_PRESETS: Record<string, RobotDescriptor> = {
       },
     },
   },
+  // Premium endgame unlock — large winged hybrid that rides the player's
+  // orbit. Heavy on plating, wings + tail + horns for that "robot dragon"
+  // silhouette. Spawned through the SPECIALS upgrade tab.
+  RoboDragon: {
+    name: "RoboDragon",
+    faction: "ally",
+    style: {
+      archetype: "hybrid",
+      scale: 1.6,
+      torsoWidth: 1.6, torsoHeight: 1.8, torsoDepth: 1.2,
+      headSize: 0.75, headShape: "cone",
+      armLength: 1.5, armThickness: 0.3, armStyle: "tapered",
+      legLength: 1.4, legThickness: 0.4, legStyle: "digitigrade",
+      shoulderPadSize: 0.85, hipPadSize: 0.8,
+      hasWings: true, wingSpan: 3.2, wingAngle: 0.45,
+      hasCannons: true, cannonSize: 0.7,
+      hasBackpack: true, backpackSize: 0.9,
+      hasVisor: true, visorStyle: "full",
+      hasHorns: true, hornLength: 0.85,
+      hasTail: true, tailLength: 2.6, tailSegments: 7,
+      hasAntennae: false, antennaLength: 0.5,
+      hasShield: true, shieldSize: 1.6,
+      extraPlating: 3, asymmetry: 0.15,
+      colors: {
+        primary: new BABYLON.Color3(0.55, 0.10, 0.10),
+        secondary: new BABYLON.Color3(0.18, 0.05, 0.05),
+        emissive: new BABYLON.Color3(1.0, 0.45, 0.05),
+      },
+    },
+  },
 };
 
 export const PET_PRESETS: Record<string, RobotDescriptor> = {

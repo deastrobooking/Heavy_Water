@@ -3,6 +3,24 @@ import type { WeaponUpgradeInfo } from "./WeaponsSystem";
 import type { CompanionUpgradeInfo } from "./CompanionSystem";
 import type { PlayerUpgradeInfo } from "./PlayerController";
 
+export interface CompanionWeaponInfo {
+  id: string;
+  name: string;
+  weaponLevel: number;
+  maxLevel: number;
+  cost: { gears: number; cores: number } | null;
+  affordable: boolean;
+}
+
+export interface SpecialUpgradeInfo {
+  id: string;
+  name: string;
+  description: string;
+  owned: boolean;
+  cost: { gears: number; cores: number; nanofiber: number; circuits?: number; credits?: number };
+  affordable: boolean;
+}
+
 interface UpgradeMenuProps {
   open: boolean;
   weapons: WeaponUpgradeInfo[];
@@ -11,9 +29,13 @@ interface UpgradeMenuProps {
   playerCredits?: number;
   resources: { gears: number; scrap: number; cores: number; circuits: number; nanofiber: number };
   partCounts: Record<string, number>;
+  specials?: SpecialUpgradeInfo[];
+  companionWeapons?: CompanionWeaponInfo[];
   onUpgradeWeapon: (type: string) => void;
   onUpgradeCompanion: (id: string) => void;
   onUpgradePlayer?: (id: string) => void;
+  onUnlockSpecial?: (id: string) => void;
+  onUpgradeCompanionWeapon?: (id: string) => void;
   onClose: () => void;
 }
 
@@ -35,12 +57,16 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
   playerCredits = 0,
   resources,
   partCounts,
+  specials = [],
+  companionWeapons = [],
   onUpgradeWeapon,
   onUpgradeCompanion,
   onUpgradePlayer,
+  onUnlockSpecial,
+  onUpgradeCompanionWeapon,
   onClose,
 }) => {
-  const [tab, setTab] = useState<"player" | "weapons" | "robots">("player");
+  const [tab, setTab] = useState<"player" | "weapons" | "robots" | "specials">("player");
   if (!open) return null;
 
   return (
@@ -68,6 +94,7 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
           <TabBtn active={tab === "player"} onClick={() => setTab("player")} label="PLAYER" />
           <TabBtn active={tab === "weapons"} onClick={() => setTab("weapons")} label="WEAPONS" />
           <TabBtn active={tab === "robots"} onClick={() => setTab("robots")} label="HELPER ROBOTS" />
+          <TabBtn active={tab === "specials"} onClick={() => setTab("specials")} label="SPECIALS" />
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
@@ -158,6 +185,40 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
             );
           })}
 
+          {tab === "robots" && companionWeapons.length > 0 && (
+            <div className="bg-zinc-950/60 border border-fuchsia-900/60 rounded-lg p-3 mb-2">
+              <div className="text-fuchsia-300 text-xs font-bold tracking-wider mb-2">HELPER WEAPONS</div>
+              <div className="space-y-1">
+                {companionWeapons.map(cw => {
+                  const isMax = cw.weaponLevel >= cw.maxLevel;
+                  return (
+                    <div key={cw.id} className="flex items-center justify-between bg-zinc-900/70 rounded px-2 py-1.5 text-[11px]">
+                      <div className="flex items-center gap-2">
+                        <div className="text-zinc-200 font-bold">{cw.name}</div>
+                        <div className="text-fuchsia-400 font-mono">WPN T{cw.weaponLevel}/{cw.maxLevel}</div>
+                      </div>
+                      {isMax ? (
+                        <div className="text-emerald-400 font-bold">MAX</div>
+                      ) : cw.cost ? (
+                        <div className="flex items-center gap-2">
+                          <div className={`${resources.gears >= cw.cost.gears ? "text-amber-300" : "text-red-400"}`}>{cw.cost.gears}g</div>
+                          <div className={`${resources.cores >= cw.cost.cores ? "text-cyan-300" : "text-red-400"}`}>{cw.cost.cores}c</div>
+                          <button
+                            disabled={!cw.affordable}
+                            onClick={() => onUpgradeCompanionWeapon?.(cw.id)}
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider ${cw.affordable ? "bg-fuchsia-500 hover:bg-fuchsia-400 text-black" : "bg-zinc-700 text-zinc-500 cursor-not-allowed"}`}
+                          >
+                            +TIER
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {tab === "robots" && (companions.length === 0 ? (
             <div className="text-center text-zinc-400 py-8 text-sm">No helper robots active. Build one at the Lab.</div>
           ) : companions.map(c => {
@@ -195,6 +256,55 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
                         </button>
                       </>
                     ) : null}
+                  </div>
+                </div>
+              </div>
+            );
+          }))}
+
+          {tab === "specials" && (specials.length === 0 ? (
+            <div className="text-center text-zinc-400 py-8 text-sm">No specials available right now.</div>
+          ) : specials.map(s => {
+            const c = s.cost;
+            const have = {
+              gears: resources.gears, cores: resources.cores,
+              nanofiber: resources.nanofiber, circuits: resources.circuits,
+              credits: playerCredits,
+            };
+            return (
+              <div key={s.id} className={`border rounded-lg p-3 transition ${s.owned ? "bg-emerald-950/40 border-emerald-700" : "bg-zinc-800/80 border-zinc-700 hover:border-purple-500"}`}>
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3">
+                      <div className="text-white font-bold uppercase tracking-wider">{s.name}</div>
+                      {s.owned && <div className="text-emerald-300 text-[10px] font-bold">OWNED</div>}
+                    </div>
+                    <div className="text-zinc-400 text-[11px] mt-1">{s.description}</div>
+                  </div>
+                  <div className="ml-3 text-right min-w-[150px]">
+                    {s.owned ? (
+                      <div className="text-emerald-400 font-bold text-sm">UNLOCKED</div>
+                    ) : (
+                      <>
+                        <div className="text-[10px] text-zinc-400">COST:</div>
+                        <div className={`text-xs ${have.gears >= c.gears ? "text-amber-300" : "text-red-400"}`}>{c.gears} gears</div>
+                        <div className={`text-xs ${have.cores >= c.cores ? "text-cyan-300" : "text-red-400"}`}>{c.cores} cores</div>
+                        <div className={`text-xs ${have.nanofiber >= c.nanofiber ? "text-fuchsia-300" : "text-red-400"}`}>{c.nanofiber} nano</div>
+                        {c.circuits != null && (
+                          <div className={`text-xs ${have.circuits >= c.circuits ? "text-emerald-300" : "text-red-400"}`}>{c.circuits} circuits</div>
+                        )}
+                        {c.credits != null && (
+                          <div className={`text-xs ${have.credits >= c.credits ? "text-yellow-300" : "text-red-400"}`}>{c.credits} credits</div>
+                        )}
+                        <button
+                          disabled={!s.affordable}
+                          onClick={() => onUnlockSpecial?.(s.id)}
+                          className={`mt-1 px-3 py-1 rounded text-xs font-bold tracking-wider ${s.affordable ? "bg-purple-500 hover:bg-purple-400 text-black" : "bg-zinc-700 text-zinc-500 cursor-not-allowed"}`}
+                        >
+                          UNLOCK
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
