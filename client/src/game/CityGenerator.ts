@@ -42,15 +42,15 @@ export class CityGenerator {
   private wallColliders: WallCollider[] = [];
   private floorPlatforms: FloorPlatform[] = [];
   // Sky-racetrack ramp parameters — saved so getDriveableHeight() can sample
-  // the ramp's tilted surface analytically (much faster + reliable than
-  // raycasting against a rotated box).
-  private rampParams: {
-    minX: number;
-    maxX: number;
-    zLow: number;     // world Z at the ramp's low end (y=0)
-    zHigh: number;    // world Z at the ramp's high end (y=rise)
-    rise: number;     // total Y rise from low end to high end
-  } | null = null;
+  // each ramp's tilted surface analytically (much faster + reliable than
+  // raycasting against a rotated box). Stored as a list of low/high endpoints
+  // so we can have multiple cardinal-direction ramps onto the ring.
+  private rampParams: Array<{
+    lowX: number; lowZ: number;   // ground end (y=0)
+    highX: number; highZ: number; // landing end (y=rise) — sits on the ring
+    width: number;
+    rise: number;
+  }> = [];
   private cellShadeMaterial: BABYLON.ShaderMaterial | null = null;
 
   constructor(scene: BABYLON.Scene) {
@@ -413,12 +413,25 @@ export class CityGenerator {
     let best = 0;
     const headroom = 3.0;
 
-    // Sky-racetrack ramp (tilted plane). Linear in z between zHigh (top) and
-    // zLow (bottom); +Z end of ramp is the LOW end (see createSkyRacetrack).
-    const rp = this.rampParams;
-    if (rp && x >= rp.minX && x <= rp.maxX && z >= rp.zHigh && z <= rp.zLow) {
-      const t = (rp.zLow - z) / (rp.zLow - rp.zHigh);
-      const rampY = t * rp.rise;
+    // Sky-racetrack ramps (tilted planes in arbitrary cardinal directions).
+    // Project (x,z) onto the ramp's low→high vector, sample linearly along
+    // the run, and clamp by lateral half-width.
+    for (let r = 0; r < this.rampParams.length; r++) {
+      const rp = this.rampParams[r];
+      const dirX = rp.highX - rp.lowX;
+      const dirZ = rp.highZ - rp.lowZ;
+      const runSq = dirX * dirX + dirZ * dirZ;
+      if (runSq < 0.01) continue;
+      const run = Math.sqrt(runSq);
+      const ux = dirX / run;
+      const uz = dirZ / run;
+      const px = x - rp.lowX;
+      const pz = z - rp.lowZ;
+      const along = px * ux + pz * uz;          // 0 at low end, run at high end
+      if (along < 0 || along > run) continue;
+      const perp = Math.abs(px * (-uz) + pz * ux);
+      if (perp > rp.width / 2) continue;
+      const rampY = (along / run) * rp.rise;
       if (rampY <= currentY + headroom && rampY > best) best = rampY;
     }
 
@@ -454,10 +467,12 @@ export class CityGenerator {
 
   /**
    * Builds a giant sky racetrack — a flat ring at high altitude encircling the
-   * downtown core — and a long ramp leading up to it from the south. The track
-   * is segmented (so cars can lean into the curve) with low neon barriers and a
-   * boost-pad runway entry. Both the ramp slab and the track segments are
-   * registered as floor platforms so ATVs and players cleanly land on them.
+   * downtown core — plus four long connection ramps leading up to it from the
+   * north, east, south and west cardinal sides. The track is segmented (so
+   * cars can lean into the curve) with low neon barriers. Each ramp slab and
+   * the track segments are registered as floor platforms so ATVs and players
+   * cleanly land on them; getDriveableHeight() samples each tilted ramp
+   * analytically.
    */
   private createSkyRacetrack(): void {
     const trackY = 80;
@@ -608,83 +623,137 @@ export class CityGenerator {
       });
     }
 
-    // ─── Giant ramp from ground up to the south side of the ring ───
-    // Ring south point is at (0, trackY, trackRadius). Ramp lands just south
-    // of it so vehicles roll directly onto the track.
-    const rampWidth = 18;
-    const rampRise = trackY;
-    const rampRun = 220; // ~20° incline
-    const rampLen = Math.sqrt(rampRise * rampRise + rampRun * rampRun);
-    const rampMidZ = trackRadius + 8 + rampRun / 2;
-    const rampMidY = rampRise / 2;
-    const rampAngle = Math.atan2(rampRise, rampRun);
-
+    // ─── Four giant ramps from the ground onto the ring (N / E / S / W) ───
+    // Each ramp lands just outside the ring's barrier on its cardinal side
+    // and runs out away from the city center, so players and vehicles can
+    // jump on the track from any approach.
     const rampMat = new BABYLON.StandardMaterial("racetrackRampMat", this.scene);
     rampMat.diffuseColor = new BABYLON.Color3(0.1, 0.1, 0.14);
     rampMat.emissiveColor = new BABYLON.Color3(0.04, 0.06, 0.1);
     rampMat.freeze();
 
+    const rampOpts = {
+      width: 18,
+      rise: trackY,
+      run: 220, // ~20° incline
+      mat: rampMat,
+      barrierMat,
+    };
+    const landingOffset = 8; // sit the ramp's top just outside the barrier
+    const ringEdge = trackRadius + landingOffset;
+
+    // outwardX/outwardZ point AWAY from ring center toward where the ramp's
+    // ground end will be. The "endX/endZ" lands on the ring at that side.
+    this.addRacetrackRamp({ endX: 0, endZ: ringEdge, outwardX: 0, outwardZ: 1, ...rampOpts });   // SOUTH (original)
+    this.addRacetrackRamp({ endX: 0, endZ: -ringEdge, outwardX: 0, outwardZ: -1, ...rampOpts }); // NORTH
+    this.addRacetrackRamp({ endX: ringEdge, endZ: 0, outwardX: 1, outwardZ: 0, ...rampOpts });   // EAST
+    this.addRacetrackRamp({ endX: -ringEdge, endZ: 0, outwardX: -1, outwardZ: 0, ...rampOpts }); // WEST
+  }
+
+  /**
+   * Build one racetrack ramp from the ground up to the ring. The ramp is a
+   * tilted box oriented by `outwardX/outwardZ` (unit vector pointing away from
+   * the ring center), with its top end at (endX, endZ, rise) and ground end
+   * `run` units further outward.
+   */
+  private addRacetrackRamp(opts: {
+    endX: number; endZ: number;
+    outwardX: number; outwardZ: number;
+    width: number; rise: number; run: number;
+    mat: BABYLON.Material; barrierMat: BABYLON.Material;
+  }): void {
+    const { endX, endZ, outwardX, outwardZ, width, rise, run, mat, barrierMat } = opts;
+
+    const lowX = endX + outwardX * run;
+    const lowZ = endZ + outwardZ * run;
+    const midX = (endX + lowX) / 2;
+    const midZ = (endZ + lowZ) / 2;
+    const midY = rise / 2;
+    const rampLen = Math.sqrt(rise * rise + run * run);
+    const pitch = Math.atan2(rise, run);
+    const yaw = Math.atan2(outwardX, outwardZ);
+
+    // Compose yaw (around world Y) then pitch (around the post-yaw local-X
+    // axis) so the box's depth axis lies along outward and its high end sits
+    // at y=rise above (endX, endZ).
+    const yawQuat = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Up(), yaw);
+    const pitchAxis = new BABYLON.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    const pitchQuat = BABYLON.Quaternion.RotationAxis(pitchAxis, pitch);
+    const rampQuat = pitchQuat.multiply(yawQuat);
+
+    const tag = `${endX.toFixed(0)}_${endZ.toFixed(0)}`;
+
     const ramp = BABYLON.MeshBuilder.CreateBox(
-      `rt_ramp`,
-      { width: rampWidth, height: 0.6, depth: rampLen },
+      `rt_ramp_${tag}`,
+      { width, height: 0.6, depth: rampLen },
       this.scene,
     );
-    ramp.position = new BABYLON.Vector3(0, rampMidY, rampMidZ);
-    ramp.rotation.x = rampAngle;
-    ramp.material = rampMat;
+    ramp.position = new BABYLON.Vector3(midX, midY, midZ);
+    ramp.rotationQuaternion = rampQuat.clone();
+    ramp.material = mat;
     ramp.freezeWorldMatrix();
     this.platforms.push(ramp);
 
-    // Save ramp footprint + slope so vehicles (and the analytic ground-height
-    // function) can sample the tilted surface without any raycast cost.
-    // The ramp's +Z (depth) end is the LOW end (y=0), -Z is the HIGH end (y=rise).
-    this.rampParams = {
-      minX: -rampWidth / 2,
-      maxX: rampWidth / 2,
-      zHigh: rampMidZ - rampRun / 2,  // top of ramp (small z)
-      zLow: rampMidZ + rampRun / 2,   // bottom of ramp (large z)
-      rise: rampRise,
-    };
+    // Save analytic params: low-end (ground) and high-end (ring) endpoints.
+    this.rampParams.push({
+      lowX, lowZ,
+      highX: endX, highZ: endZ,
+      width,
+      rise,
+    });
 
-    // Glow strips along ramp sides
+    // Side glow strips. Lateral axis (perpendicular to outward in XZ).
+    const sideAxisX = -outwardZ;
+    const sideAxisZ = outwardX;
     for (const side of [-1, 1]) {
       const strip = BABYLON.MeshBuilder.CreateBox(
-        `rt_rampGlow`,
+        `rt_rampGlow_${tag}_${side}`,
         { width: 0.4, height: 0.2, depth: rampLen },
         this.scene,
       );
-      strip.position = new BABYLON.Vector3(side * (rampWidth / 2 - 0.3), rampMidY + 0.5, rampMidZ);
-      strip.rotation.x = rampAngle;
+      const stripCenterX = midX + side * (width / 2 - 0.3) * sideAxisX;
+      const stripCenterZ = midZ + side * (width / 2 - 0.3) * sideAxisZ;
+      strip.position = new BABYLON.Vector3(stripCenterX, midY + 0.5, stripCenterZ);
+      strip.rotationQuaternion = rampQuat.clone();
       strip.material = barrierMat;
       strip.isPickable = false;
       strip.freezeWorldMatrix();
     }
 
-    // Pad at bottom of ramp so vehicles can drive on without a step.
+    // Ground landing pad just past the ramp's low end so vehicles can drive
+    // straight onto the slope without a step.
+    const padDist = run + 6;
+    const padX = endX + outwardX * padDist;
+    const padZ = endZ + outwardZ * padDist;
     const pad = BABYLON.MeshBuilder.CreateBox(
-      `rt_rampPad`,
-      { width: rampWidth + 4, height: 0.4, depth: 12 },
+      `rt_rampPad_${tag}`,
+      { width: width + 4, height: 0.4, depth: 12 },
       this.scene,
     );
-    pad.position = new BABYLON.Vector3(0, 0.2, trackRadius + rampRun + 14);
-    pad.material = rampMat;
+    pad.position = new BABYLON.Vector3(padX, 0.2, padZ);
+    pad.rotation.y = yaw;
+    pad.material = mat;
     pad.freezeWorldMatrix();
     this.platforms.push(pad);
+
+    // Floor AABB for the pad (axis-aligned approximation that's a bit wider
+    // than the rotated box so the player always lands on it).
+    const padHalf = (width + 4) / 2 + 4;
     this.floorPlatforms.push({
-      minX: -rampWidth / 2 - 2,
-      maxX: rampWidth / 2 + 2,
-      minZ: trackRadius + rampRun + 8,
-      maxZ: trackRadius + rampRun + 20,
+      minX: padX - padHalf, maxX: padX + padHalf,
+      minZ: padZ - padHalf, maxZ: padZ + padHalf,
       y: 0.4,
     });
 
-    // Beacon pylon next to the pad so players can spot the entry from far away.
+    // Beacon pylon next to each pad — visible from far away.
+    const beaconOffsetX = sideAxisX * (width / 2 + 6);
+    const beaconOffsetZ = sideAxisZ * (width / 2 + 6);
     const beacon = BABYLON.MeshBuilder.CreateCylinder(
-      `rt_beacon`,
+      `rt_beacon_${tag}`,
       { height: 30, diameter: 1.5 },
       this.scene,
     );
-    beacon.position = new BABYLON.Vector3(rampWidth / 2 + 6, 15, trackRadius + rampRun + 14);
+    beacon.position = new BABYLON.Vector3(padX + beaconOffsetX, 15, padZ + beaconOffsetZ);
     beacon.material = barrierMat;
     beacon.freezeWorldMatrix();
   }

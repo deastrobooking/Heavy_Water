@@ -95,6 +95,15 @@ export class PlayerController implements IDamageable {
   private staminaRegenRate: number = 15;
   private sprintStaminaCost: number = 12;
 
+  // Rocket skates: hold sprint for `rocketSkateThreshold` seconds and the
+  // player slides into a "rollerskating" mode — even faster, smoother
+  // momentum, and reduced stamina drain so it can be sustained for cinematic
+  // long-distance traversal.
+  private sprintHoldTime: number = 0;
+  private isRocketSkating: boolean = false;
+  private rocketSkateThreshold: number = 2.0;
+  private rocketSkateSpeed: number = 1.0;
+
   private isDodging: boolean = false;
   private dodgeTimer: number = 0;
   private dodgeDuration: number = 0.3;
@@ -640,14 +649,49 @@ export class PlayerController implements IDamageable {
   private updateStamina(dt: number): void {
     this.isSprinting = this.keys["ShiftLeft"] && this.stats.stamina > 0 && this.isMoving();
 
+    // Only accumulate skate-charge while genuinely sprinting on foot — being
+    // airborne, jetpacking, or in free-flight should not trigger an "engaged"
+    // popup mid-air.
+    const onFoot = this.isGrounded && !this.isFlying && !this.isJetpacking && !this.isDodging;
+
     if (this.isSprinting) {
-      this.stats.stamina = Math.max(0, this.stats.stamina - this.sprintStaminaCost * dt);
+      // Drain stamina any time the player is sprinting, but only CHARGE the
+      // skate timer while on foot. Once engaged, skates persist through brief
+      // jumps so a launch off a ramp won't pop the mode.
+      const cost = this.isRocketSkating ? this.sprintStaminaCost * 0.4 : this.sprintStaminaCost;
+      this.stats.stamina = Math.max(0, this.stats.stamina - cost * dt);
       this.staminaRegenDelay = 0.5;
+
+      if (onFoot) {
+        this.sprintHoldTime += dt;
+        if (this.sprintHoldTime >= this.rocketSkateThreshold && !this.isRocketSkating) {
+          this.isRocketSkating = true;
+          this.bus.emit(GameEvents.UI_MESSAGE, {
+            text: "ROCKET SKATES ENGAGED",
+            duration: 1.5,
+          });
+        }
+      }
+    } else {
+      // Sprint released (or stamina gone, or stopped moving): stow skates.
+      if (this.isRocketSkating) {
+        this.bus.emit(GameEvents.UI_MESSAGE, {
+          text: "Rocket Skates Stowed",
+          duration: 1.0,
+        });
+      }
+      this.sprintHoldTime = 0;
+      this.isRocketSkating = false;
     }
 
     if (this.staminaRegenDelay <= 0 && this.stats.stamina < this.stats.maxStamina) {
       this.stats.stamina = Math.min(this.stats.maxStamina, this.stats.stamina + this.staminaRegenRate * dt);
     }
+  }
+
+  /** Public accessor so the HUD can show a rocket-skate badge. */
+  isRocketSkateMode(): boolean {
+    return this.isRocketSkating;
   }
 
   private updateJetpack(dt: number): void {
@@ -748,7 +792,10 @@ export class PlayerController implements IDamageable {
     right.normalize();
 
     let moveDirection = BABYLON.Vector3.Zero();
-    const speed = this.isSprinting ? this.sprintSpeed : this.walkSpeed;
+    // Rocket skates > sprint > walk. Speed applies to every WASD axis below.
+    const speed = this.isRocketSkating
+      ? this.rocketSkateSpeed
+      : (this.isSprinting ? this.sprintSpeed : this.walkSpeed);
 
     if (this.keys["KeyW"]) moveDirection.addInPlace(forward.scale(speed));
     if (this.keys["KeyS"]) moveDirection.addInPlace(forward.scale(-speed));
@@ -756,8 +803,16 @@ export class PlayerController implements IDamageable {
     if (this.keys["KeyD"]) moveDirection.addInPlace(right.scale(speed));
 
     if (this.isGrounded) {
-      this.velocity.x = moveDirection.x;
-      this.velocity.z = moveDirection.z;
+      if (this.isRocketSkating) {
+        // Vehicle-like momentum so the skates feel weighty and glide-y
+        // instead of snapping direction every frame.
+        const lerp = 0.14;
+        this.velocity.x += (moveDirection.x - this.velocity.x) * lerp;
+        this.velocity.z += (moveDirection.z - this.velocity.z) * lerp;
+      } else {
+        this.velocity.x = moveDirection.x;
+        this.velocity.z = moveDirection.z;
+      }
       this.airMomentumX = this.velocity.x;
       this.airMomentumZ = this.velocity.z;
     } else {

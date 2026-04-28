@@ -17,6 +17,8 @@ The game uses an EventBus for decoupled communication and a generic StateMachine
 ### Player and Character Systems
 PlayerController manages humanoid characters with complex state machines for movement, combat, and a triple-jump flight system with free-flight. Camera supports first-person and third-person views. The HumanoidCharacter system enables procedural generation, modular body parts, and customization. An AnimationSystem provides procedural, multi-part animations. The CharacterEditor allows player customization. Shield, stamina, and cooldown timers are persistent. A Boost Dash provides i-frames and a short burst of speed, with specific integration for a "dash → slash" combo.
 
+**Rocket Skates**: Holding sprint (ShiftLeft) for ≥2 seconds engages "rocket skate" mode — top speed jumps from 0.55 → 1.0, ground movement uses vehicle-like lerped momentum (lerp 0.14) for a smooth driving feel, and stamina drain is reduced to 40% so the mode can be sustained over long traversal. Releasing sprint (or running out of stamina / stopping) instantly stows the skates. UI_MESSAGE events announce engage/stow.
+
 ### Robot and Armor Systems
 The ArmorMaterialFactory creates reusable materials. RobotArmorParts provides a data-driven registry of parametric armor parts, equipped to humanoid rigs by the RobotArmorSystem.
 
@@ -63,7 +65,7 @@ The MiningSystem scatters destructible glowing resource nodes that respawn after
 ProgressSync.ts handles saving and loading player progress to a database, including stats, weapon levels, inventory, and captured creatures. Auto-save occurs periodically and on key game events. A "friendly respawn" mechanism allows revival without progress loss.
 
 ### Environment and World
-A CityGenerator creates a 1200x1200 open world with a central city and four biomes. The SkySystem renders a custom-shader gradient skybox, a day/night cycle, and weather modes. Buildings are hollow shells with accessible interiors and ramps for tall structures. Wall AABBs are exposed for collision detection. Driveable height data is provided for ground vehicles. A giant tilted ramp leads to a sky racetrack ring encircling downtown.
+A CityGenerator creates a 1200x1200 open world with a central city and four biomes. The SkySystem renders a custom-shader gradient skybox, a day/night cycle, and weather modes. Buildings are hollow shells with accessible interiors and ramps for tall structures. Wall AABBs are exposed for collision detection. Driveable height data is provided for ground vehicles. A sky racetrack ring (radius 280, y=80) encircles downtown with **four cardinal-direction connection ramps (N/E/S/W)** so players and vehicles can roll onto the track from any approach. Ramp geometry is built by the `addRacetrackRamp` helper using composed yaw + pitch quaternions; `getDriveableHeight` samples each ramp analytically by projecting (x,z) onto the ramp's low→high axis.
 
 ### Multiplayer
 A MultiplayerSystem provides client-side WebSocket integration for real-time multiplayer, supporting room management, position synchronization, chat, and enemy damage syncing for up to 4 players.
