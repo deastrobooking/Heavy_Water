@@ -35,6 +35,20 @@ export class BabylonEngine {
       stencil: true,
     });
 
+    // Disable parallel shader compilation. With it on, a freshly-built
+    // material can hit a render frame before its GLSL program is linked,
+    // causing `effect._pipelineContext.program` to be null and the engine to
+    // throw `Cannot read properties of null (reading 'program')` in
+    // `bindSamplers`. We hit this consistently during scene rebuilds (death /
+    // respawn / restart). Synchronous compile costs a one-off ~tens of ms per
+    // rebuild but eliminates the dropped-frame errors entirely.
+    try {
+      const caps = this.engine.getCaps();
+      (caps as { parallelShaderCompile?: unknown }).parallelShaderCompile = undefined;
+    } catch (e) {
+      console.warn("Could not disable parallel shader compile:", e);
+    }
+
     this.scene = new BABYLON.Scene(this.engine);
     this.camera = this.createCamera();
     this.setupLighting();

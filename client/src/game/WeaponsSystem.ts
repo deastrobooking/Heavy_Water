@@ -315,17 +315,32 @@ export class WeaponsSystem {
     const hits: { hitEnemy: BABYLON.Mesh; damage: number }[] = [];
     const now = Date.now();
 
+    // Homing-missile lock-on range. Beyond this distance the missile cannot
+    // see / steer toward an enemy. Squared form so we can avoid the sqrt
+    // inside the per-enemy hot loop.
+    const HOMING_RANGE_SQ = 120 * 120;
+
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const projectile = this.projectiles[i];
+      const px = projectile.mesh.position.x;
+      const py = projectile.mesh.position.y;
+      const pz = projectile.mesh.position.z;
 
-      // Tracking Missile: aggressively home onto the nearest live target.
+      // Tracking Missile: aggressively home onto the nearest live target
+      // within HOMING_RANGE. Use squared-distance comparison to skip the sqrt
+      // call per enemy — at high enemy counts this was the single biggest
+      // cost when the missile was equipped.
       if (projectile.type === "tracking_missile") {
         let nearest: BABYLON.Mesh | null = null;
-        let nearestDist = Infinity;
-        for (const e of enemies) {
+        let nearestDistSq = HOMING_RANGE_SQ;
+        for (let j = 0; j < enemies.length; j++) {
+          const e = enemies[j];
           if (e.isDisposed()) continue;
-          const d = BABYLON.Vector3.Distance(projectile.mesh.position, e.position);
-          if (d < nearestDist) { nearestDist = d; nearest = e; }
+          const dx = e.position.x - px;
+          const dy = e.position.y - py;
+          const dz = e.position.z - pz;
+          const dSq = dx * dx + dy * dy + dz * dz;
+          if (dSq < nearestDistSq) { nearestDistSq = dSq; nearest = e; }
         }
         if (nearest) {
           const desired = nearest.position.subtract(projectile.mesh.position).normalize();
@@ -346,16 +361,32 @@ export class WeaponsSystem {
         projectile.direction.y -= 0.01;
       }
 
-      for (const enemy of enemies) {
-        const distance = BABYLON.Vector3.Distance(projectile.mesh.position, enemy.position);
+      // Re-read after movement.
+      const px2 = projectile.mesh.position.x;
+      const py2 = projectile.mesh.position.y;
+      const pz2 = projectile.mesh.position.z;
+
+      let hitDetected = false;
+      for (let k = 0; k < enemies.length; k++) {
+        const enemy = enemies[k];
+        const dx = enemy.position.x - px2;
+        const dy = enemy.position.y - py2;
+        const dz = enemy.position.z - pz2;
+        const distSq = dx * dx + dy * dy + dz * dz;
         const hitRadius = (enemy.metadata && typeof enemy.metadata.hitRadius === "number") ? enemy.metadata.hitRadius : 1.5;
-        if (distance < hitRadius) {
+        if (distSq < hitRadius * hitRadius) {
           if (projectile.isExplosive) {
             this.createExplosion(projectile.mesh.position, projectile.explosionRadius);
-            for (const e of enemies) {
-              const expDist = BABYLON.Vector3.Distance(projectile.mesh.position, e.position);
-              if (expDist < projectile.explosionRadius) {
-                const falloff = 1 - (expDist / projectile.explosionRadius);
+            const radSq = projectile.explosionRadius * projectile.explosionRadius;
+            const radius = projectile.explosionRadius;
+            for (let m = 0; m < enemies.length; m++) {
+              const e = enemies[m];
+              const ex = e.position.x - px2;
+              const ey = e.position.y - py2;
+              const ez = e.position.z - pz2;
+              const eSq = ex * ex + ey * ey + ez * ez;
+              if (eSq < radSq) {
+                const falloff = 1 - (Math.sqrt(eSq) / radius);
                 hits.push({ hitEnemy: e, damage: projectile.damage * falloff });
               }
             }
@@ -364,9 +395,11 @@ export class WeaponsSystem {
           }
           projectile.mesh.dispose();
           this.projectiles.splice(i, 1);
+          hitDetected = true;
           break;
         }
       }
+      if (hitDetected) continue;
 
       if (projectile.lifetime <= 0 || projectile.mesh.position.y < 0) {
         if (projectile.isExplosive && projectile.mesh.position.y < 0.5) {

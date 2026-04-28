@@ -1,0 +1,123 @@
+Failed to load resource: the server responded with a status of 401 ()Understand this error
+/api/auth/login:1  Failed to load resource: the server responded with a status of 401 ()Understand this error
+/api/auth/login:1  Failed to load resource: the server responded with a status of 401 ()Understand this error
+/api/auth/login:1  Failed to load resource: the server responded with a status of 401 ()Understand this error
+/api/auth/login:1  Failed to load resource: the server responded with a status of 401 ()Understand this error
+index-QLAhDBY9.js:43 BJS - [02:18:32]: Babylon.js v8.42.0 - WebGL2 - Parallel shader compilation
+index-QLAhDBY9.js:27562 [SkySystem] Initialized at hour 8.0
+index-QLAhDBY9.js:27562 [BuildingSystem] Initialized
+index-QLAhDBY9.js:27562 [PrefabSystem] Initialized with 16 prefabs
+index-QLAhDBY9.js:27562 [BaseSystem] Initialized
+index-QLAhDBY9.js:27562 [PickupSystem] Initialized
+index-QLAhDBY9.js:27562 [BioCreatureSystem] Initialized
+index-QLAhDBY9.js:27562 [EffectsSystem] Initialized
+index-QLAhDBY9.js:27562 [PropAudioSystem] Initialized
+index-QLAhDBY9.js:27562 [SoundSystem] Initialized
+index-QLAhDBY9.js:27462 [AerialEnemySystem] Initialized
+index-QLAhDBY9.js:27609 [MiningSystem] Initialized
+index-QLAhDBY9.js:27609 [EnemyBaseSystem] Initialized
+index-QLAhDBY9.js:27562 [VehicleSystem] Initialized
+index-QLAhDBY9.js:27562 [EnvironmentPropSystem] Initialized
+index-QLAhDBY9.js:27617 [Game] Environment props placed: 129 (cap 220)
+/music/track_01.mp3:1  Failed to load resource: the server responded with a status of 500 ()Understand this error
+33WebGL: INVALID_VALUE: texImage2D: bad image dataUnderstand this warning
+33[.WebGL-0x104004e9800] GL_INVALID_OPERATION: glGenerateMipmap: Texture format does not support mipmap generation.Understand this warning
+index-QLAhDBY9.js:27462 [PlayerController] Jump 1 - Normal jump
+index-QLAhDBY9.js:27462 [PlayerController] Jump 2 - Double jump
+index-QLAhDBY9.js:27462 [PlayerController] Jump 1 - Normal jump
+index-QLAhDBY9.js:27462 [PlayerController] Wall jump
+index-QLAhDBY9.js:27462 [PlayerController] Jump 2 - Double jump
+2index-QLAhDBY9.js:27462 [PlayerController] Jump 1 - Normal jump
+index-QLAhDBY9.js:27462 [AerialEnemySystem] AGGRO engaged — aerial squadron will now attack
+index-QLAhDBY9.js:27462 [PlayerController] Disposed
+index-QLAhDBY9.js:27562 [BuildingSystem] Disposed
+index-QLAhDBY9.js:27562 [PrefabSystem] Disposed
+index-QLAhDBY9.js:27562 [PickupSystem] Disposed
+index-QLAhDBY9.js:27562 [EnvironmentPropSystem] Disposed
+index-QLAhDBY9.js:43 BJS - [02:21:10]: Babylon.js v8.42.0 - WebGL2 - Parallel shader compilation
+index-QLAhDBY9.js:27562 [SkySystem] Initialized at hour 8.0
+index-QLAhDBY9.js:27562 [BuildingSystem] Initialized
+index-QLAhDBY9.js:27562 [PrefabSystem] Initialized with 16 prefabs
+index-QLAhDBY9.js:27562 [BaseSystem] Initialized
+index-QLAhDBY9.js:27562 [PickupSystem] Initialized
+index-QLAhDBY9.js:27562 [BioCreatureSystem] Initialized
+index-QLAhDBY9.js:27562 [EffectsSystem] Initialized
+index-QLAhDBY9.js:27562 [PropAudioSystem] Initialized
+index-QLAhDBY9.js:27562 [SoundSystem] Initialized
+index-QLAhDBY9.js:27462 [AerialEnemySystem] Initialized
+index-QLAhDBY9.js:27609 [MiningSystem] Initialized
+index-QLAhDBY9.js:27609 [EnemyBaseSystem] Initialized
+index-QLAhDBY9.js:27562 [VehicleSystem] Initialized
+index-QLAhDBY9.js:27562 [EnvironmentPropSystem] Initialized
+index-QLAhDBY9.js:27617 [Game] Environment props placed: 129 (cap 220)
+installHook.js:1 [BabylonEngine] scene.render() threw — skipping frame TypeError: Cannot read properties of null (reading 'program')
+    at Ce.bindSamplers (index-QLAhDBY9.js:77:49658)
+    at Ce.enableEffect (index-QLAhDBY9.js:77:34888)
+    at K._preBind (index-QLAhDBY9.js:587:78180)
+    at Q.render (index-QLAhDBY9.js:587:337724)
+    at Bs.render (index-QLAhDBY9.js:587:63586)
+    at Dl._RenderSorted (index-QLAhDBY9.js:61:94016)
+    at Dl._renderOpaqueSorted (index-QLAhDBY9.js:61:93034)
+    at Dl.render (index-QLAhDBY9.js:61:92132)
+    at Ss.render (index-QLAhDBY9.js:61:99070)
+    at Fe._renderForCamera (index-QLAhDBY9.js:587:163291)
+overrideMethod @ installHook.js:1Understand this warning
+4installHook.js:1 [BabylonEngine] scene.render() threw — skipping frame TypeError: Cannot read properties of undefined (reading '0')
+    at Ft.getAttributeLocation (index-QLAhDBY9.js:56:1232)
+    at Ce._bindVertexBuffersAttributes (index-QLAhDBY9.js:77:26791)
+    at Ce.recordVertexArrayObject (index-QLAhDBY9.js:77:27509)
+    at $r._bind (index-QLAhDBY9.js:587:227993)
+    at Q._bindDirect (index-QLAhDBY9.js:587:324900)
+    at Q._bind (index-QLAhDBY9.js:587:324640)
+    at Q.render (index-QLAhDBY9.js:587:338072)
+    at Bs.render (index-QLAhDBY9.js:587:63586)
+    at Dl._RenderSorted (index-QLAhDBY9.js:61:94016)
+    at Dl._renderOpaqueSorted (index-QLAhDBY9.js:61:93034)
+overrideMethod @ installHook.js:1Understand this warning
+2index-QLAhDBY9.js:27462 [PlayerController] Jump 1 - Normal jump
+index-QLAhDBY9.js:27462 [PlayerController] Wall jump
+3index-QLAhDBY9.js:27462 [PlayerController] Jump 1 - Normal jump
+index-QLAhDBY9.js:27462 [PlayerController] Jump 2 - Double jump
+2index-QLAhDBY9.js:27462 [PlayerController] Wall jump
+index-QLAhDBY9.js:27562 [BuildingSystem] Build mode enabled
+190[.WebGL-0x104004e9800] GL_INVALID_OPERATION: glDrawElements: Insufficient buffer size.Understand this warning
+index-QLAhDBY9.js:27562 [BuildingSystem] Build mode disabled
+(index):1 WebGL: too many errors, no more errors will be reported to the console for this context.Understand this warning
+2index-QLAhDBY9.js:27462 [PlayerController] Jump 1 - Normal jump
+index-QLAhDBY9.js:27462 [AerialEnemySystem] AGGRO engaged — aerial squadron will now attack
+index-QLAhDBY9.js:27462 [PlayerController] Jump 1 - Normal jump
+index-QLAhDBY9.js:27462 [PlayerController] Jump 2 - Double jump
+index-QLAhDBY9.js:27462 [PlayerController] Disposed
+index-QLAhDBY9.js:27562 [BuildingSystem] Disposed
+index-QLAhDBY9.js:27562 [PrefabSystem] Disposed
+index-QLAhDBY9.js:27562 [PickupSystem] Disposed
+index-QLAhDBY9.js:27562 [EnvironmentPropSystem] Disposed
+index-QLAhDBY9.js:43 BJS - [02:24:44]: Babylon.js v8.42.0 - WebGL2 - Parallel shader compilation
+index-QLAhDBY9.js:27562 [SkySystem] Initialized at hour 8.0
+index-QLAhDBY9.js:27562 [BuildingSystem] Initialized
+index-QLAhDBY9.js:27562 [PrefabSystem] Initialized with 16 prefabs
+index-QLAhDBY9.js:27562 [BaseSystem] Initialized
+index-QLAhDBY9.js:27562 [PickupSystem] Initialized
+index-QLAhDBY9.js:27562 [BioCreatureSystem] Initialized
+index-QLAhDBY9.js:27562 [EffectsSystem] Initialized
+index-QLAhDBY9.js:27562 [PropAudioSystem] Initialized
+index-QLAhDBY9.js:27562 [SoundSystem] Initialized
+index-QLAhDBY9.js:27462 [AerialEnemySystem] Initialized
+index-QLAhDBY9.js:27609 [MiningSystem] Initialized
+index-QLAhDBY9.js:27609 [EnemyBaseSystem] Initialized
+index-QLAhDBY9.js:27562 [VehicleSystem] Initialized
+index-QLAhDBY9.js:27562 [EnvironmentPropSystem] Initialized
+index-QLAhDBY9.js:27617 [Game] Environment props placed: 129 (cap 220)
+5installHook.js:1 [BabylonEngine] scene.render() threw — skipping frame TypeError: Cannot read properties of undefined (reading '0')
+    at Ft.getAttributeLocation (index-QLAhDBY9.js:56:1232)
+    at Ce._bindVertexBuffersAttributes (index-QLAhDBY9.js:77:26791)
+    at Ce.recordVertexArrayObject (index-QLAhDBY9.js:77:27509)
+    at $r._bind (index-QLAhDBY9.js:587:227993)
+    at Q._bindDirect (index-QLAhDBY9.js:587:324900)
+    at Q._bind (index-QLAhDBY9.js:587:324640)
+    at Q.render (index-QLAhDBY9.js:587:338072)
+    at Bs.render (index-QLAhDBY9.js:587:63586)
+    at Dl._RenderSorted (index-QLAhDBY9.js:61:94016)
+    at Dl._renderOpaqueSorted (index-QLAhDBY9.js:61:93034)
+overrideMethod @ installHook.js:1Understand this warning
+index-QLAhDBY9.js:27462 [AerialEnemySystem] AGGRO engaged — aerial squadron will now attack
