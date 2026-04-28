@@ -54,47 +54,87 @@ const PICKUP_LABELS: Record<PickupType, string> = {
   health_kit: "HEALTH",
 };
 
+// Drop rates were tuned up: at higher player levels gears and especially
+// energy cores were too rare to keep upgrading helper bots. Every enemy now
+// drops more gears, and even basic enemies have a small chance to drop a
+// core / circuit so progression keeps moving.
 const ENEMY_DROP_TABLE: Record<string, PickupSpawnRequest[]> = {
   drone: [
-    { type: "gear", amount: 1 },
-    { type: "scrap_metal", amount: 1 },
-  ],
-  soldier: [
-    { type: "gear", amount: 2 },
+    { type: "gear", amount: 3 },
     { type: "scrap_metal", amount: 2 },
   ],
-  heavy: [
-    { type: "gear", amount: 4 },
+  soldier: [
+    { type: "gear", amount: 5 },
     { type: "scrap_metal", amount: 3 },
-    { type: "energy_core", amount: 1 },
+  ],
+  heavy: [
+    { type: "gear", amount: 9 },
+    { type: "scrap_metal", amount: 5 },
+    { type: "energy_core", amount: 2 },
+    { type: "circuit_board", amount: 1 },
   ],
   insectoid: [
-    { type: "gear", amount: 2 },
-    { type: "bio_essence", amount: 1 },
+    { type: "gear", amount: 4 },
+    { type: "bio_essence", amount: 2 },
   ],
   hybrid: [
-    { type: "gear", amount: 6 },
-    { type: "circuit_board", amount: 2 },
-    { type: "bio_essence", amount: 1 },
+    { type: "gear", amount: 12 },
+    { type: "circuit_board", amount: 3 },
+    { type: "energy_core", amount: 1 },
+    { type: "bio_essence", amount: 2 },
   ],
   commander: [
-    { type: "gear", amount: 10 },
-    { type: "energy_core", amount: 2 },
-    { type: "circuit_board", amount: 3 },
-    { type: "nano_fiber", amount: 2 },
+    { type: "gear", amount: 22 },
+    { type: "energy_core", amount: 5 },
+    { type: "circuit_board", amount: 6 },
+    { type: "nano_fiber", amount: 4 },
   ],
   aerial_fighter: [
-    { type: "gear", amount: 3 },
-    { type: "scrap_metal", amount: 4 },
-    { type: "energy_core", amount: 1 },
+    { type: "gear", amount: 7 },
+    { type: "scrap_metal", amount: 6 },
+    { type: "energy_core", amount: 2 },
+    { type: "circuit_board", amount: 1 },
   ],
   aerial_battleship: [
-    { type: "gear", amount: 18 },
-    { type: "scrap_metal", amount: 12 },
-    { type: "energy_core", amount: 4 },
-    { type: "circuit_board", amount: 4 },
-    { type: "nano_fiber", amount: 3 },
+    { type: "gear", amount: 35 },
+    { type: "scrap_metal", amount: 20 },
+    { type: "energy_core", amount: 8 },
+    { type: "circuit_board", amount: 8 },
+    { type: "nano_fiber", amount: 6 },
   ],
+};
+
+// Bonus drop chances for tier-2 components from EVERY enemy kill, so cores
+// and circuits aren't gated solely behind tough enemies.
+const BONUS_CORE_CHANCE: Record<string, number> = {
+  drone: 0.10,
+  soldier: 0.18,
+  heavy: 0.0,        // already guaranteed
+  insectoid: 0.15,
+  hybrid: 0.0,       // already in base table
+  commander: 0.0,    // already in base table
+  aerial_fighter: 0.0,
+  aerial_battleship: 0.0,
+};
+const BONUS_CIRCUIT_CHANCE: Record<string, number> = {
+  drone: 0.05,
+  soldier: 0.10,
+  heavy: 0.25,
+  insectoid: 0.10,
+  hybrid: 0.0,
+  commander: 0.0,
+  aerial_fighter: 0.20,
+  aerial_battleship: 0.0,
+};
+const BONUS_NANO_CHANCE: Record<string, number> = {
+  drone: 0.0,
+  soldier: 0.0,
+  heavy: 0.10,
+  insectoid: 0.05,
+  hybrid: 0.20,
+  commander: 0.45,
+  aerial_fighter: 0.10,
+  aerial_battleship: 0.55,
 };
 
 const WEAPON_PART_BY_ENEMY: Record<string, string[]> = {
@@ -155,11 +195,27 @@ export class PickupSystem {
     if (!data || !data.position) return;
     const drops: PickupSpawnRequest[] = [...(ENEMY_DROP_TABLE[data.type] || ENEMY_DROP_TABLE.drone)];
     const partTable = WEAPON_PART_BY_ENEMY[data.type] || ["pistol"];
-    const dropChance = data.type === "commander" ? 1.0 : data.type === "hybrid" ? 0.6 : 0.35;
+    // Weapon-part drops were also bumped — at high level the player needs a
+    // steady supply of parts to keep all six weapons leveled.
+    const dropChance = data.type === "commander" ? 1.0 : data.type === "hybrid" ? 0.85 : 0.6;
     if (Math.random() < dropChance) {
       const wid = partTable[Math.floor(Math.random() * partTable.length)];
-      const amount = data.type === "commander" ? 2 + Math.floor(Math.random() * 2) : 1;
+      const amount = data.type === "commander" ? 3 + Math.floor(Math.random() * 3) : 1 + (Math.random() < 0.4 ? 1 : 0);
       drops.push({ type: "weapon_part", amount, weaponId: wid });
+    }
+    // Bonus tier-2 component rolls so cores / circuits / nano fiber drop
+    // even from grunts. Without these, late-game upgrades stall completely.
+    const coreChance = BONUS_CORE_CHANCE[data.type] ?? 0.05;
+    if (coreChance > 0 && Math.random() < coreChance) {
+      drops.push({ type: "energy_core", amount: 1 });
+    }
+    const circuitChance = BONUS_CIRCUIT_CHANCE[data.type] ?? 0.05;
+    if (circuitChance > 0 && Math.random() < circuitChance) {
+      drops.push({ type: "circuit_board", amount: 1 });
+    }
+    const nanoChance = BONUS_NANO_CHANCE[data.type] ?? 0;
+    if (nanoChance > 0 && Math.random() < nanoChance) {
+      drops.push({ type: "nano_fiber", amount: 1 });
     }
     const isTough = data.type === "heavy" || data.type === "hybrid" || data.type === "commander";
     const healthChance = isTough ? HEALTH_DROP_CHANCE_TOUGH : HEALTH_DROP_CHANCE;
