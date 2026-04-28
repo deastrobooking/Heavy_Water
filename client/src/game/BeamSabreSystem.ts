@@ -58,6 +58,13 @@ export class BeamSabreSystem {
   private slashTimers: number[] = [];
   private bladeMaterial: BABYLON.StandardMaterial | null = null;
 
+  // Screen-sweep slash animation. While `slashAnimTimer > 0` the blade is
+  // driven through a horizontal arc across the screen instead of being held
+  // in its rest pose.
+  private slashAnimTimer: number = 0;
+  private slashAnimDuration: number = 0.28;
+  private slashSwingDir: number = 1;
+
   // Optional external router. When set, the sabre delegates damage to the
   // game's central routeHit (so it correctly hurts aerial fortresses, enemy
   // bases, mining nodes, props, etc.). When null, falls back to the local
@@ -113,7 +120,9 @@ export class BeamSabreSystem {
       slashCount: LEVEL_CONFIGS[0].slashCount,
       energyWaveWidth: LEVEL_CONFIGS[0].energyWaveWidth,
       energyWaveSpeed: LEVEL_CONFIGS[0].energyWaveSpeed,
-      isActive: false,
+      // The Beam Sabre is always active — pressing Y or LT just slashes.
+      // No more dedicated toggle key.
+      isActive: true,
       cooldown: LEVEL_CONFIGS[0].cooldown,
     };
 
@@ -121,21 +130,24 @@ export class BeamSabreSystem {
   }
 
   private createBladeMesh(): void {
+    // Bigger blade (was 1.8×0.06×0.06) so the slash reads clearly at any FOV
+    // and the longer reach matches the expanded slash hit-radius.
     this.sabreMesh = BABYLON.MeshBuilder.CreateBox("beamSabreBlade", {
-      height: 1.8,
-      width: 0.06,
-      depth: 0.06,
+      height: 2.6,
+      width: 0.12,
+      depth: 0.12,
     }, this.scene);
 
     this.bladeMaterial = new BABYLON.StandardMaterial("beamSabreMat", this.scene);
     this.bladeMaterial.emissiveColor = new BABYLON.Color3(0, 0.9, 1);
     this.bladeMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.8, 1);
     this.bladeMaterial.specularColor = new BABYLON.Color3(1, 1, 1);
-    this.bladeMaterial.alpha = 0.85;
+    this.bladeMaterial.alpha = 0.9;
 
     this.sabreMesh.material = this.bladeMaterial;
     this.sabreMesh.isPickable = false;
-    this.sabreMesh.setEnabled(false);
+    // Always shown — the sabre never deactivates.
+    this.sabreMesh.setEnabled(true);
 
     const glowLayer = this.scene.effectLayers?.find(l => l instanceof BABYLON.GlowLayer) as BABYLON.GlowLayer | undefined;
     if (glowLayer) {
@@ -148,42 +160,66 @@ export class BeamSabreSystem {
   }
 
   private updateBladePosition(): void {
-    if (!this.sabreMesh || !this.sabre.isActive) return;
+    // The sabre is always active — only bail if the mesh is gone.
+    if (!this.sabreMesh) return;
 
     const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
     const right = this.camera.getDirection(BABYLON.Vector3.Right());
     const up = this.camera.getDirection(BABYLON.Vector3.Up());
 
-    const pos = this.getAimOrigin()
-      .add(forward.scale(1.2))
-      .add(right.scale(0.5))
-      .add(up.scale(-0.3));
-
-    this.sabreMesh.position.copyFrom(pos);
-
-    const lookDir = forward.clone();
-    const bladeUp = up.clone();
-    const rotQuat = BABYLON.Quaternion.FromLookDirectionLH(lookDir, bladeUp);
-    const extraRot = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Forward(), Math.PI / 6);
-
     if (!this.sabreMesh.rotationQuaternion) {
       this.sabreMesh.rotationQuaternion = BABYLON.Quaternion.Identity();
     }
-    this.sabreMesh.rotationQuaternion = rotQuat.multiply(extraRot);
+
+    if (this.slashAnimTimer > 0) {
+      // Drive the blade through a wide horizontal arc across the screen.
+      // t goes 0 → 1 over the full slash duration.
+      const t = 1 - this.slashAnimTimer / this.slashAnimDuration;
+      const dir = this.slashSwingDir;
+      // Position: start ~1.6m off to one side, arc forward, end on opposite
+      // side. The vertical sin curve gives a satisfying "lift then drop" feel.
+      const lateralStart = dir * 1.8;
+      const lateralEnd = -dir * 1.8;
+      const lateral = lateralStart + (lateralEnd - lateralStart) * t;
+      const verticalArc = Math.sin(t * Math.PI) * 0.45 - 0.15;
+      // Push the blade well in front of the camera — the 2.6m blade is held
+      // at its midpoint, so the back tip sits at (forwardOffset − 1.3).
+      const forwardOffset = 2.4 + Math.sin(t * Math.PI) * 0.6;
+
+      const pos = this.getAimOrigin()
+        .add(forward.scale(forwardOffset))
+        .add(right.scale(lateral))
+        .add(up.scale(verticalArc));
+      this.sabreMesh.position.copyFrom(pos);
+
+      // Rotation: blade swings tangent to its motion. Roll the blade around
+      // the camera-forward axis from +90° to -90° (or reverse) so it visibly
+      // sweeps across the screen.
+      const baseLook = BABYLON.Quaternion.FromLookDirectionLH(forward, up);
+      const rollAngle = dir * (Math.PI * 0.55 - Math.PI * 1.1 * t);
+      const roll = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Forward(), rollAngle);
+      this.sabreMesh.rotationQuaternion = baseLook.multiply(roll);
+    } else {
+      // Rest pose — blade held forward and to the right, tilted up. The
+      // blade is 2.6m centered, so a 2.0m forward offset keeps the hilt
+      // ~0.7m in front of the camera (no near-plane clipping).
+      const pos = this.getAimOrigin()
+        .add(forward.scale(2.0))
+        .add(right.scale(0.6))
+        .add(up.scale(-0.4));
+      this.sabreMesh.position.copyFrom(pos);
+
+      const rotQuat = BABYLON.Quaternion.FromLookDirectionLH(forward, up);
+      const extraRot = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Forward(), Math.PI / 6);
+      this.sabreMesh.rotationQuaternion = rotQuat.multiply(extraRot);
+    }
   }
 
+  /** No-op — kept for API compatibility. The sabre is always active now,
+   *  so there's nothing to toggle. */
   toggle(): void {
-    this.sabre.isActive = !this.sabre.isActive;
-    if (this.sabreMesh) {
-      this.sabreMesh.setEnabled(this.sabre.isActive);
-    }
-    this.currentSlash = 0;
-    this.isSlashing = false;
-
-    this.bus.emit(GameEvents.UI_MESSAGE, {
-      text: this.sabre.isActive ? "Beam Sabre Activated" : "Beam Sabre Deactivated",
-      duration: 1.5,
-    });
+    this.sabre.isActive = true;
+    if (this.sabreMesh) this.sabreMesh.setEnabled(true);
   }
 
   attack(): void {
@@ -238,9 +274,10 @@ export class BeamSabreSystem {
 
   private performSlashHit(targets?: BABYLON.AbstractMesh[]): void {
     const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
-    const origin = this.getAimOrigin().add(forward.scale(2.5));
-    // Slightly larger reach so the sword feels satisfying.
-    const hitRadius = 5;
+    // Reach further into the world so the longer blade actually connects with
+    // enemies the player can see at the tip of the sweep.
+    const origin = this.getAimOrigin().add(forward.scale(3.2));
+    const hitRadius = 7;
 
     const list = targets && targets.length ? targets : this.scene.meshes;
     for (const mesh of list) {
@@ -275,26 +312,11 @@ export class BeamSabreSystem {
 
   private animateSlash(): void {
     if (!this.sabreMesh) return;
-
-    const startAngle = this.currentSlash % 2 === 0 ? -Math.PI / 3 : Math.PI / 3;
-    const endAngle = this.currentSlash % 2 === 0 ? Math.PI / 3 : -Math.PI / 3;
-
-    const anim = new BABYLON.Animation(
-      "sabreSlash",
-      "rotation.z",
-      60,
-      BABYLON.Animation.ANIMATIONTYPE_FLOAT,
-      BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT
-    );
-
-    anim.setKeys([
-      { frame: 0, value: startAngle },
-      { frame: 6, value: endAngle },
-      { frame: 10, value: 0 },
-    ]);
-
-    this.sabreMesh.animations = [anim];
-    this.scene.beginAnimation(this.sabreMesh, 0, 10, false, 2);
+    // Rest of the animation is driven from updateBladePosition() — we just
+    // reset the timer here and pick a swing direction that alternates per
+    // slash so multi-hit combos visibly cross back and forth.
+    this.slashAnimTimer = this.slashAnimDuration;
+    this.slashSwingDir = this.currentSlash % 2 === 0 ? 1 : -1;
   }
 
   private launchEnergyWave(): void {
@@ -310,16 +332,34 @@ export class BeamSabreSystem {
         forward.normalize();
       }
 
-      const waveMesh = BABYLON.MeshBuilder.CreateBox(`energyWave_${Date.now()}_${i}`, {
-        height: 0.3,
-        width: this.sabre.energyWaveWidth,
-        depth: 0.5,
+      // Arc-shaped slash wave (crescent), built as a tube along a curved path.
+      // The arc opens backward in local space so the convex (bulging) front
+      // leads as the wave travels in +Z.
+      const arcRadius = Math.max(2, this.sabre.energyWaveWidth * 0.7);
+      const arcSpan = Math.PI * 0.85;
+      const segments = 18;
+      const arcPath: BABYLON.Vector3[] = [];
+      for (let s = 0; s <= segments; s++) {
+        const u = s / segments;
+        const angle = -arcSpan / 2 + arcSpan * u;
+        arcPath.push(new BABYLON.Vector3(
+          Math.sin(angle) * arcRadius,
+          0,
+          -(arcRadius - Math.cos(angle) * arcRadius),
+        ));
+      }
+      const tubeRadius = this.sabre.level >= 4 ? 0.28 : 0.22;
+      const waveMesh = BABYLON.MeshBuilder.CreateTube(`energyWave_${Date.now()}_${i}`, {
+        path: arcPath,
+        radius: tubeRadius,
+        tessellation: 10,
+        cap: BABYLON.Mesh.CAP_ALL,
       }, this.scene);
 
       const waveMat = new BABYLON.StandardMaterial(`energyWaveMat_${Date.now()}_${i}`, this.scene);
       waveMat.emissiveColor = new BABYLON.Color3(0, 1, 1);
       waveMat.diffuseColor = new BABYLON.Color3(0, 0.8, 1);
-      waveMat.alpha = 0.75;
+      waveMat.alpha = 0.8;
       waveMesh.material = waveMat;
       waveMesh.isPickable = false;
 
@@ -381,6 +421,10 @@ export class BeamSabreSystem {
   update(dt: number, enemies?: BABYLON.AbstractMesh[]): void {
     if (this.cooldownTimer > 0) {
       this.cooldownTimer -= dt;
+    }
+    if (this.slashAnimTimer > 0) {
+      this.slashAnimTimer -= dt;
+      if (this.slashAnimTimer < 0) this.slashAnimTimer = 0;
     }
 
     this.updateBladePosition();

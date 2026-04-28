@@ -557,7 +557,7 @@ export const GameUI: React.FC<GameUIProps> = ({
           <div>Q - Dodge | <span className="text-yellow-300">L - Boost Dash</span> | F - Parry</div>
           <div>E - Interact | G - Build</div>
           <div>V - Melee | B - Heavy Melee</div>
-          <div>Y - Beam Sabre | <span className="text-yellow-300">J - Slash</span> (L→J = wave!)</div>
+          <div><span className="text-yellow-300">Y / J - Beam Sabre Slash</span> (L→J = arc wave!)</div>
           <div className="text-cyan-300">Z/I/N - Lightning/Ice/Fire (track)</div>
           <div className="text-cyan-300">U/T/M - Inferno/Wind/Psychic (dome)</div>
           <div className="text-yellow-300">K - Cast Selected | O / . - Cycle</div>

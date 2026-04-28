@@ -61,9 +61,11 @@ export interface CompanionUpgradeInfo {
 
 const DEFAULT_ALLY_BEHAVIOR: CompanionBehavior = {
   followDistance: 6,
-  attackRange: 18,
-  attackDamage: 12,
-  attackCooldown: 2.0,
+  // Allies were "hardly assisting" — pump engagement range, fire rate, and
+  // damage so they actively contribute to fights instead of plinking.
+  attackRange: 32,
+  attackDamage: 22,
+  attackCooldown: 0.85,
   healAmount: 5,
   healCooldown: 8.0,
   moveSpeed: 0.12,
@@ -121,8 +123,13 @@ export class CompanionSystem {
         behavior = { ...DEFAULT_ALLY_BEHAVIOR };
 
         if (presetName === "MedicDrone") {
+          // Medics still primarily heal, but they also fire a light support
+          // beam so they aren't passive bystanders in fights.
           behavior.canHeal = true;
-          behavior.canAttack = false;
+          behavior.canAttack = true;
+          behavior.attackDamage = 10;
+          behavior.attackCooldown = 1.4;
+          behavior.attackRange = 26;
           behavior.healAmount = 8;
           behavior.healCooldown = 6.0;
         }
@@ -264,7 +271,8 @@ export class CompanionSystem {
       }
 
       for (const enemy of enemyMeshes) {
-        if (BABYLON.Vector3.Distance(proj.mesh.position, enemy.position) < 2) {
+        const enemyR = (enemy.metadata as any)?.hitRadius ?? 1.5;
+        if (BABYLON.Vector3.Distance(proj.mesh.position, enemy.position) < enemyR + 0.6) {
           attackHits.push({ mesh: enemy, damage: proj.damage });
           proj.mesh.dispose();
           this.projectiles.splice(i, 1);
@@ -286,7 +294,7 @@ export class CompanionSystem {
     proj.material = mat;
 
     const dir = to.subtract(from).normalize();
-    const speed = 25;
+    const speed = 38;
 
     this.projectiles.push({
       mesh: proj,

@@ -8,7 +8,7 @@ interface ButtonMap {
 //  0 (A) → Space (jump / fly)
 //  1 (B) → KeyE (interact: enter vehicle, talk, mount)
 //  2 (X) → KeyV (capture)
-//  3 (Y) → KeyB (sabre toggle synonym; KeyY remains the keyboard binding)
+//  3 (Y) → KeyY (beam-sabre slash; matches the keyboard binding)
 //  4 (LB) → KeyL (boost dash with i-frames)
 //  5 (RB) → KeyK (cast currently-selected elemental special)
 //  8 (Select / View) → Tab (upgrade menu)
@@ -23,7 +23,7 @@ const BUTTON_TO_KEY: ButtonMap = {
   0: { code: "Space", key: " " },
   1: { code: "KeyE", key: "e" },
   2: { code: "KeyV", key: "v" },
-  3: { code: "KeyB", key: "b" },
+  3: { code: "KeyY", key: "y" },
   4: { code: "KeyL", key: "l" },
   5: { code: "KeyK", key: "k" },
   8: { code: "Tab", key: "Tab" },

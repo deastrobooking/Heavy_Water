@@ -30,7 +30,7 @@ A 6-element casting system operates parallel to weapons:
 Each elemental has independent cooldowns and levels (1-5), scaling damage, radius, and target count. A `currentIndex` system allows cycling and casting selected elementals via dedicated keys or controller input.
 
 ### Beam Sabre
-The Beam Sabre is a high-damage on-foot energy blade with multi-hit slash combos and a forward-launching energy wave. Damage scales with level, and level 5 waves pierce and have splash damage. It integrates a "dash → slash" chain for signature combat moves.
+The Beam Sabre is always equipped — pressing Y (keyboard) or controller-Y triggers a wide cross-screen slash with a long blade and extended reach (hit radius 7). It performs multi-hit slash combos and launches arc-shaped (crescent) energy waves forward. Damage scales with level, and level-5 waves pierce and apply AoE splash. The "boost-dash → slash" chain (L → J within 600ms) instantly fires an arc wave for the signature combo.
 
 ### Music and Sound
 A singleton MusicSystem manages dynamic music loading, playback, and includes an in-game UI.
@@ -51,7 +51,7 @@ The BaseSystem tracks player-placed, multi-level structures like labs (controlli
 The BuildingSystem enables Minecraft-style mining and building with grid-snapped placement. The PrefabSystem allows placing pre-designed structures, with both supporting serialization.
 
 ### Commerce and Companions
-A ShopSystem manages 5 shop locations with dynamic pricing. The GardenSystem and CompanionSystem manage digital companions with leveling and bonding. A MapSystem provides a real-time minimap.
+A ShopSystem manages 5 shop locations with dynamic pricing. The GardenSystem and CompanionSystem manage digital companions with leveling and bonding. A MapSystem provides a real-time minimap. Companions are aggressive assistants — combat allies engage at 32m range with ~0.85s cooldowns and faster, larger projectiles. Even MedicDrones now contribute light support fire while healing.
 
 ### Enemy Systems
 The EnemySystem features a wave spawner for distinct enemy types, including Commanders. The Robot Shape Engine generates all robots (enemies, allies, pets) using parametric descriptors. Aerial enemies (fighters, battleships, Fortresses) have specialized behaviors and are initially passive, engaging upon player aggression towards any aerial unit or enemy base. Aerial unit shots are line-of-sight tested against city buildings. Hostile Enemy Bases include turrets and destructible loot vaults.

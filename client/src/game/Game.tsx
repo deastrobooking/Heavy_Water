@@ -153,7 +153,7 @@ export const Game: React.FC = () => {
   const [comboInfo, setComboInfo] = useState<{ name: string; index: number } | null>(null);
   const [specialWeaponInfo, setSpecialWeaponInfo] = useState<any[]>([]);
   const [elementalSpecialsInfo, setElementalSpecialsInfo] = useState<ElementalDisplay[]>([]);
-  const [beamSabreActive, setBeamSabreActive] = useState(false);
+  const [beamSabreActive, setBeamSabreActive] = useState(true);
   const [beamSabreLevel, setBeamSabreLevel] = useState(1);
   const [activeElement, setActiveElement] = useState<string | null>(null);
   const [armorDefense, setArmorDefense] = useState(0);
@@ -1265,7 +1265,7 @@ export const Game: React.FC = () => {
     setComboInfo(null);
     setSpecialWeaponInfo([]);
     setElementalSpecialsInfo([]);
-    setBeamSabreActive(false);
+    setBeamSabreActive(true);
     setBeamSabreLevel(1);
     setActiveElement(null);
     setArmorDefense(0);
@@ -1544,20 +1544,12 @@ export const Game: React.FC = () => {
           setGardenOpen(true);
           if (document.pointerLockElement) document.exitPointerLock();
         }
-      } else if (e.code === "KeyY" || e.code === "KeyB") {
-        // Toggle the on-foot Beam Sabre. KeyY is the canonical keyboard
-        // binding; KeyB is the controller's Y-button synonym.
+      } else if (e.code === "KeyY" || e.code === "KeyJ") {
+        // The Beam Sabre is always active. Y (keyboard) and J (controller LT)
+        // both trigger a slash. KeyB stays reserved for interact / vehicle
+        // entry; KeyG stays reserved for build mode.
         if (beamSabreRef.current) {
-          beamSabreRef.current.toggle();
-          setBeamSabreActive(beamSabreRef.current.active);
-        }
-      } else if (e.code === "KeyJ") {
-        // Slash combo + energy wave finisher. The signature on-foot move.
-        // (KeyG is reserved for build mode.)
-        if (beamSabreRef.current && beamSabreRef.current.active) {
           beamSabreRef.current.attack();
-        } else if (beamSabreRef.current) {
-          showMessage("PRESS Y TO ACTIVATE BEAM SABRE", 1200);
         }
       } else if (e.code === "KeyK") {
         // Cast the currently-selected elemental special (controller RB).

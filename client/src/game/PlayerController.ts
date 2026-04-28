@@ -115,10 +115,10 @@ export class PlayerController implements IDamageable {
   // slash triggers an instant energy wave (LB → LT chain).
   private isBoostDashing: boolean = false;
   private boostDashTimer: number = 0;
-  private boostDashDuration: number = 0.22;
-  private boostDashCooldown: number = 0.6;
+  private boostDashDuration: number = 0.28;
+  private boostDashCooldown: number = 0.7;
   private boostDashCooldownTimer: number = 0;
-  private boostDashSpeed: number = 2.4;
+  private boostDashSpeed: number = 4.2;
   private boostDashDirection: BABYLON.Vector3 = BABYLON.Vector3.Zero();
   private lastBoostDashAt: number = 0;
 
