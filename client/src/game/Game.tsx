@@ -561,8 +561,11 @@ export const Game: React.FC = () => {
         );
         vehicleSystem.setBuildingColliders(cityGenerator.getWallColliders());
         vehicleRef.current = vehicleSystem;
-        vehicleSystem.spawnPreset("RaiderATV", new BABYLON.Vector3(-6, 0.6, -10));
-        vehicleSystem.spawnPreset("CometFighter", new BABYLON.Vector3(8, 1.2, -10));
+        // Spawn vehicles in a side parking spot — not in front of the player.
+        // Player starts at (0, 2, -15) looking toward +Z so we park vehicles
+        // to the west so they're out of the opening field of view.
+        vehicleSystem.spawnPreset("RaiderATV", new BABYLON.Vector3(-40, 0.6, -15));
+        vehicleSystem.spawnPreset("CometFighter", new BABYLON.Vector3(-55, 2, -15));
 
         // === EnvironmentPropSystem: scattered destructible/lootable sci-fi props ===
         const propSystem = new EnvironmentPropSystem(scene);
