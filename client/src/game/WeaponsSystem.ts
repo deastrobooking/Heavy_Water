@@ -2,7 +2,7 @@ import * as BABYLON from "@babylonjs/core";
 import { EventBus, GameEvents } from "./EventBus";
 import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
 
-export type WeaponType = "pistol" | "rifle" | "shotgun" | "rocket" | "laser" | "grenade";
+export type WeaponType = "pistol" | "rifle" | "shotgun" | "rocket" | "laser" | "grenade" | "tracking_missile";
 
 export interface Weapon {
   type: WeaponType;
@@ -58,6 +58,7 @@ const WEAPON_PART_ID: Record<WeaponType, string> = {
   rocket: "weapon_part_rocket",
   laser: "weapon_part_laser",
   grenade: "weapon_part_grenade",
+  tracking_missile: "weapon_part_rocket",
 };
 
 function levelStats(base: { damage: number; fireRate: number; spread: number; explosionRadius: number }, level: number) {
@@ -166,6 +167,10 @@ export class WeaponsSystem {
     define("rocket", "Nova Launcher", 100, 1500, 8, 200, 1, 0, false, 5);
     define("laser", "Photon Beam", 40, 50, 200, 300, 10, 0, true, 0);
     define("grenade", "Fusion Grenades", 80, 1000, 6, 50, 0.5, 0, false, 4);
+    // Tracking Missile: launcher that fires a smart projectile that locks
+    // onto the nearest target in the camera frustum and aggressively homes
+    // in on it. Powerful, slower fire rate, big AoE.
+    define("tracking_missile", "Hunter Missile", 120, 1300, 6, 220, 0.9, 0, false, 6);
   }
 
   private setupControls(): void {
@@ -194,6 +199,7 @@ export class WeaponsSystem {
         case "Digit4": this.selectWeapon("rocket"); break;
         case "Digit5": this.selectWeapon("laser"); break;
         case "Digit6": this.selectWeapon("grenade"); break;
+        case "KeyP": this.selectWeapon("tracking_missile"); break;
         case "KeyR": this.reload(); break;
       }
     });
@@ -268,6 +274,11 @@ export class WeaponsSystem {
         projectileMesh = BABYLON.MeshBuilder.CreateSphere("projectile", { diameter: 0.2 * sizeMul }, this.scene);
         color = new BABYLON.Color3(0.5, 1, 0);
         break;
+      case "tracking_missile":
+        projectileMesh = BABYLON.MeshBuilder.CreateCylinder("projectile", { height: 0.7 * sizeMul, diameter: 0.18 * sizeMul, tessellation: 10 }, this.scene);
+        projectileMesh.rotation.x = Math.PI / 2;
+        color = new BABYLON.Color3(1, 0.3, 0.7);
+        break;
       default:
         projectileMesh = BABYLON.MeshBuilder.CreateSphere("projectile", { diameter: 0.1 * sizeMul }, this.scene);
         color = new BABYLON.Color3(1, 1, 1);
@@ -280,15 +291,15 @@ export class WeaponsSystem {
 
     projectileMesh.position = this.getAimOrigin().add(forward.scale(1));
 
-    const baseR = weapon.type === "rocket" ? 5 : weapon.type === "grenade" ? 4 : 0;
+    const baseR = weapon.type === "rocket" ? 5 : weapon.type === "grenade" ? 4 : weapon.type === "tracking_missile" ? 6 : 0;
     const projectile: Projectile = {
       mesh: projectileMesh,
       direction,
       speed: weapon.projectileSpeed * speedMul,
       damage: weapon.damage * dmgMul,
-      lifetime: 3000,
+      lifetime: weapon.type === "tracking_missile" ? 6000 : 3000,
       type: weapon.type,
-      isExplosive: weapon.type === "rocket" || weapon.type === "grenade",
+      isExplosive: weapon.type === "rocket" || weapon.type === "grenade" || weapon.type === "tracking_missile",
       explosionRadius: (baseR + (weapon.explosionRadiusBonus || 0)) * sizeMul,
     };
 
@@ -306,7 +317,28 @@ export class WeaponsSystem {
 
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const projectile = this.projectiles[i];
-      
+
+      // Tracking Missile: aggressively home onto the nearest live target.
+      if (projectile.type === "tracking_missile") {
+        let nearest: BABYLON.Mesh | null = null;
+        let nearestDist = Infinity;
+        for (const e of enemies) {
+          if (e.isDisposed()) continue;
+          const d = BABYLON.Vector3.Distance(projectile.mesh.position, e.position);
+          if (d < nearestDist) { nearestDist = d; nearest = e; }
+        }
+        if (nearest) {
+          const desired = nearest.position.subtract(projectile.mesh.position).normalize();
+          // Strong steering – missile pivots quickly toward the target.
+          projectile.direction = BABYLON.Vector3.Lerp(projectile.direction, desired, 0.18).normalize();
+          // Orient the cylinder mesh along the direction of travel.
+          const dir = projectile.direction;
+          const yaw = Math.atan2(dir.x, dir.z);
+          const pitch = -Math.asin(dir.y);
+          projectile.mesh.rotation = new BABYLON.Vector3(pitch + Math.PI / 2, yaw, 0);
+        }
+      }
+
       projectile.mesh.position.addInPlace(projectile.direction.scale(projectile.speed));
       projectile.lifetime -= 16;
 
@@ -390,7 +422,7 @@ export class WeaponsSystem {
   }
 
   private cycleWeapon(direction: number): void {
-    const types: WeaponType[] = ["pistol", "rifle", "shotgun", "rocket", "laser", "grenade"];
+    const types: WeaponType[] = ["pistol", "rifle", "shotgun", "rocket", "laser", "grenade", "tracking_missile"];
     const currentIndex = types.indexOf(this.currentWeapon);
     const newIndex = (currentIndex + direction + types.length) % types.length;
     this.selectWeapon(types[newIndex]);

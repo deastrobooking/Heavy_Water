@@ -12,6 +12,7 @@ import { GamepadInput } from "./GamepadInput";
 import { ChestSystem, Loot } from "./ChestSystem";
 import { CombatSystem } from "./CombatSystem";
 import { SpecialWeaponsSystem } from "./SpecialWeaponsSystem";
+import { ElementalSpecialsSystem, ElementalDisplay, ElementalKind } from "./ElementalSpecialsSystem";
 import { BeamSabreSystem } from "./BeamSabreSystem";
 import { ArmorSystem } from "./ArmorSystem";
 import { CraftingSystem } from "./CraftingSystem";
@@ -64,6 +65,7 @@ export const Game: React.FC = () => {
   const chestSystemRef = useRef<ChestSystem | null>(null);
   const combatSystemRef = useRef<CombatSystem | null>(null);
   const specialWeaponsRef = useRef<SpecialWeaponsSystem | null>(null);
+  const elementalSpecialsRef = useRef<ElementalSpecialsSystem | null>(null);
   const beamSabreRef = useRef<BeamSabreSystem | null>(null);
   const armorSystemRef = useRef<ArmorSystem | null>(null);
   const craftingSystemRef = useRef<CraftingSystem | null>(null);
@@ -150,6 +152,7 @@ export const Game: React.FC = () => {
   const [playerState, setPlayerState] = useState("idle");
   const [comboInfo, setComboInfo] = useState<{ name: string; index: number } | null>(null);
   const [specialWeaponInfo, setSpecialWeaponInfo] = useState<any[]>([]);
+  const [elementalSpecialsInfo, setElementalSpecialsInfo] = useState<ElementalDisplay[]>([]);
   const [beamSabreActive, setBeamSabreActive] = useState(false);
   const [beamSabreLevel, setBeamSabreLevel] = useState(1);
   const [activeElement, setActiveElement] = useState<string | null>(null);
@@ -301,6 +304,20 @@ export const Game: React.FC = () => {
         specialWeaponsRef.current = specialWeapons;
         specialWeapons.setOnSpecialWeaponChange(() => {
           setSpecialWeaponInfo(specialWeapons.getActiveSpecialWeapons());
+        });
+
+        const elementalSpecials = new ElementalSpecialsSystem(
+          scene,
+          engine.getCamera(),
+          () => player.getPosition(),
+        );
+        elementalSpecialsRef.current = elementalSpecials;
+        elementalSpecials.setOnChange((list) => {
+          setElementalSpecialsInfo(list);
+        });
+        // Brief upper-body cast pose whenever the player triggers a special.
+        elementalSpecials.setOnCast(() => {
+          try { player.triggerAttackAnimation(false); } catch {}
         });
 
         const beamSabre = new BeamSabreSystem(scene, engine.getCamera());
@@ -851,6 +868,14 @@ export const Game: React.FC = () => {
             routeHit(hit.hitEnemy, hit.damage);
           }
 
+          // Elemental specials (Lightning/Ice/Fireball tracking + Inferno/Wind/Psychic dome)
+          // route through the same hit pipeline so they damage every category
+          // and engage the aerial squadron just like normal weapon fire.
+          const elementalHits = elementalSpecials.update(dt, enemyMeshes, playerPos);
+          for (const hit of elementalHits) {
+            routeHit(hit.hitEnemy, hit.damage);
+          }
+
           // Beam Sabre damage flows through the same router so slashes and
           // energy waves correctly hurt aerial fortresses, enemy bases,
           // mining nodes and props (not just ground enemies).
@@ -1127,6 +1152,8 @@ export const Game: React.FC = () => {
         chestSystemRef.current = null;
         combatSystemRef.current = null;
         specialWeaponsRef.current = null;
+        if (elementalSpecialsRef.current) { try { elementalSpecialsRef.current.dispose(); } catch {} }
+        elementalSpecialsRef.current = null;
         beamSabreRef.current = null;
         armorSystemRef.current = null;
         craftingSystemRef.current = null;
@@ -1187,6 +1214,7 @@ export const Game: React.FC = () => {
     weaponsRef.current = null;
     if (combatSystemRef.current) { try { combatSystemRef.current.dispose(); } catch {} combatSystemRef.current = null; }
     if (specialWeaponsRef.current) { try { specialWeaponsRef.current.dispose(); } catch {} specialWeaponsRef.current = null; }
+    if (elementalSpecialsRef.current) { try { elementalSpecialsRef.current.dispose(); } catch {} elementalSpecialsRef.current = null; }
     if (beamSabreRef.current) { try { beamSabreRef.current.dispose(); } catch {} beamSabreRef.current = null; }
     if (companionRef.current) { try { companionRef.current.dispose(); } catch {} companionRef.current = null; }
     if (capsuleRef.current) { try { capsuleRef.current.dispose(); } catch {} capsuleRef.current = null; }
@@ -1229,6 +1257,7 @@ export const Game: React.FC = () => {
     setWaveNumber(1);
     setComboInfo(null);
     setSpecialWeaponInfo([]);
+    setElementalSpecialsInfo([]);
     setBeamSabreActive(false);
     setBeamSabreLevel(1);
     setActiveElement(null);
@@ -1578,6 +1607,7 @@ export const Game: React.FC = () => {
       if (playerRef.current) playerRef.current.dispose();
       if (combatSystemRef.current) combatSystemRef.current.dispose();
       if (specialWeaponsRef.current) specialWeaponsRef.current.dispose();
+      if (elementalSpecialsRef.current) elementalSpecialsRef.current.dispose();
       if (beamSabreRef.current) beamSabreRef.current.dispose();
       if (companionRef.current) companionRef.current.dispose();
       if (capsuleRef.current) capsuleRef.current.dispose();
@@ -1665,6 +1695,7 @@ export const Game: React.FC = () => {
           playerState={playerState}
           comboInfo={comboInfo}
           specialWeapons={specialWeaponInfo}
+          elementalSpecials={elementalSpecialsInfo}
           beamSabreActive={beamSabreActive}
           beamSabreLevel={beamSabreLevel}
           activeElement={activeElement}

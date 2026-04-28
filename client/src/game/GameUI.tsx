@@ -34,6 +34,7 @@ interface GameUIProps {
   playerState?: string;
   comboInfo?: { name: string; index: number } | null;
   specialWeapons?: { slot: number; name: string; ammo: number; maxAmmo: number; cooldownRemaining: number; level: number }[];
+  elementalSpecials?: { kind: string; name: string; category: string; key: string; level: number; maxLevel: number; cooldownMs: number; cooldownRemaining: number; damagePerHit: number; radius: number; maxTargets: number }[];
   beamSabreActive?: boolean;
   beamSabreLevel?: number;
   activeElement?: string | null;
@@ -132,6 +133,7 @@ export const GameUI: React.FC<GameUIProps> = ({
   playerState = "idle",
   comboInfo = null,
   specialWeapons = [],
+  elementalSpecials = [],
   beamSabreActive = false,
   beamSabreLevel = 1,
   activeElement = null,
@@ -480,6 +482,46 @@ export const GameUI: React.FC<GameUIProps> = ({
         </div>
       )}
 
+      {elementalSpecials.length > 0 && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/85 border-2 border-cyan-400 p-2 rounded-lg">
+          <div className="text-cyan-300 text-[10px] mb-1 text-center font-bold tracking-widest">ELEMENTAL SPECIALS</div>
+          <div className="grid grid-cols-6 gap-1.5">
+            {elementalSpecials.map((sp) => {
+              const ready = sp.cooldownRemaining <= 0;
+              const cdPct = ready ? 0 : Math.min(100, (sp.cooldownRemaining / sp.cooldownMs) * 100);
+              const colorMap: Record<string, string> = {
+                lightning: "border-sky-300 text-sky-200",
+                ice: "border-cyan-300 text-cyan-200",
+                fireball: "border-orange-400 text-orange-200",
+                inferno: "border-red-500 text-red-300",
+                windstorm: "border-emerald-300 text-emerald-200",
+                psychic: "border-fuchsia-400 text-fuchsia-200",
+              };
+              const cls = colorMap[sp.kind] ?? "border-white text-white";
+              const keyLabel = sp.key.startsWith("Key") ? sp.key.replace("Key", "") : sp.key;
+              return (
+                <div
+                  key={sp.kind}
+                  className={`relative w-20 h-16 border-2 rounded p-1 ${cls} ${ready ? "bg-black/60" : "bg-black/80 opacity-60"}`}
+                  title={`${sp.name} — ${sp.category === "tracking" ? `tracks ${sp.maxTargets} targets` : `dome AoE r${sp.radius.toFixed(0)}`}, ${sp.damagePerHit} dmg`}
+                >
+                  <div className="text-[9px] font-bold leading-tight">{sp.name}</div>
+                  <div className="text-[8px] mt-0.5 opacity-80">
+                    L{sp.level}/{sp.maxLevel} · {sp.category === "tracking" ? `${sp.maxTargets}T` : `r${sp.radius.toFixed(0)}`}
+                  </div>
+                  <div className="absolute bottom-0.5 right-1 text-[9px] font-mono opacity-90">[{keyLabel}]</div>
+                  {!ready && (
+                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-800 overflow-hidden">
+                      <div className="h-full bg-cyan-400" style={{ width: `${100 - cdPct}%` }} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {companions && companions.length > 0 && (
         <div className="absolute left-4 bottom-32 bg-black/80 border-2 border-emerald-600 p-3 rounded-lg text-xs min-w-[140px]">
           <div className="text-emerald-400 font-bold mb-2">COMPANIONS</div>
@@ -505,13 +547,14 @@ export const GameUI: React.FC<GameUIProps> = ({
         <div className="text-gray-300 space-y-1">
           <div>WASD - Move | SHIFT - Sprint</div>
           <div>MOUSE - Look | LMB - Fire</div>
-          <div>1-6 - Weapons | R - Reload</div>
-          <div>7-0 - Special Weapons</div>
-          <div>SPACE - Jump (x3 = Fly)</div>
-          <div>X - Toggle Flight | G - Build</div>
-          <div>Q - Dodge | F - Parry</div>
+          <div>1-6 - Weapons | P - Hunter Missile</div>
+          <div>7-0 - Special Arsenal | R - Reload</div>
+          <div>SPACE - Jump (x3 = Fly) | X - Flight</div>
+          <div>Q - Dodge | F - Parry | E - Interact</div>
           <div>V - Melee | B - Heavy Melee</div>
-          <div>T - Beam Sabre | E - Interact</div>
+          <div>Y - Beam Sabre | G - Sabre Slash</div>
+          <div className="text-cyan-300">Z/I/N - Lightning/Ice/Fire (track)</div>
+          <div className="text-cyan-300">U/T/M - Inferno/Wind/Psychic (dome)</div>
         </div>
       </div>
 

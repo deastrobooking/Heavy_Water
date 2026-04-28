@@ -142,6 +142,20 @@ export class AnimationSystem {
   }
 
   setAnimationState(state: AnimationState): void {
+    // Lock the body into the current attack pose for the duration of the
+    // attack timer. Without this, the per-frame state mapping in
+    // PlayerController (which returns "lightPunch" whenever player state ==
+    // "attacking") would overwrite a freshly-triggered heavySlam, and the
+    // visible animation would always look like a light punch.
+    if (this.attackTimer > 0 && (this.blend.current === "lightPunch" || this.blend.current === "heavySlam")) {
+      // Allow re-triggering an attack of the same type (combo) or upgrading
+      // light → heavy, but block downgrades / unrelated states from
+      // hijacking the animation mid-swing.
+      if (state === this.blend.current) return;
+      if (state === "lightPunch" && this.blend.current === "heavySlam") return;
+      if (state !== "lightPunch" && state !== "heavySlam" && state !== "dead" && state !== "dodgeRoll") return;
+    }
+
     if (state === this.blend.current) return;
     this.blend.previous = this.blend.current;
     this.blend.current = state;

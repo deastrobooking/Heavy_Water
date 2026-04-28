@@ -23,6 +23,23 @@ The ArmorMaterialFactory produces reusable material types. The RobotArmorParts s
 ### Combat, Inventory, and Crafting
 Combat features light and heavy melee combo chains with input buffering. An InventorySystem offers a 24-slot grid. The CraftingSystem supports recipe-based crafting for weapons, armor, and base components. All ranged weapons have unlimited ammo.
 
+### Hunter Missile (Tracking)
+A new `tracking_missile` weapon (Hunter Missile, **KeyP**) sits in `WeaponsSystem.ts` alongside the regular guns. Each shot spawns a glowing red projectile that locks onto the nearest valid target (ground, aerial, turret/vault, mining node, prop) at fire time and steers toward it every frame using a Lerp-based homing controller (steer factor ~0.18, orientation-aligned). On impact the missile deals 120 base damage with a radius-6 AoE and is routed through Game.tsx `routeHit`, so it engages the aerial squadron and damages every hostile category just like other ranged weapons. The weapon participates in the standard Weapons cycle/UI and benefits from per-weapon level upgrades.
+
+### Elemental Specials (6-Element Casting System)
+`ElementalSpecialsSystem.ts` adds a dedicated, parallel-to-weapons casting layer with six elementals across two archetypes:
+
+- **Tracking strikes** (each picks the N nearest enemies, where N scales 2 → 10 by level 1–5):
+  - **Lightning Strike** — `KeyZ`
+  - **Ice Strike** — `KeyI`
+  - **Fireball** — `KeyN` (homing fireballs that arc to each target)
+- **Dome explosions** (centered on the player; radius and damage scale with level):
+  - **Flame Inferno** — `KeyU`
+  - **Windstorm** — `KeyT`
+  - **Psychic Shockwave** — `KeyM`
+
+Each elemental has its own cooldown and level (1–5). Damage, radius, and target count all scale up per level, with level 5 hitting up to 10 targets. Hits returned by `update()` are routed through Game.tsx's central `routeHit`, so specials damage every hostile category and engage the aerial squadron just like regular weapons. Casting any elemental triggers a brief upper-body cast pose via `triggerAttackAnimation(false)`. The HUD's bottom-center `GameUI` panel shows all six cards with cooldown bars and key labels.
+
 ### Beam Sabre (On-Foot Signature Weapon)
 The BeamSabreSystem is the player's massive-damage on-foot weapon — a glowing energy blade rendered in front of the camera that performs multi-hit slash combos and finishes each combo with a forward-launching energy wave. Slash damage scales from 120 (L1) up to 450 (L5) per hit and energy waves from 220 up to 900 per pass; level 5 waves pierce and apply 60% AoE splash. Players toggle the sabre on/off with **Y** and trigger a slash combo with **G**; pressing G while it's off shows a hint to activate. The sabre routes all damage through Game.tsx's central `routeHit`, so slashes and waves correctly damage every hostile category — ground enemies (`isEnemy`), aerial fighters/battleships/fortresses (`aerialUnit`), enemy base turrets and vaults (`isTurret`/`isVault`), mining nodes (`miningNodeId`), and destructible props (`isProp`) — and each hit on an aerial unit also triggers `AerialEnemySystem.engage()` like any other weapon.
 
