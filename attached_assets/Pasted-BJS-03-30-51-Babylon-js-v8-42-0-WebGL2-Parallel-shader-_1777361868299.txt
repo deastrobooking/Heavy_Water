@@ -1,0 +1,93 @@
+BJS - [03:30:51]: Babylon.js v8.42.0 - WebGL2 - Parallel shader compilation
+index-CZaGahLx.js:27562 [SkySystem] Initialized at hour 8.0
+index-CZaGahLx.js:27562 [BuildingSystem] Initialized
+index-CZaGahLx.js:27562 [PrefabSystem] Initialized with 16 prefabs
+index-CZaGahLx.js:27562 [BaseSystem] Initialized
+index-CZaGahLx.js:27562 [PickupSystem] Initialized
+index-CZaGahLx.js:27562 [BioCreatureSystem] Initialized
+index-CZaGahLx.js:27562 [EffectsSystem] Initialized
+index-CZaGahLx.js:27562 [PropAudioSystem] Initialized
+index-CZaGahLx.js:27562 [SoundSystem] Initialized
+index-CZaGahLx.js:27462 [AerialEnemySystem] Initialized
+index-CZaGahLx.js:27609 [MiningSystem] Initialized
+index-CZaGahLx.js:27609 [EnemyBaseSystem] Initialized
+index-CZaGahLx.js:27562 [VehicleSystem] Initialized
+index-CZaGahLx.js:27562 [EnvironmentPropSystem] Initialized
+index-CZaGahLx.js:27617 [Game] Environment props placed: 129 (cap 220)
+40WebGL: INVALID_VALUE: texImage2D: bad image dataUnderstand this warning
+40[.WebGL-0x10c0052fc00] GL_INVALID_OPERATION: glGenerateMipmap: Texture format does not support mipmap generation.Understand this warning
+2index-CZaGahLx.js:27462 [PlayerController] Jump 1 - Normal jump
+index-CZaGahLx.js:27462 [AerialEnemySystem] AGGRO engaged — aerial squadron will now attack
+index-CZaGahLx.js:27462 [PlayerController] Jump 1 - Normal jump
+index-CZaGahLx.js:27462 [PlayerController] Jump 2 - Double jump
+index-CZaGahLx.js:27462 [PlayerController] Jump 3 - No flight armor, weaker third jump
+index-CZaGahLx.js:27462 [PlayerController] Disposed
+index-CZaGahLx.js:27562 [BuildingSystem] Disposed
+index-CZaGahLx.js:27562 [PrefabSystem] Disposed
+index-CZaGahLx.js:27562 [PickupSystem] Disposed
+index-CZaGahLx.js:27562 [EnvironmentPropSystem] Disposed
+index-CZaGahLx.js:43 BJS - [03:32:14]: Babylon.js v8.42.0 - WebGL2 - Parallel shader compilation
+index-CZaGahLx.js:27562 [SkySystem] Initialized at hour 8.0
+index-CZaGahLx.js:27562 [BuildingSystem] Initialized
+index-CZaGahLx.js:27562 [PrefabSystem] Initialized with 16 prefabs
+index-CZaGahLx.js:27562 [BaseSystem] Initialized
+index-CZaGahLx.js:27562 [PickupSystem] Initialized
+index-CZaGahLx.js:27562 [BioCreatureSystem] Initialized
+index-CZaGahLx.js:27562 [EffectsSystem] Initialized
+index-CZaGahLx.js:27562 [PropAudioSystem] Initialized
+index-CZaGahLx.js:27562 [SoundSystem] Initialized
+index-CZaGahLx.js:27462 [AerialEnemySystem] Initialized
+index-CZaGahLx.js:27609 [MiningSystem] Initialized
+index-CZaGahLx.js:27609 [EnemyBaseSystem] Initialized
+index-CZaGahLx.js:27562 [VehicleSystem] Initialized
+index-CZaGahLx.js:27562 [EnvironmentPropSystem] Initialized
+index-CZaGahLx.js:27617 [Game] Environment props placed: 129 (cap 220)
+2installHook.js:1 [BabylonEngine] scene.render() threw — skipping frame TypeError: Cannot read properties of null (reading 'program')
+    at Ce.bindSamplers (index-CZaGahLx.js:77:49658)
+    at Ce.enableEffect (index-CZaGahLx.js:77:34888)
+    at K._preBind (index-CZaGahLx.js:587:78180)
+    at Q.render (index-CZaGahLx.js:587:337724)
+    at Bs.render (index-CZaGahLx.js:587:63586)
+    at Dl._RenderSorted (index-CZaGahLx.js:61:94016)
+    at Dl._renderOpaqueSorted (index-CZaGahLx.js:61:93034)
+    at Dl.render (index-CZaGahLx.js:61:92132)
+    at Ss.render (index-CZaGahLx.js:61:99070)
+    at Fe._renderForCamera (index-CZaGahLx.js:587:163291)
+overrideMethod @ installHook.js:1Understand this warning
+index-CZaGahLx.js:27462 [AerialEnemySystem] AGGRO engaged — aerial squadron will now attack
+index-CZaGahLx.js:27462 [PlayerController] Disposed
+index-CZaGahLx.js:27562 [BuildingSystem] Disposed
+index-CZaGahLx.js:27562 [PrefabSystem] Disposed
+index-CZaGahLx.js:27562 [PickupSystem] Disposed
+index-CZaGahLx.js:27562 [EnvironmentPropSystem] Disposed
+index-CZaGahLx.js:43 BJS - [03:34:01]: Babylon.js v8.42.0 - WebGL2 - Parallel shader compilation
+index-CZaGahLx.js:27562 [SkySystem] Initialized at hour 8.0
+index-CZaGahLx.js:27562 [BuildingSystem] Initialized
+index-CZaGahLx.js:27562 [PrefabSystem] Initialized with 16 prefabs
+index-CZaGahLx.js:27562 [BaseSystem] Initialized
+index-CZaGahLx.js:27562 [PickupSystem] Initialized
+index-CZaGahLx.js:27562 [BioCreatureSystem] Initialized
+index-CZaGahLx.js:27562 [EffectsSystem] Initialized
+index-CZaGahLx.js:27562 [PropAudioSystem] Initialized
+index-CZaGahLx.js:27562 [SoundSystem] Initialized
+index-CZaGahLx.js:27462 [AerialEnemySystem] Initialized
+index-CZaGahLx.js:27609 [MiningSystem] Initialized
+index-CZaGahLx.js:27609 [EnemyBaseSystem] Initialized
+index-CZaGahLx.js:27562 [VehicleSystem] Initialized
+index-CZaGahLx.js:27562 [EnvironmentPropSystem] Initialized
+index-CZaGahLx.js:27617 [Game] Environment props placed: 129 (cap 220)
+2installHook.js:1 [BabylonEngine] scene.render() threw — skipping frame TypeError: Cannot read properties of null (reading 'program')
+    at Ce.bindSamplers (index-CZaGahLx.js:77:49658)
+    at Ce.enableEffect (index-CZaGahLx.js:77:34888)
+    at K._preBind (index-CZaGahLx.js:587:78180)
+    at Q.render (index-CZaGahLx.js:587:337724)
+    at Bs.render (index-CZaGahLx.js:587:63586)
+    at Dl._RenderSorted (index-CZaGahLx.js:61:94016)
+    at Dl._renderOpaqueSorted (index-CZaGahLx.js:61:93034)
+    at Dl.render (index-CZaGahLx.js:61:92132)
+    at Ss.render (index-CZaGahLx.js:61:99070)
+    at Fe._renderForCamera (index-CZaGahLx.js:587:163291)
+overrideMethod @ installHook.js:1Understand this warning
+2index-CZaGahLx.js:27462 [PlayerController] Jump 1 - Normal jump
+index-CZaGahLx.js:27462 [PlayerController] Jump 2 - Double jump
+index-CZaGahLx.js:27462 [PlayerController] Jump 3 - No flight armor, weaker third jump

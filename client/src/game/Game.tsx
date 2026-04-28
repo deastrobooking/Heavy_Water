@@ -1187,7 +1187,15 @@ export const Game: React.FC = () => {
         enemyBaseRef.current = null;
         if (autosaveTimerRef.current !== null) { window.clearInterval(autosaveTimerRef.current); autosaveTimerRef.current = null; }
         if (respawnTimeoutRef.current !== null) { window.clearTimeout(respawnTimeoutRef.current); respawnTimeoutRef.current = null; }
-        baseRef.current = null;
+        // Match handleRestart — these systems also need explicit dispose so
+        // their EventBus subscriptions / scene refs don't leak between
+        // failed-init retries.
+        if (effectsRef.current) { try { effectsRef.current.dispose(); } catch {} effectsRef.current = null; }
+        if (propAudioRef.current) { try { propAudioRef.current.dispose(); } catch {} propAudioRef.current = null; }
+        if (soundRef.current) { try { soundRef.current.dispose(); } catch {} soundRef.current = null; }
+        if (vehicleRef.current) { try { vehicleRef.current.dispose(); } catch {} vehicleRef.current = null; }
+        if (skyRef.current) { try { skyRef.current.dispose(); } catch {} skyRef.current = null; }
+        if (baseRef.current) { try { baseRef.current.dispose(); } catch {} baseRef.current = null; }
         multiplayerRef.current = null;
         initializingRef.current = false;
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1238,12 +1246,21 @@ export const Game: React.FC = () => {
     if (enemyHealthBarsRef.current) { try { enemyHealthBarsRef.current.dispose(); } catch {} enemyHealthBarsRef.current = null; }
     if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} gamepadRef.current = null; }
     if (aerialEnemyRef.current) { try { aerialEnemyRef.current.dispose(); } catch {} aerialEnemyRef.current = null; }
+    // CRITICAL: these systems also subscribe to EventBus / hold scene state.
+    // Skipping their dispose was the root cause of the multi-restart freeze:
+    // every restart left a fresh listener stack on the bus, so each event
+    // fanned out to N stale handlers that walked dead meshes.
+    if (effectsRef.current) { try { effectsRef.current.dispose(); } catch {} effectsRef.current = null; }
+    if (propAudioRef.current) { try { propAudioRef.current.dispose(); } catch {} propAudioRef.current = null; }
+    if (soundRef.current) { try { soundRef.current.dispose(); } catch {} soundRef.current = null; }
+    if (vehicleRef.current) { try { vehicleRef.current.dispose(); } catch {} vehicleRef.current = null; }
+    if (skyRef.current) { try { skyRef.current.dispose(); } catch {} skyRef.current = null; }
+    if (baseRef.current) { try { baseRef.current.dispose(); } catch {} baseRef.current = null; }
     enemySystemRef.current = null;
     chestSystemRef.current = null;
     armorSystemRef.current = null;
     craftingSystemRef.current = null;
     inventoryRef.current = null;
-    baseRef.current = null;
     atvHitCooldownRef.current.clear();
     if (autosaveTimerRef.current !== null) { window.clearInterval(autosaveTimerRef.current); autosaveTimerRef.current = null; }
     if (respawnTimeoutRef.current !== null) { window.clearTimeout(respawnTimeoutRef.current); respawnTimeoutRef.current = null; }

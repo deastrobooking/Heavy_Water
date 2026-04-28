@@ -314,22 +314,24 @@ export class BabylonEngine {
     // error (e.g. a shader still parallel-compiling when a material first
     // appears, or a disposed mesh referenced for one frame after a system
     // restart) drops only that frame instead of killing the entire loop.
-    // Log the first few occurrences then go quiet to avoid console spam.
-    let renderErrorCount = 0;
-    const RENDER_ERROR_LOG_LIMIT = 5;
+    // Only log the very first occurrence — these races are expected during
+    // scene-rebuild settling and the catch already recovers automatically.
+    let renderErrorLogged = false;
     this.engine.runRenderLoop(() => {
       try {
         renderLoop();
       } catch (e) {
-        if (renderErrorCount++ < RENDER_ERROR_LOG_LIMIT) {
-          console.warn("[BabylonEngine] renderLoop callback threw — skipping frame", e);
+        if (!renderErrorLogged) {
+          renderErrorLogged = true;
+          console.warn("[BabylonEngine] renderLoop callback threw — skipping frame (further errors silenced)", e);
         }
       }
       try {
         this.scene.render();
       } catch (e) {
-        if (renderErrorCount++ < RENDER_ERROR_LOG_LIMIT) {
-          console.warn("[BabylonEngine] scene.render() threw — skipping frame", e);
+        if (!renderErrorLogged) {
+          renderErrorLogged = true;
+          console.warn("[BabylonEngine] scene.render() threw — skipping frame (further errors silenced)", e);
         }
       }
     });

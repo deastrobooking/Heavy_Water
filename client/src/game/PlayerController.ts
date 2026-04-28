@@ -1202,6 +1202,13 @@ export class PlayerController implements IDamageable {
     this.isParrying = false;
     this.velocity.setAll(0);
     this.meshRoot.position.copyFrom(spawnPosition);
+    // Reset orientation. Without this the character respawned still rotated
+    // from whatever pose they died in (mid-roll, mid-flight, ragdoll), which
+    // shows up as a misaligned mesh after the friendly respawn.
+    this.meshRoot.rotation.setAll(0);
+    if (this.meshRoot.rotationQuaternion) {
+      this.meshRoot.rotationQuaternion.copyFromFloats(0, 0, 0, 1);
+    }
     this.stateMachine.forceState("idle");
     this.bus.emit(GameEvents.PLAYER_HEALED, { amount: this.stats.maxHealth, health: this.stats.health });
   }
