@@ -91,4 +91,19 @@ export const GameEvents = {
 
   UI_MESSAGE: "ui:message",
   UI_DAMAGE_NUMBER: "ui:damageNumber",
+
+  // ---- Boss fortress + level progression ----
+  /** Fired by EnemyBaseSystem when every outer turret of the boss fortress
+   *  is destroyed — Game.tsx uses it to spawn the BossCaptain at the spire. */
+  BOSS_FORTRESS_TURRETS_CLEARED: "boss:turretsCleared",
+  /** Fired by EnemyBaseSystem when the central command spire's HP hits 0. */
+  BOSS_FORTRESS_CLEARED: "boss:fortressCleared",
+  /** Fired when the captured ally inside the spire is freed. Carries the
+   *  ally's world position so other systems can mark it / spawn pickups. */
+  ALLY_RESCUED: "boss:allyRescued",
+  /** Fired by LevelSystem when a level is finished. */
+  LEVEL_COMPLETED: "level:completed",
+  /** Fired by LevelSystem when a new level begins (including the initial
+   *  Level 1 emit on world load). */
+  LEVEL_STARTED: "level:started",
 };

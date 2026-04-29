@@ -1,7 +1,7 @@
 # Heavy Water
 
 ## Overview
-Heavy Water is a 3D futuristic sci-fi action game developed with Babylon.js, set in a far-future Detroit. It features anime-style cell-shaded graphics, offering immersive ground and aerial combat, DBZ-style flight mechanics, and open-world exploration. The game's core purpose is to defend the city from an invasion of insane hybrid organoids, encompassing both ground swarms and hostile aerial forces. Key capabilities include deep exploration, dynamic combat, character customization, crafting, and base building, aiming to deliver a rich and engaging player experience.
+Heavy Water is a 3D futuristic sci-fi action game developed with Babylon.js, set in a far-future Detroit. It features anime-style cell-shaded graphics, offering immersive ground and aerial combat, DBZ-style flight mechanics, and open-world exploration. The game's core purpose is to defend the city from an invasion of insane hybrid organoids, encompassing both ground swarms and hostile aerial forces. Key capabilities include deep exploration, dynamic combat, character customization, crafting, and base building, aiming to deliver a rich and engaging player experience with business vision to target the niche market of anime-style sci-fi game enthusiasts.
 
 ## User Preferences
 - Design choice: Anime retro 80's sci-fi cell-shaded graphics style
@@ -15,75 +15,64 @@ Heavy Water is a 3D futuristic sci-fi action game developed with Babylon.js, set
 The game uses an EventBus for decoupled communication and a generic StateMachine for entity behaviors. A unified DamageSystem handles combat calculations. Babylon.js v8.x provides WebGL rendering with a cell-shaded anime aesthetic, including ink outlines, bloom, chromatic aberration, and FXAA. The frontend is built with React, TypeScript, and Vite.
 
 ### Player and Character Systems
-PlayerController manages humanoid characters with complex state machines for movement, combat, and a triple-jump flight system with free-flight. Camera supports first-person and third-person views. The HumanoidCharacter system enables procedural generation, modular body parts, and customization. An AnimationSystem provides procedural, multi-part animations. The CharacterEditor allows player customization. Shield, stamina, and cooldown timers are persistent. A Boost Dash provides i-frames and a short burst of speed, with specific integration for a "dash → slash" combo.
-
-**Rocket Skates**: Holding sprint (ShiftLeft) for ≥2 seconds engages "rocket skate" mode — top speed jumps from 0.55 → 1.0, ground movement uses vehicle-like lerped momentum (lerp 0.14) for a smooth driving feel, and stamina drain is reduced to 40% so the mode can be sustained over long traversal. Releasing sprint (or running out of stamina / stopping) instantly stows the skates. UI_MESSAGE events announce engage/stow.
+PlayerController manages humanoid characters with complex state machines for movement, combat, and a triple-jump flight system with free-flight. Camera supports first-person and third-person views. The HumanoidCharacter system enables procedural generation, modular body parts, and customization. An AnimationSystem provides procedural, multi-part animations. The CharacterEditor allows player customization. Shield, stamina, and cooldown timers are persistent. A Boost Dash provides i-frames and a short burst of speed, with specific integration for a "dash → slash" combo. Rocket Skates provide sustained high-speed ground traversal.
 
 ### Robot and Armor Systems
 The ArmorMaterialFactory creates reusable materials. RobotArmorParts provides a data-driven registry of parametric armor parts, equipped to humanoid rigs by the RobotArmorSystem.
 
 ### Combat, Inventory, and Crafting
-Combat features melee combo chains and input buffering. The InventorySystem offers a 24-slot grid. The CraftingSystem supports recipe-based crafting. Ranged weapons have unlimited ammo. The Hunter Missile (`tracking_missile`) is a homing projectile weapon with AoE damage.
+Combat features melee combo chains and input buffering. The InventorySystem offers a 24-slot grid. The CraftingSystem supports recipe-based crafting. Ranged weapons have unlimited ammo. The Hunter Missile is a homing projectile weapon with AoE damage.
 
 ### Elemental Specials
-A 6-element casting system operates parallel to weapons:
-- **Tracking Strikes**: Lightning Strike, Ice Strike, Fireball (homing).
-- **Dome Explosions**: Flame Inferno, Windstorm, Psychic Shockwave (centered on player).
-Each elemental has independent cooldowns and levels (1-5), scaling damage, radius, and target count. A `currentIndex` system allows cycling and casting selected elementals via dedicated keys or controller input.
+A 6-element casting system operates parallel to weapons, offering Tracking Strikes (Lightning, Ice, Fireball) and Dome Explosions (Flame Inferno, Windstorm, Psychic Shockwave). Each elemental has independent cooldowns and levels (1-5), scaling damage, radius, and target count.
 
 ### Beam Sabre
-The Beam Sabre is always equipped — pressing Y (keyboard) or controller-Y triggers a wide cross-screen slash with a long blade and extended reach (hit radius 7). It performs multi-hit slash combos and launches arc-shaped (crescent) energy waves forward. Damage scales with level, and level-5 waves pierce and apply AoE splash. The "boost-dash → slash" chain (L → J within 600ms) instantly fires an arc wave for the signature combo.
-
-**Sabre specials (one-time SPECIALS-tab unlocks):**
-- **Spinning Blade** — `hasSpinAttack`. Hold Y/J for ~0.5 s and release to perform a 360° spin AoE (12 m radius, 2× damage, 2× cooldown). Short tap still fires a normal slash.
-- **Twin Wave** — `hasTwinWave`. Every arc wave is shadowed by a much larger trailing red wave for double coverage.
-- **Giant Blade** — `hasGiantBlade`. Sabre mesh scales 1.6×, slash hit radius and damage gain +50%, deeper red glow on the blade and arc waves.
-The unlock API is `unlockSpinAttack()` / `unlockTwinWave()` / `unlockGiantBlade()` plus `startCharge()` / `releaseCharge()` for hold-to-spin input.
+The Beam Sabre is always equipped, featuring wide cross-screen slashes with multi-hit combos and arc-shaped energy waves. Damage scales with level, and level-5 waves pierce and apply AoE splash. Special unlocks include Spinning Blade, Twin Wave, and Giant Blade, enhancing its capabilities.
 
 ### Music and Sound
-A singleton MusicSystem manages dynamic music loading, playback, and includes an in-game UI. Game music auto-pauses on death (one-shot guard `deathHandledRef` so the per-frame death check doesn't repeatedly pause) and resumes from `handleRestart` via `MusicSystem.startGameMusic()`.
+A singleton MusicSystem manages dynamic music loading and playback, with an in-game UI and automatic pausing on player death.
 
 ### Vehicles
-A parametric vehicle pipeline generates ATVs and space fighters. VehicleFactory builds meshes, and VehicleSystem manages instances and physics for ground and aerial vehicles, including respawn. The factory's `matCacheByScene` is keyed per Babylon scene (with a `clearVehicleMaterialCache(scene)` hook called from `VehicleSystem.dispose`) so cached materials never outlive their scene — fixes the "transparent vehicles after death+restart" bug.
+A parametric vehicle pipeline generates ATVs and space fighters. VehicleFactory builds meshes, and VehicleSystem manages instances and physics for ground and aerial vehicles, including respawn, with careful material caching.
 
 ### Loot and Pickups
-The PickupSystem spawns physical glowing world meshes from defeated enemies, which magnetize towards the player for collection. Drop tables are enemy-specific. **Drop rates are doubled** vs. the original baseline so progression keeps up with the new high-cost specials. The optional **Auto-Loot Drones** SPECIALS unlock turns every active companion into a secondary collector — `setCompanionPositionsProvider(fn)` feeds live companion positions and `setAutoLootEnabled(true)` extends both magnet (×1.4) and collect (×1.6) radii to the nearest companion as well as the player.
+The PickupSystem spawns physical glowing world meshes from defeated enemies with enemy-specific drop tables and doubled drop rates. Auto-Loot Drones (an unlockable SPECIALS feature) allow companions to assist with collection.
 
 ### Upgrades and Progression
-WeaponsSystem implements per-weapon level progression. The CompanionSystem manages companion upgrades — including a separate per-companion **weapon tier** (`weaponLevel` 0–3) that scales `attackCooldown ÷ (1 + 0.4·wl)` and `damage × (1 + 0.6·wl)` independently of the base companion `level`. The in-game UpgradeMenu now has four tabs: **PLAYER**, **WEAPONS**, **ROBOTS** (with a HELPER WEAPONS row per active companion), and **SPECIALS** (one-time premium unlocks: Spinning Blade, Twin Wave, Giant Blade, Auto-Loot Drones, Robot Dragon).
+The WeaponsSystem implements per-weapon level progression. The CompanionSystem manages companion upgrades, including weapon tiers. The in-game UpgradeMenu features PLAYER, WEAPONS, ROBOTS, and SPECIALS tabs for comprehensive progression.
 
 ### Base Structures
-The BaseSystem tracks player-placed, multi-level structures like labs (controlling companion roster and blueprints) and gardens (controlling capture roster and bonuses). These have interactive UIs.
+The BaseSystem tracks player-placed, multi-level structures like labs (companion roster, blueprints) and gardens (capture roster, bonuses), each with interactive UIs.
 
 ### Building and Prefab Systems
 The BuildingSystem enables Minecraft-style mining and building with grid-snapped placement. The PrefabSystem allows placing pre-designed structures, with both supporting serialization.
 
 ### Commerce and Companions
-A ShopSystem manages 5 shop locations with dynamic pricing. **Credits live on `PlayerController.stats.credits`, not in the inventory** — the shop binds to the real wallet via `ShopSystem.setCreditsAccessor(get, spend, add)` (wired in `Game.tsx` immediately after `new ShopSystem(...)`). Without this binding `inventory.getItemCount("credits")` always returns 0 and every purchase fails with "Not enough credits"; sells previously dropped credits into a phantom inventory slot. `buyItem` now reads/spends through the accessor and `sellItem` routes proceeds via `grantCredits()` so they actually appear in the HUD. To let players exchange surplus credits for upgrade materials, **general shops also stock `gear` and `nano_fiber`** and **weapon shops stock matching weapon parts** (`weapon_part_pistol/rifle/shotgun/rocket/laser/grenade`) via the new `WEAPON_PART_SHOP_ITEMS` table appended to `Cyber Arms Dealer` and `Frontier Armory`. The GardenSystem and CompanionSystem manage digital companions with leveling and bonding. A MapSystem provides a real-time minimap. Companions are aggressive assistants — combat allies engage at 32m range with ~0.85s cooldowns and faster, larger projectiles. Even MedicDrones now contribute light support fire while healing. The premium **Robot Dragon** ally (`RoboDragon` hybrid preset, scale 1.6, winged with cannons) is gated behind a SPECIALS-tab unlock and bumps the companion cap by 1 if the lab is full so it always slots in.
+A ShopSystem manages 5 shop locations with dynamic pricing, integrating with `PlayerController.stats.credits` for transactions. General shops stock `gear` and `nano_fiber`, and weapon shops stock matching weapon parts. The GardenSystem and CompanionSystem manage digital companions with leveling and bonding. A MapSystem provides a real-time minimap. Companions are aggressive assistants, with MedicDrones providing support fire. The premium Robot Dragon ally is an unlockable SPECIALS feature.
 
 ### Enemy Systems
-The EnemySystem features a wave spawner for distinct enemy types, including Commanders. The Robot Shape Engine generates all robots (enemies, allies, pets) using parametric descriptors. Aerial enemies (fighters, battleships, Fortresses) have specialized behaviors and are initially passive, engaging upon player aggression towards any aerial unit or enemy base. Aerial unit shots are line-of-sight tested against city buildings. Hostile Enemy Bases include turrets and destructible loot vaults. **Flying Fortresses** use a 5-minute regroup lockout (`FORTRESS_REGROUP_SECONDS = 300`) — once the player wipes out every fortress, none respawn until the timer elapses (a `FLYING FORTRESSES ROUTED — REGROUPING` UI message announces it). Fighters and battleships continue to drip-spawn during the lockout (when aggro).
+The EnemySystem features a wave spawner for distinct enemy types, including Commanders. The Robot Shape Engine generates all robots. Aerial enemies have specialized behaviors and engage upon player aggression. Hostile Enemy Bases include turrets and destructible loot vaults. Flying Fortresses use a 5-minute regroup lockout. BossCaptain is a humanoid boss enemy mirroring the player's kit, spawned in specific scenarios. The Boss Fortress is a multi-stage objective with turrets, a central command spire vault, and a captured ally.
 
 ### Resource Nodes
 The MiningSystem scatters destructible glowing resource nodes that respawn after a delay.
 
 ### Player Progress and Persistence
-ProgressSync.ts handles saving and loading player progress to a database. The snapshot covers stats, weapon levels, inventory (so SCRAP / CORES / CIRCUITS / NANO survive), captured creatures, **the live companion roster (per-companion `level` + `weaponLevel`, with `maxCompanions` so the Robot Dragon's bumped cap restores)**, **the beam sabre level**, **all SPECIALS unlocks (`sabreSpin`, `sabreTwin`, `sabreGiant`, `autoLoot`, `roboDragon`)**, and **per-element elemental specials levels**. `CompanionSystem.applyLoadedCompanions` and `BeamSabreSystem.applyLoadedState` replay the per-level upgrade chain so derived fields (cooldowns, damage scaling, sabre visuals) are reconstructed exactly. Auto-save runs every **5 s** (down from 15 s) and additionally on `PLAYER_LEVEL_UP`, `WEAPON_UPGRADED`, `CREATURE_CAPTURED`, `COMPANION_BUILT`, `COMPANION_UPGRADED`, and `PICKUP_COLLECTED`; `doSaveProgress(force=true)` bypasses the 2 s throttle and is used on death and after any SPECIALS unlock or helper-bot upgrade so paid-for progression is never lost. A "friendly respawn" mechanism allows revival without progress loss.
+ProgressSync.ts handles saving and loading player progress to a database. The snapshot covers stats, weapon levels, inventory, live companion roster (level, weaponLevel), beam sabre level, all SPECIALS unlocks, and elemental specials levels. Auto-save runs every 5 seconds and on key progression events, with a "friendly respawn" mechanism.
 
 ### Environment and World
-A CityGenerator creates a 1200x1200 open world with a central city and four biomes. The SkySystem renders a custom-shader gradient skybox, a day/night cycle, and weather modes. Buildings are hollow shells with accessible interiors and ramps for tall structures. Wall AABBs are exposed for collision detection. Driveable height data is provided for ground vehicles. A sky racetrack ring (radius 280, y=80) encircles downtown with **four cardinal-direction connection ramps (N/E/S/W)** so players and vehicles can roll onto the track from any approach. Ramp geometry is built by the `addRacetrackRamp` helper using composed yaw + pitch quaternions; `getDriveableHeight` samples each ramp analytically by projecting (x,z) onto the ramp's low→high axis.
+A CityGenerator creates a 1200x1200 open world with a central city and four biomes. The SkySystem renders a custom-shader gradient skybox, a day/night cycle, and weather modes. Buildings are hollow with accessible interiors and ramps. Wall AABBs are exposed for collision. A sky racetrack ring with four cardinal-direction connection ramps is integrated into the cityscape.
 
 ### Multiplayer
 A MultiplayerSystem provides client-side WebSocket integration for real-time multiplayer, supporting room management, position synchronization, chat, and enemy damage syncing for up to 4 players.
 
 ### Friendly NPCs
-`FriendlyNPCSystem` (`client/src/game/FriendlyNPCSystem.ts`) scatters six brightly-coloured humanoid NPCs around the spawn area — sunshine yellow, bubblegum pink, aqua, lime, magenta, orange — each with a small golden halo at their feet so they read instantly as non-hostile. Each NPC carries a `NPCDialogue` (name + ordered lines) introducing one game system: combat overview (Capt. Iris), shops + materials exchange (Merchant Bex), helper-bot upgrades (Engineer Juno), rocket skates / sabre / flight (Rider Kazu), elemental specials (Mystic Ori), and biome / fortress dangers (Scout Pip). Walking within 5.5 m shows a "PRESS E TO TALK" prompt projected above the NPC's head; pressing E opens a speech bubble that advances one line per press until the dialogue closes. The system is gated by `setShopOpenProvider(() => shopRef.current?.isOpen())` so the E key never double-fires when a shop dialog owns input. NPCs idle-bob and yaw-lerp to face the player when nearby.
+FriendlyNPCSystem scatters six brightly-coloured humanoid NPCs around the spawn area, each introducing one game system (combat, shops, helper-bot upgrades, rocket skates/sabre/flight, elemental specials, biome/fortress dangers) via interactive dialogue.
 
 ### Input and UI
 GamepadInput provides seamless controller integration. The EffectsSystem drives transient visual effects. The UI includes a redesigned HUD, AuthUI, GameUI, shop interfaces, upgrade interfaces, multiplayer lobby, contextual build hotbar, and MainMenu with character customization. An EnemyHealthBarSystem renders HTML overlays for active enemies and objects.
 
 ### Controller Mapping
-The game features comprehensive Xbox-style controller mapping for all core actions, including movement, interaction, combat, elemental casting, and menu navigation. Specific mappings are provided for boosting, dashing, elemental cycling, weapon cycling, and a signature dash-slash combo.
+The game features comprehensive Xbox-style controller mapping for all core actions, including movement, interaction, combat, elemental casting, and menu navigation.
 
 ## External Dependencies
 - **PostgreSQL**: Primary database with Drizzle ORM.

@@ -18,6 +18,15 @@ export interface SupplyCacheMarker {
   looted: boolean;
 }
 
+export interface BossFortressMarker {
+  position: BABYLON.Vector3;
+  /** Spire still intact — render as bright pulsing gold star. */
+  spireAlive: boolean;
+  /** Outer turrets all destroyed — switches the marker to a brighter,
+   *  rotating cue so the player knows the captain is exposed. */
+  turretsCleared: boolean;
+}
+
 export class MapSystem {
   private scene: BABYLON.Scene;
   private mapCanvas: HTMLCanvasElement;
@@ -33,6 +42,7 @@ export class MapSystem {
   private gardens: GardenDefinition[] = [];
   private bases: BaseMarker[] = [];
   private supplyCaches: SupplyCacheMarker[] = [];
+  private bossFortresses: BossFortressMarker[] = [];
   /** Player's last known world position — kept so distance-based icon
    *  fade/scale can be computed without each draw() caller passing it. */
   private playerWorldPos: BABYLON.Vector3 = new BABYLON.Vector3(0, 0, 0);
@@ -199,6 +209,11 @@ export class MapSystem {
    *  out instead of popping. */
   setSupplyCaches(caches: ReadonlyArray<{ position: BABYLON.Vector3; looted: boolean }>): void {
     this.supplyCaches = caches.map(c => ({ position: c.position, looted: c.looted }));
+  }
+
+  /** Replaces the cached boss-fortress positions used for the mini-map. */
+  setBossFortresses(fs: ReadonlyArray<BossFortressMarker>): void {
+    this.bossFortresses = fs.map(f => ({ ...f }));
   }
 
   updatePlayerPosition(playerPos: BABYLON.Vector3): void {
@@ -473,6 +488,78 @@ export class MapSystem {
       }
     }
     ctx.globalAlpha = 1;
+
+    // Boss fortresses: prominent gold star + pulsing ring. Always shows
+    // an edge arrow when off-screen since this is THE objective.
+    const t = performance.now() / 1000;
+    for (const boss of this.bossFortresses) {
+      const coords = this.worldToMapCoords(boss.position);
+      const onScreen =
+        coords.x >= 0 && coords.x <= width && coords.y >= 0 && coords.y <= height;
+      const cleared = !boss.spireAlive;
+      const fillColor = cleared
+        ? "rgba(180, 180, 180, 1)"
+        : boss.turretsCleared
+          ? "rgba(255, 245, 130, 1)"
+          : "rgba(255, 200, 60, 1)";
+      const strokeColor = cleared
+        ? "rgba(120, 120, 120, 0.8)"
+        : "rgba(0, 0, 0, 0.85)";
+
+      if (onScreen) {
+        // Five-point star shape.
+        const baseR = cleared ? 6 : 9 + Math.sin(t * 3) * 1.2;
+        ctx.save();
+        ctx.translate(coords.x, coords.y);
+        ctx.beginPath();
+        for (let i = 0; i < 10; i++) {
+          const r = i % 2 === 0 ? baseR : baseR * 0.45;
+          const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+          const px = Math.cos(a) * r;
+          const py = Math.sin(a) * r;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fillStyle = fillColor;
+        ctx.fill();
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        if (!cleared) {
+          // Pulsing ring around the star to draw the eye to the objective.
+          const ringR = 12 + Math.sin(t * 4) * 2;
+          ctx.beginPath();
+          ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+          ctx.strokeStyle = boss.turretsCleared
+            ? "rgba(255, 230, 100, 0.85)"
+            : "rgba(255, 180, 50, 0.7)";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+        ctx.restore();
+      } else if (!cleared) {
+        const arrow = this.computeEdgeArrow(boss.position);
+        if (!arrow) continue;
+        const len = 11;
+        const wid = 7;
+        ctx.save();
+        ctx.translate(arrow.x, arrow.y);
+        ctx.rotate(arrow.angle);
+        ctx.beginPath();
+        ctx.moveTo(len, 0);
+        ctx.lineTo(-len * 0.55, -wid);
+        ctx.lineTo(-len * 0.55, wid);
+        ctx.closePath();
+        ctx.fillStyle = fillColor;
+        ctx.fill();
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
 
     this.markers.forEach((marker) => {
       const coords = this.worldToMapCoords(marker.position);

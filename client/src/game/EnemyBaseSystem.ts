@@ -2,6 +2,8 @@ import * as BABYLON from "@babylonjs/core";
 import { EventBus, GameEvents } from "./EventBus";
 import type { EnemyLike } from "./EnemyHealthBarSystem";
 import type { PickupSpawnRequest } from "./PickupSystem";
+import { HumanoidCharacter } from "./HumanoidCharacter";
+import { HUMANOID_PRESETS } from "./HumanoidPresets";
 
 interface BaseTurret extends EnemyLike {
   hitbox: BABYLON.Mesh;
@@ -36,6 +38,19 @@ interface EnemyBase {
   vault: LootVault;
   centerPillar: BABYLON.TransformNode;
   ownedMaterials: BABYLON.Material[];
+
+  // ---- Boss-fortress only fields ----
+  /** Marks this base as the giant boss-fortress variant — triggers the
+   *  extra event broadcasts (turrets cleared, fortress cleared). */
+  isBoss?: boolean;
+  /** True after BOSS_FORTRESS_TURRETS_CLEARED has fired so we don't re-emit. */
+  bossTurretsClearedFired?: boolean;
+  /** Captured ally humanoid sitting inside the central spire. */
+  allyRoot?: BABYLON.TransformNode;
+  /** Halo mesh that activates once the ally is freed. */
+  allyHalo?: BABYLON.Mesh;
+  /** Toggled true when the spire breaks and the ally is rescued. */
+  allyFreed?: boolean;
 }
 
 interface BaseTracer {
@@ -254,6 +269,24 @@ export class EnemyBaseSystem {
         color: gold,
         scale: 3.0,
       });
+
+      // Boss fortress: this is the cue to spawn the BossCaptain.
+      if (base.isBoss && !base.bossTurretsClearedFired) {
+        base.bossTurretsClearedFired = true;
+        const spawnPos = base.position.clone();
+        spawnPos.y = 1.5;
+        // Drop the captain in front of the spire so the player can engage him.
+        spawnPos.z += 8;
+        this.bus.emit(GameEvents.BOSS_FORTRESS_TURRETS_CLEARED, {
+          baseId: base.id,
+          spirePosition: base.position.clone(),
+          captainSpawnPosition: spawnPos,
+        });
+        this.bus.emit(GameEvents.UI_MESSAGE, {
+          text: "FORTRESS DEFENSES DOWN — BOSS CAPTAIN INCOMING",
+          duration: 4000,
+        });
+      }
     }
   }
 
@@ -285,20 +318,92 @@ export class EnemyBaseSystem {
     this.bus.emit("effect:hitImpact", {
       position: base.vault.position.clone().add(new BABYLON.Vector3(0, 1.6, 0)),
       color: new BABYLON.Color3(1.0, 0.78, 0.25),
-      scale: 4.0,
+      scale: base.isBoss ? 8.0 : 4.0,
     });
     this.bus.emit(GameEvents.PICKUP_SPAWNED, {
       position: base.vault.position.clone().add(new BABYLON.Vector3(0, 0.6, 0)),
-      requests: VAULT_LOOT,
-      spread: 2.4,
+      requests: base.isBoss ? this.bossVaultLoot() : VAULT_LOOT,
+      spread: base.isBoss ? 4.0 : 2.4,
     });
     this.bus.emit(GameEvents.ENEMY_KILLED, {
-      type: "vault",
-      credits: 250,
-      experience: 200,
+      type: base.isBoss ? "bossSpire" : "vault",
+      credits: base.isBoss ? 1500 : 250,
+      experience: base.isBoss ? 1200 : 200,
       position: base.vault.position.clone(),
     });
     base.vault.visual.setEnabled(false);
+
+    // Boss fortress: free the captured ally + emit the fortress-cleared event.
+    if (base.isBoss) {
+      this.freeAlly(base);
+      this.bus.emit(GameEvents.BOSS_FORTRESS_CLEARED, {
+        baseId: base.id,
+        position: base.position.clone(),
+      });
+      this.bus.emit(GameEvents.UI_MESSAGE, {
+        text: "ALLY RESCUED — FORTRESS CLEARED",
+        duration: 5000,
+      });
+    }
+  }
+
+  /** Activate the freed-ally visuals (halo + lift + ALLY_RESCUED event). */
+  private freeAlly(base: EnemyBase): void {
+    if (base.allyFreed) return;
+    base.allyFreed = true;
+    if (!base.allyRoot) return;
+
+    // Bright golden halo above the ally's head.
+    if (!base.allyHalo) {
+      const halo = BABYLON.MeshBuilder.CreateTorus(`bossAllyHalo_${base.id}`, {
+        diameter: 1.2,
+        thickness: 0.12,
+        tessellation: 32,
+      }, this.scene);
+      const haloMat = new BABYLON.StandardMaterial(`bossAllyHaloMat_${base.id}`, this.scene);
+      haloMat.emissiveColor = new BABYLON.Color3(1.0, 0.88, 0.35);
+      haloMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+      haloMat.disableLighting = true;
+      halo.material = haloMat;
+      halo.parent = base.allyRoot;
+      halo.position.set(0, 2.5, 0);
+      base.allyHalo = halo;
+      base.ownedMaterials.push(haloMat);
+    }
+
+    // Tiny lift animation so the rescue reads as a celebration.
+    const startY = base.allyRoot.position.y;
+    let f = 0;
+    const animate = () => {
+      f++;
+      if (!base.allyRoot || base.allyRoot.isDisposed()) return;
+      base.allyRoot.position.y = startY + Math.min(0.4, f * 0.02);
+      if (base.allyHalo && !base.allyHalo.isDisposed()) {
+        base.allyHalo.rotation.y += 0.05;
+      }
+      if (f < 200) requestAnimationFrame(animate);
+    };
+    animate();
+
+    this.bus.emit(GameEvents.ALLY_RESCUED, {
+      baseId: base.id,
+      position: base.allyRoot.position.clone().add(base.position),
+    });
+  }
+
+  /** Premium loot table for the boss spire. Significantly bigger payout
+   *  than the regular vault loot. Credits are granted via the ENEMY_KILLED
+   *  payload (1500), so we don't include them in the pickup list. */
+  private bossVaultLoot(): PickupSpawnRequest[] {
+    return [
+      { type: "gear", amount: 30 },
+      { type: "energy_core", amount: 15 },
+      { type: "circuit_board", amount: 15 },
+      { type: "nano_fiber", amount: 10 },
+      { type: "weapon_part", amount: 4, weaponId: "rocket" },
+      { type: "weapon_part", amount: 3, weaponId: "laser" },
+      { type: "weapon_part", amount: 3, weaponId: "grenade" },
+    ];
   }
 
   /** Returns hitbox meshes routed through WeaponsSystem.update */
@@ -539,6 +644,303 @@ export class EnemyBaseSystem {
 
   seedWorld(centers: BABYLON.Vector3[]): void {
     for (const c of centers) this.spawnBase(c);
+  }
+
+  // ============================================================================
+  //                            BOSS FORTRESS
+  // ============================================================================
+
+  static readonly BOSS_TURRET_HP = 380;
+  static readonly BOSS_SPIRE_HP = 1800;
+
+  /** Build the giant boss fortress at `center`: outer wall ring, 12 turrets
+   *  in two concentric rings, central command spire (high-HP vault analog),
+   *  and the captured-ally humanoid sitting in front of the spire.
+   *
+   *  Hooks (via EventBus):
+   *    - `BOSS_FORTRESS_TURRETS_CLEARED` once every outer turret dies.
+   *    - `BOSS_FORTRESS_CLEARED` + `ALLY_RESCUED` once the spire is broken.
+   */
+  spawnBossFortress(center: BABYLON.Vector3): EnemyBase {
+    const id = this.idCounter++;
+    const baseRoot = new BABYLON.TransformNode(`bossFortress_${id}`, this.scene);
+    baseRoot.position.copyFrom(center);
+
+    // Materials reused across the fortress shell.
+    const wallMat = new BABYLON.StandardMaterial(`bossWallMat_${id}`, this.scene);
+    wallMat.diffuseColor = new BABYLON.Color3(0.18, 0.16, 0.22);
+    wallMat.emissiveColor = new BABYLON.Color3(0.05, 0.02, 0.06);
+    const trimMat = new BABYLON.StandardMaterial(`bossTrimMat_${id}`, this.scene);
+    trimMat.diffuseColor = new BABYLON.Color3(0.45, 0.06, 0.10);
+    trimMat.emissiveColor = new BABYLON.Color3(0.7, 0.05, 0.1);
+    trimMat.disableLighting = true;
+    const spireMat = new BABYLON.StandardMaterial(`bossSpireMat_${id}`, this.scene);
+    spireMat.diffuseColor = new BABYLON.Color3(0.22, 0.16, 0.20);
+    spireMat.emissiveColor = new BABYLON.Color3(0.08, 0.02, 0.04);
+    const coreMat = new BABYLON.StandardMaterial(`bossCoreMat_${id}`, this.scene);
+    coreMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+    coreMat.emissiveColor = new BABYLON.Color3(1.0, 0.18, 0.22); // glowing red core
+    coreMat.disableLighting = true;
+    const ownedMaterials: BABYLON.Material[] = [wallMat, trimMat, spireMat, coreMat];
+
+    // Octagonal outer wall (8 segments, each 16 units long).
+    const outerR = 32;
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const cosA = Math.cos(a);
+      const sinA = Math.sin(a);
+      const wall = BABYLON.MeshBuilder.CreateBox(`bossWall_${id}_${i}`, {
+        width: 16, height: 5.5, depth: 1.6,
+      }, this.scene);
+      wall.material = wallMat;
+      wall.position.set(cosA * outerR, 2.75, sinA * outerR);
+      wall.rotation.y = -a + Math.PI / 2;
+      wall.parent = baseRoot;
+
+      // Glowing red trim along the top edge of each wall section.
+      const trim = BABYLON.MeshBuilder.CreateBox(`bossWallTrim_${id}_${i}`, {
+        width: 16, height: 0.25, depth: 1.7,
+      }, this.scene);
+      trim.material = trimMat;
+      trim.position.set(cosA * outerR, 5.6, sinA * outerR);
+      trim.rotation.y = -a + Math.PI / 2;
+      trim.parent = baseRoot;
+    }
+
+    // Central command spire — tall obelisk with a glowing red core.
+    const spireBase = BABYLON.MeshBuilder.CreateCylinder(`bossSpireBase_${id}`, {
+      height: 4, diameterBottom: 12, diameterTop: 9,
+    }, this.scene);
+    spireBase.material = spireMat;
+    spireBase.position.y = 2;
+    spireBase.parent = baseRoot;
+
+    const spireBody = BABYLON.MeshBuilder.CreateCylinder(`bossSpireBody_${id}`, {
+      height: 14, diameterBottom: 6, diameterTop: 3.2,
+    }, this.scene);
+    spireBody.material = spireMat;
+    spireBody.position.y = 11;
+    spireBody.parent = baseRoot;
+
+    const spireTop = BABYLON.MeshBuilder.CreateCylinder(`bossSpireTop_${id}`, {
+      height: 4, diameterBottom: 3.2, diameterTop: 0.4,
+    }, this.scene);
+    spireTop.material = spireMat;
+    spireTop.position.y = 20;
+    spireTop.parent = baseRoot;
+
+    // Glowing red core embedded mid-spire (the visual weak point).
+    const core = BABYLON.MeshBuilder.CreateSphere(`bossSpireCore_${id}`, { diameter: 2.2, segments: 16 }, this.scene);
+    core.material = coreMat;
+    core.position.y = 9;
+    core.parent = baseRoot;
+
+    // Four red trim rings climbing the spire.
+    for (let i = 0; i < 4; i++) {
+      const ring = BABYLON.MeshBuilder.CreateTorus(`bossSpireRing_${id}_${i}`, {
+        diameter: 5.5 - i * 0.7, thickness: 0.18, tessellation: 24,
+      }, this.scene);
+      ring.material = trimMat;
+      ring.position.y = 5 + i * 4;
+      ring.parent = baseRoot;
+    }
+
+    // 12 turrets: 8 in an outer ring + 4 inner sentries near the spire.
+    const turrets: BaseTurret[] = [];
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + Math.PI / 16;
+      const x = Math.cos(a) * (outerR - 3);
+      const z = Math.sin(a) * (outerR - 3);
+      turrets.push(this.createBossTurret(center.add(new BABYLON.Vector3(x, 0, z)), id));
+    }
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      const x = Math.cos(a) * 14;
+      const z = Math.sin(a) * 14;
+      turrets.push(this.createBossTurret(center.add(new BABYLON.Vector3(x, 0, z)), id));
+    }
+
+    // Spire vault hitbox — sits at the glowing core. Massive HP.
+    const vault = this.createSpireVault(center, id);
+
+    // Captured ally inside the spire base, at floor level in front of the
+    // spire (so the player can see them once they breach the inner ring).
+    const allyRoot = this.createCapturedAlly(id);
+    allyRoot.parent = baseRoot;
+    allyRoot.position.set(0, 0, 5);
+
+    const base: EnemyBase = {
+      id,
+      position: center.clone(),
+      turrets,
+      vault,
+      centerPillar: baseRoot,
+      ownedMaterials,
+      isBoss: true,
+      bossTurretsClearedFired: false,
+      allyRoot,
+      allyFreed: false,
+    };
+    this.bases.push(base);
+    return base;
+  }
+
+  private createBossTurret(position: BABYLON.Vector3, baseId: number): BaseTurret {
+    const turret = this.createTurret(position, baseId);
+    // Beefier than a normal turret.
+    turret.health = EnemyBaseSystem.BOSS_TURRET_HP;
+    turret.maxHealth = EnemyBaseSystem.BOSS_TURRET_HP;
+    turret.barLabel = "FORTRESS TURRET";
+    turret.barColor = "linear-gradient(90deg, #b8001a 0%, #ff4030 100%)";
+    return turret;
+  }
+
+  private createSpireVault(center: BABYLON.Vector3, baseId: number): LootVault {
+    const id = this.idCounter++;
+    const visual = new BABYLON.TransformNode(`bossSpireVaultVisual_${id}`, this.scene);
+    visual.position.copyFrom(center);
+
+    // Highlight ring at the core for "shoot here when armed" telegraphing.
+    const lockMat = new BABYLON.StandardMaterial(`bossSpireLockMat_${id}`, this.scene);
+    lockMat.diffuseColor = new BABYLON.Color3(0.35, 0.45, 1.0);
+    lockMat.emissiveColor = new BABYLON.Color3(0.35, 0.45, 1.0);
+    lockMat.disableLighting = true;
+    const ring = BABYLON.MeshBuilder.CreateTorus(`bossSpireLock_${id}`, {
+      diameter: 3.5, thickness: 0.28, tessellation: 24,
+    }, this.scene);
+    ring.material = lockMat;
+    ring.position.y = 9;
+    ring.parent = visual;
+
+    // Big invisible hitbox covering the spire's mid-section.
+    const hitbox = BABYLON.MeshBuilder.CreateBox(`bossSpireHit_${id}`, {
+      width: 5, height: 12, depth: 5,
+    }, this.scene);
+    hitbox.position.copyFrom(center);
+    hitbox.position.y += 9;
+    hitbox.isVisible = false;
+    hitbox.metadata = { hitRadius: 3.0, isVault: true, isBossSpire: true };
+
+    return {
+      baseId,
+      hitbox,
+      visual,
+      emissives: [lockMat],
+      ownedMaterials: [lockMat],
+      hp: EnemyBaseSystem.BOSS_SPIRE_HP,
+      maxHp: EnemyBaseSystem.BOSS_SPIRE_HP,
+      armed: false,
+      alive: true,
+      shakeTimer: 0,
+      lastHitFxAt: 0,
+      position: center.clone(),
+    };
+  }
+
+  /** Create the kneeling captured-ally humanoid + small "cuffs" cube at
+   *  the wrists. Owned by the boss-fortress base root, so it disposes with
+   *  the rest of the fortress. */
+  private createCapturedAlly(baseId: number): BABYLON.TransformNode {
+    const wrap = new BABYLON.TransformNode(`bossAlly_${baseId}`, this.scene);
+
+    // Use any available humanoid preset (PlayerDefault first), tinted
+    // friendly cyan/yellow so the ally never gets confused for a captain.
+    const preferred = ["PlayerDefault", "HumanoidCaptainAlpha", "HumanoidCaptainBeta"];
+    let placed = false;
+    for (const name of preferred) {
+      const def = HUMANOID_PRESETS[name];
+      if (!def) continue;
+      try {
+        const human = new HumanoidCharacter(this.scene, def);
+        const root = human.getRoot();
+        root.parent = wrap;
+        root.position = BABYLON.Vector3.Zero();
+        root.scaling.setAll(0.95);
+
+        // Friendly cyan/yellow tint so it visually contrasts with captains.
+        for (const m of root.getChildMeshes()) {
+          const mat = m.material as BABYLON.StandardMaterial | null;
+          if (mat) {
+            if (mat.diffuseColor) {
+              mat.diffuseColor = new BABYLON.Color3(
+                Math.min(1, mat.diffuseColor.r * 0.6 + 0.25),
+                Math.min(1, mat.diffuseColor.g * 0.6 + 0.55),
+                Math.min(1, mat.diffuseColor.b * 0.6 + 0.55),
+              );
+            }
+            if (mat.emissiveColor) {
+              mat.emissiveColor = new BABYLON.Color3(
+                mat.emissiveColor.r * 0.4,
+                Math.min(1, mat.emissiveColor.g * 0.6 + 0.25),
+                Math.min(1, mat.emissiveColor.b * 0.6 + 0.30),
+              );
+            }
+          }
+        }
+
+        placed = true;
+        break;
+      } catch {
+        /* try the next preset */
+      }
+    }
+    if (!placed) {
+      const cap = BABYLON.MeshBuilder.CreateCapsule(`bossAllyFallback_${baseId}`, {
+        height: 1.8, radius: 0.35,
+      }, this.scene);
+      const mat = new BABYLON.StandardMaterial(`bossAllyFallbackMat_${baseId}`, this.scene);
+      mat.diffuseColor = new BABYLON.Color3(0.95, 0.85, 0.4);
+      mat.emissiveColor = new BABYLON.Color3(0.4, 0.35, 0.15);
+      cap.material = mat;
+      cap.position.y = 0.9;
+      cap.parent = wrap;
+    }
+
+    // Glowing red containment cuffs on the ground (visual only).
+    const cuffs = BABYLON.MeshBuilder.CreateTorus(`bossAllyCuffs_${baseId}`, {
+      diameter: 1.6, thickness: 0.18, tessellation: 24,
+    }, this.scene);
+    const cuffMat = new BABYLON.StandardMaterial(`bossAllyCuffsMat_${baseId}`, this.scene);
+    cuffMat.emissiveColor = new BABYLON.Color3(1.0, 0.18, 0.22);
+    cuffMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+    cuffMat.disableLighting = true;
+    cuffs.material = cuffMat;
+    cuffs.position.y = 0.15;
+    cuffs.parent = wrap;
+
+    return wrap;
+  }
+
+  /** Returns every boss fortress + its rescue-state. Empty when no boss
+   *  fortress has been seeded yet. Both the L1 and (later) L2 fortresses
+   *  appear here simultaneously once L2 starts. */
+  getBossFortresses(): Array<{
+    position: BABYLON.Vector3;
+    spireAlive: boolean;
+    turretsCleared: boolean;
+    allyFreed: boolean;
+  }> {
+    return this.bases
+      .filter(b => b.isBoss)
+      .map(b => ({
+        position: b.position.clone(),
+        spireAlive: b.vault.alive,
+        turretsCleared: !!b.bossTurretsClearedFired,
+        allyFreed: !!b.allyFreed,
+      }));
+  }
+
+  /** Convenience: the most-recently-spawned boss fortress, or null. Used
+   *  by the level system to detect whether the L2 fortress already exists
+   *  before re-seeding it after a save reload. */
+  getLatestBossFortress(): null | {
+    position: BABYLON.Vector3;
+    spireAlive: boolean;
+    turretsCleared: boolean;
+    allyFreed: boolean;
+  } {
+    const all = this.getBossFortresses();
+    return all.length === 0 ? null : all[all.length - 1];
   }
 
   dispose(): void {

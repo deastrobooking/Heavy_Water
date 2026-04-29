@@ -43,6 +43,7 @@ import { SoundSystem } from "./SoundSystem";
 import { SkySystem } from "./SkySystem";
 import { MiningSystem } from "./MiningSystem";
 import { EnemyBaseSystem } from "./EnemyBaseSystem";
+import { LevelSystem } from "./LevelSystem";
 import { loadProgress, saveProgress, ProgressSnapshot } from "./ProgressSync";
 import { EventBus, GameEvents } from "./EventBus";
 import { DamageType } from "./DamageSystem";
@@ -126,6 +127,9 @@ export const Game: React.FC = () => {
   const skyRef = useRef<SkySystem | null>(null);
   const miningRef = useRef<MiningSystem | null>(null);
   const enemyBaseRef = useRef<EnemyBaseSystem | null>(null);
+  // World-level progression (Level 1 → Level 2). Owned outside the engine
+  // closure so the GameUI props + persistence layer can read it.
+  const levelSystemRef = useRef<LevelSystem | null>(null);
   const respawnTimeoutRef = useRef<number | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
   const lastSaveAtRef = useRef<number>(0);
@@ -193,6 +197,13 @@ export const Game: React.FC = () => {
   const [waveNumber, setWaveNumber] = useState(1);
   const [chestCount, setChestCount] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
+  // ---- Level / objective UI (driven by LevelSystem events) ----
+  const [levelBanner, setLevelBanner] = useState<string>("LEVEL 1 — RESCUE THE ALLY");
+  const [levelObjective, setLevelObjective] = useState<string>(
+    "Breach the enemy fortress and rescue the captured ally."
+  );
+  const [levelCompleteOverlay, setLevelCompleteOverlay] =
+    useState<{ title: string; subtitle?: string } | null>(null);
   const [jetpackFuel, setJetpackFuel] = useState(200);
   const [maxJetpackFuel, setMaxJetpackFuel] = useState(200);
   const [playerState, setPlayerState] = useState("idle");
@@ -623,6 +634,64 @@ export const Game: React.FC = () => {
           new BABYLON.Vector3(-250, 0, 250),
           new BABYLON.Vector3(0, 0, -280),
         ]);
+        // The Level-1 boss objective: one giant fortress holding the captured
+        // ally. Seeded at a fixed coordinate so the minimap arrow always
+        // points the player toward it.
+        const BOSS_FORTRESS_LEVEL1 = new BABYLON.Vector3(380, 0, -120);
+        const BOSS_FORTRESS_LEVEL2 = new BABYLON.Vector3(-360, 0, -360);
+        enemyBaseSystem.spawnBossFortress(BOSS_FORTRESS_LEVEL1);
+
+        // Level system — drives Level 1 → Level 2 progression, sky tint,
+        // and the level-2 captain spawner.
+        const levelSystem = new LevelSystem();
+        levelSystemRef.current = levelSystem;
+
+        // BOSS FORTRESS turret-clear → spawn the BossCaptain at the spire.
+        bus.on(GameEvents.BOSS_FORTRESS_TURRETS_CLEARED, (payload: any) => {
+          const pos = (payload?.captainSpawnPosition as BABYLON.Vector3 | undefined)
+            ?? (payload?.spirePosition as BABYLON.Vector3 | undefined);
+          if (!pos) return;
+          enemySystem.spawnCaptain(pos.clone(), { isBossCaptain: true });
+        });
+
+        // LEVEL_COMPLETED → show the full-screen overlay for ~3 s.
+        bus.on(GameEvents.LEVEL_COMPLETED, (payload: any) => {
+          setLevelCompleteOverlay({
+            title: "LEVEL COMPLETE",
+            subtitle: payload?.banner || "Stand by — the war isn't over.",
+          });
+          window.setTimeout(() => setLevelCompleteOverlay(null), 3200);
+        });
+
+        // LEVEL_STARTED → swap banner + objective; re-apply sky/spawn rules.
+        bus.on(GameEvents.LEVEL_STARTED, (payload: any) => {
+          if (payload?.banner) setLevelBanner(payload.banner);
+          if (payload?.objective) setLevelObjective(payload.objective);
+          // Sky tint per level (red shift on Level 2).
+          if (payload?.skyTint && skyRef.current) {
+            skyRef.current.setLevelTint(payload.skyTint);
+          }
+          // Level 2: bump difficulty and seed the second boss fortress
+          // (only once — re-fires via applyLoadedState are idempotent because
+          // spawnBossFortress is the only reason a new fortress appears).
+          if (payload?.level === 2) {
+            enemySystem.jumpToWave(Math.max(enemySystem.getWaveNumber() + 2, 5));
+            // Spawn the second fortress only if we don't already have one
+            // at the L2 coord (handles save-load re-firing LEVEL_STARTED).
+            const existing = enemyBaseSystem.getBossFortresses();
+            const hasL2 = existing.some(b =>
+              b.position.subtract(BOSS_FORTRESS_LEVEL2).length() <= 5
+            );
+            if (!hasL2) enemyBaseSystem.spawnBossFortress(BOSS_FORTRESS_LEVEL2);
+            showMessage("LEVEL 2 — CAPTAINS INVADING", 4000);
+          }
+        });
+
+        // ALLY_RESCUED → small UI cue (the spire-clear UI message already fires
+        // from EnemyBaseSystem; this keeps a dedicated slot for future hooks).
+        bus.on(GameEvents.ALLY_RESCUED, () => {
+          showMessage("ALLY RESCUED", 3000);
+        });
 
         const enemyHealthBars = new EnemyHealthBarSystem(scene, engine.getCamera());
         enemyHealthBars.setEnemyProvider(() => {
@@ -801,6 +870,10 @@ export const Game: React.FC = () => {
             specialsOwned: specialsOwnedSnap,
             beamSabreLevel: sabreState.level,
             elementalLevels,
+            // World-level progression so reloading puts the player back in
+            // Level 2 (red sky, harder spawns, second fortress) if they
+            // already cleared the first boss fortress.
+            worldLevel: levelSystemRef.current?.getSnapshot().worldLevel ?? 1,
           };
         };
 
@@ -869,6 +942,13 @@ export const Game: React.FC = () => {
               }
               if (snap.companions && snap.companions.length > 0) {
                 companionSystem.applyLoadedCompanions(snap.companions, player.getPosition());
+              }
+              // Restore world-level progression. For L2, applyLoadedState
+              // re-emits LEVEL_STARTED, which our listener uses to swap
+              // banner/objective, tint the sky, seed the second fortress,
+              // and bump enemy difficulty.
+              if (snap.worldLevel && levelSystemRef.current) {
+                levelSystemRef.current.applyLoadedState({ worldLevel: snap.worldLevel });
               }
 
               showMessage(`PROGRESS LOADED — LVL ${snap.stats.level} | ${snap.stats.credits}cr`, 2500);
@@ -1230,6 +1310,7 @@ export const Game: React.FC = () => {
           // few dozen entries at most — so the per-frame cost is negligible.
           mapSystem.setEnemyBases(enemyBaseSystem.getBasePositions());
           mapSystem.setSupplyCaches(propSystem.getOpenContainers());
+          mapSystem.setBossFortresses(enemyBaseSystem.getBossFortresses());
           mapSystem.draw();
           setRemotePlayerCount(multiplayer.getRemotePlayerCount());
 
@@ -1355,6 +1436,7 @@ export const Game: React.FC = () => {
         miningRef.current = null;
         if (enemyBaseRef.current) { try { enemyBaseRef.current.dispose(); } catch {} }
         enemyBaseRef.current = null;
+        if (levelSystemRef.current) { try { levelSystemRef.current.dispose(); } catch {} levelSystemRef.current = null; }
         if (autosaveTimerRef.current !== null) { window.clearInterval(autosaveTimerRef.current); autosaveTimerRef.current = null; }
         if (respawnTimeoutRef.current !== null) { window.clearTimeout(respawnTimeoutRef.current); respawnTimeoutRef.current = null; }
         // Match handleRestart — these systems also need explicit dispose so
@@ -1415,6 +1497,7 @@ export const Game: React.FC = () => {
     if (bioRef.current) { try { bioRef.current.dispose(); } catch {} bioRef.current = null; }
     if (miningRef.current) { try { miningRef.current.dispose(); } catch {} miningRef.current = null; }
     if (enemyBaseRef.current) { try { enemyBaseRef.current.dispose(); } catch {} enemyBaseRef.current = null; }
+    if (levelSystemRef.current) { try { levelSystemRef.current.dispose(); } catch {} levelSystemRef.current = null; }
     if (enemyHealthBarsRef.current) { try { enemyHealthBarsRef.current.dispose(); } catch {} enemyHealthBarsRef.current = null; }
     if (friendlyNPCsRef.current) { try { friendlyNPCsRef.current.dispose(); } catch {} friendlyNPCsRef.current = null; }
     if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} gamepadRef.current = null; }
@@ -1959,6 +2042,7 @@ export const Game: React.FC = () => {
       if (baseRef.current) baseRef.current.dispose();
       if (miningRef.current) miningRef.current.dispose();
       if (enemyBaseRef.current) enemyBaseRef.current.dispose();
+      if (levelSystemRef.current) { try { levelSystemRef.current.dispose(); } catch {} levelSystemRef.current = null; }
       if (autosaveTimerRef.current !== null) window.clearInterval(autosaveTimerRef.current);
       if (respawnTimeoutRef.current !== null) window.clearTimeout(respawnTimeoutRef.current);
       if (effectsRef.current) effectsRef.current.dispose();
@@ -2051,6 +2135,9 @@ export const Game: React.FC = () => {
           waveNumber={waveNumber}
           chestCount={chestCount}
           showMessage={message}
+          levelBanner={levelBanner}
+          levelObjective={levelObjective}
+          levelCompleteOverlay={levelCompleteOverlay}
           jetpackFuel={jetpackFuel}
           maxJetpackFuel={maxJetpackFuel}
           playerState={playerState}

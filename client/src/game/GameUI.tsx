@@ -29,6 +29,12 @@ interface GameUIProps {
   waveNumber: number;
   chestCount: number;
   showMessage: string | null;
+  /** Top-center level banner ("LEVEL 1 — RESCUE THE ALLY"). */
+  levelBanner?: string | null;
+  /** Long-form objective text shown beneath the banner. */
+  levelObjective?: string | null;
+  /** When non-null, fades a full-screen "LEVEL COMPLETE" overlay in/out. */
+  levelCompleteOverlay?: { title: string; subtitle?: string } | null;
   jetpackFuel?: number;
   maxJetpackFuel?: number;
   playerState?: string;
@@ -132,6 +138,9 @@ export const GameUI: React.FC<GameUIProps> = ({
   waveNumber,
   chestCount,
   showMessage,
+  levelBanner = null,
+  levelObjective = null,
+  levelCompleteOverlay = null,
   jetpackFuel = 200,
   maxJetpackFuel = 200,
   playerState = "idle",
@@ -597,6 +606,67 @@ export const GameUI: React.FC<GameUIProps> = ({
       {showMessage && (
         <div className="absolute top-1/3 left-1/2 transform -translate-x-1/2 bg-black/90 border-2 border-cyan-400 px-6 py-3 rounded-lg animate-pulse">
           <div className="text-cyan-400 text-sm">{showMessage}</div>
+        </div>
+      )}
+
+      {/* Level banner: top-center anime/sci-fi styled. Shown whenever
+          there's an active level (always, after LevelSystem boots). */}
+      {levelBanner && (
+        <div className="absolute top-3 left-1/2 transform -translate-x-1/2 text-center">
+          <div
+            className="px-6 py-1.5 rounded-md border-[3px] bg-black/80"
+            style={{
+              borderColor: "rgba(255,210,90,0.95)",
+              boxShadow: "0 0 14px rgba(255,180,40,0.55), inset 0 0 8px rgba(255,180,40,0.25)",
+            }}
+          >
+            <div
+              className="text-yellow-200 text-xs tracking-[0.35em] font-bold"
+              style={{ textShadow: "0 0 6px rgba(255,200,40,0.85)" }}
+            >
+              {levelBanner}
+            </div>
+          </div>
+          {levelObjective && (
+            <div className="mt-1 text-[10px] text-cyan-200/80 tracking-widest"
+                 style={{ textShadow: "0 0 4px rgba(0,0,0,0.9)" }}>
+              {levelObjective}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Level-complete full-screen overlay — fades in for ~3 s when the
+          player clears a fortress. Driven by Game.tsx via the prop. */}
+      {levelCompleteOverlay && (
+        <div
+          className="absolute inset-0 flex items-center justify-center bg-black/55"
+          style={{ animation: "fadeInOut 3000ms ease-out forwards" }}
+        >
+          <div className="text-center">
+            <div
+              className="text-yellow-200 text-5xl font-extrabold tracking-[0.4em]"
+              style={{ textShadow: "0 0 20px rgba(255,210,90,0.9), 0 0 40px rgba(255,160,40,0.6)" }}
+            >
+              {levelCompleteOverlay.title}
+            </div>
+            {levelCompleteOverlay.subtitle && (
+              <div
+                className="mt-4 text-cyan-200 text-sm tracking-[0.3em]"
+                style={{ textShadow: "0 0 8px rgba(34,211,238,0.7)" }}
+              >
+                {levelCompleteOverlay.subtitle}
+              </div>
+            )}
+          </div>
+          <style>{`
+            @keyframes fadeInOut {
+              0%   { opacity: 0; }
+              15%  { opacity: 1; }
+              80%  { opacity: 1; }
+              100% { opacity: 0; }
+            }
+          `}</style>
         </div>
       )}
 

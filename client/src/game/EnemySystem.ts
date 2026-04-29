@@ -7,8 +7,33 @@ import { ROBOT_PRESETS } from "./RobotPresets";
 import { HumanoidCharacter } from "./HumanoidCharacter";
 import { HUMANOID_PRESETS } from "./HumanoidPresets";
 
-export type EnemyType = "drone" | "soldier" | "heavy" | "insectoid" | "hybrid" | "commander";
+export type EnemyType = "drone" | "soldier" | "heavy" | "insectoid" | "hybrid" | "commander" | "captain";
 export type EnemyAIState = "idle" | "patrol" | "chase" | "attack" | "stunned" | "dead" | "flying" | "hovering" | "dodging";
+
+/** A homing red orb the BossCaptain fires at the player. Tracked per-captain
+ *  so we can lerp it forward + check the impact-radius each frame, and clean
+ *  up the mesh when its lifetime expires. */
+interface CaptainTracker {
+  mesh: BABYLON.Mesh;
+  trail: BABYLON.Mesh;
+  ttl: number;
+  speed: number;
+  damage: number;
+  done: boolean;
+}
+
+/** Pending elemental dome the BossCaptain has armed. The visual sphere
+ *  expands over ~0.45s; once it crosses the damage frame we apply AoE to
+ *  the player if they're inside the final radius. */
+interface CaptainDome {
+  mesh: BABYLON.Mesh;
+  origin: BABYLON.Vector3;
+  age: number;
+  duration: number;
+  radius: number;
+  damage: number;
+  fired: boolean;
+}
 
 export interface EnemyConfig {
   maxHealth: number;
@@ -57,6 +82,13 @@ const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     knockbackForce: 1200, experienceValue: 500, detectionRange: 45, chaseRange: 60,
     attackRange: 12, patrolSpeed: 0.06, chaseSpeed: 0.12, credits: 250,
   },
+  // Boss Captain — abilities mirror the player (sabre slash, tracker, dash, dome).
+  // High HP, fast, and dangerous: this is the inner boss of the boss fortress.
+  captain: {
+    maxHealth: 2400, attackDamage: 38, defense: 22, movementSpeed: 6, attackCooldown: 1.4,
+    knockbackForce: 1400, experienceValue: 800, detectionRange: 60, chaseRange: 90,
+    attackRange: 6.5, patrolSpeed: 0.08, chaseSpeed: 0.16, credits: 500,
+  },
 };
 
 export class EnemyUnit implements IDamageable {
@@ -86,6 +118,24 @@ export class EnemyUnit implements IDamageable {
   private dodgeDirection: BABYLON.Vector3 = BABYLON.Vector3.Zero();
   private auraMesh: BABYLON.Mesh | null = null;
 
+  // ---- BossCaptain-only state (mirrors player abilities) ----
+  /** Visible red sabre prop carried by a captain — null for other types. */
+  private captainSabre: BABYLON.Mesh | null = null;
+  /** Cooldown gate so the captain doesn't spam tracker / dome every frame. */
+  private captainAbilityCd: number = 0;
+  /** Active homing red orbs in flight. Each is ticked + collided per-frame. */
+  private captainTrackers: CaptainTracker[] = [];
+  /** Currently-armed AoE dome (only one at a time). */
+  private captainDome: CaptainDome | null = null;
+  /** Damage from completed trackers/dome impacts, drained each `update()`. */
+  private pendingDamage: number = 0;
+  /** Last player position, sampled every frame so async impact callbacks
+   *  (setTimeout-based dome detonation) can score against the latest pos. */
+  private lastPlayerPos: BABYLON.Vector3 = BABYLON.Vector3.Zero();
+  /** True for captains spawned by the boss fortress: emit a special ENEMY_KILLED
+   *  payload so Game.tsx can broadcast a victory toast. */
+  public isBossCaptain: boolean = false;
+
   constructor(mesh: BABYLON.Mesh, type: EnemyType, waveMultiplier: number = 1) {
     this.mesh = mesh;
     this.type = type;
@@ -106,6 +156,11 @@ export class EnemyUnit implements IDamageable {
       this.flightHeight = mesh.position.y;
       this.targetFlightHeight = mesh.position.y;
       this.createCommanderAura();
+    }
+
+    if (type === "captain") {
+      this.createCaptainAura();
+      this.createCaptainSabre();
     }
 
     mesh.metadata = {
@@ -163,6 +218,26 @@ export class EnemyUnit implements IDamageable {
       this.dodgeCooldown = Math.max(0, this.dodgeCooldown - dt);
     }
 
+    if (this.type === "captain") {
+      this.lastPlayerPos.copyFrom(playerPosition);
+      this.updateAura();
+      this.dodgeCooldown = Math.max(0, this.dodgeCooldown - dt);
+      this.captainAbilityCd = Math.max(0, this.captainAbilityCd - dt);
+      this.tickCaptainTrackers(dt, playerPosition);
+      this.tickCaptainDome(dt);
+      // While chasing or attacking, fire a special when ability cooldown is up.
+      if ((state === "chase" || state === "attack") && this.captainAbilityCd <= 0) {
+        const dist = BABYLON.Vector3.Distance(this.mesh.position, playerPosition);
+        if (dist <= 9.5) {
+          this.captainCastDome();
+          this.captainAbilityCd = 4.2;
+        } else if (dist <= 45) {
+          this.captainCastTracker(playerPosition);
+          this.captainAbilityCd = 2.4;
+        }
+      }
+    }
+
     let dmg = 0;
     switch (state) {
       case "idle": dmg = this.updateIdle(dt, playerPosition); break;
@@ -173,6 +248,12 @@ export class EnemyUnit implements IDamageable {
       case "flying": dmg = this.updateFlying(dt, playerPosition); break;
       case "hovering": dmg = this.updateHovering(dt, playerPosition); break;
       case "dodging": dmg = this.updateDodging(dt, playerPosition); break;
+    }
+
+    // Drain async damage accumulated by captain abilities (tracker + dome).
+    if (this.pendingDamage > 0) {
+      dmg += this.pendingDamage;
+      this.pendingDamage = 0;
     }
 
     // Hit-shake jitter — applied AFTER FSM movement so it visibly displaces the mesh briefly.
@@ -280,6 +361,8 @@ export class EnemyUnit implements IDamageable {
       this.attackTimer = this.config.attackCooldown;
       if (this.type === "commander") {
         this.createCommanderAttackEffect();
+      } else if (this.type === "captain") {
+        this.captainSabreSlashEffect(playerPos);
       } else {
         this.createAttackEffect();
       }
@@ -361,8 +444,15 @@ export class EnemyUnit implements IDamageable {
   }
 
   private tryDodge(playerPos: BABYLON.Vector3): boolean {
-    if (this.type !== "commander" || this.dodgeCooldown > 0) return false;
-    if (Math.random() > 0.4) return false;
+    if (this.dodgeCooldown > 0) return false;
+    // Captains dash much more aggressively than commanders.
+    if (this.type === "commander") {
+      if (Math.random() > 0.4) return false;
+    } else if (this.type === "captain") {
+      if (Math.random() > 0.65) return false;
+    } else {
+      return false;
+    }
 
     const toPlayer = playerPos.subtract(this.mesh.position);
     toPlayer.y = 0;
@@ -410,7 +500,7 @@ export class EnemyUnit implements IDamageable {
       return { damageAmount: 0, wasKilled: false, wasBlocked: false, wasParried: false };
     }
 
-    if (this.type === "commander" && info.hitPoint) {
+    if ((this.type === "commander" || this.type === "captain") && info.hitPoint) {
       if (this.tryDodge(info.hitPoint)) {
         return { damageAmount: 0, wasKilled: false, wasBlocked: false, wasParried: false };
       }
@@ -460,6 +550,14 @@ export class EnemyUnit implements IDamageable {
       } else if (this.fsm.getState() !== "stunned") {
         this.fsm.changeState("stunned");
         this.stunTimer = 0.8;
+      }
+    } else if (this.type === "captain") {
+      // Captains barely flinch — only a quick 0.25s stagger so the player can
+      // still combo, but the boss never gets perma-locked into a stun chain.
+      const cur = this.fsm.getState();
+      if (cur !== "stunned" && cur !== "dodging") {
+        this.fsm.changeState("stunned");
+        this.stunTimer = 0.25;
       }
     } else {
       if (this.fsm.getState() !== "stunned") {
@@ -511,15 +609,39 @@ export class EnemyUnit implements IDamageable {
       lootData.rareLoot = true;
       lootData.upgradeModules = 1 + Math.floor(Math.random() * 3);
       lootData.credits = this.config.credits * 2;
+    } else if (this.type === "captain") {
+      lootData.rareLoot = true;
+      lootData.upgradeModules = 3 + Math.floor(Math.random() * 4);
+      lootData.credits = this.config.credits * 2;
+      lootData.isBossCaptain = this.isBossCaptain;
     }
 
     this.bus.emit(GameEvents.ENEMY_KILLED, lootData);
 
-    if (this.type === "commander") {
+    if (this.type === "commander" || this.type === "captain") {
       this.createCommanderDeathEffect();
     } else {
       this.createDeathEffect();
     }
+
+    // Captains: actively dispose orbiting projectiles + dome so they don't
+    // outlive the corpse and keep ticking damage.
+    if (this.type === "captain") {
+      for (const t of this.captainTrackers) {
+        if (!t.mesh.isDisposed()) try { t.mesh.dispose(); } catch {}
+        if (!t.trail.isDisposed()) try { t.trail.dispose(); } catch {}
+      }
+      this.captainTrackers = [];
+      if (this.captainDome && !this.captainDome.mesh.isDisposed()) {
+        try { this.captainDome.mesh.dispose(); } catch {}
+      }
+      this.captainDome = null;
+      if (this.captainSabre && !this.captainSabre.isDisposed()) {
+        try { this.captainSabre.dispose(); } catch {}
+        this.captainSabre = null;
+      }
+    }
+
     setTimeout(() => {
       if (this.auraMesh && !this.auraMesh.isDisposed()) {
         this.auraMesh.dispose();
@@ -704,6 +826,239 @@ export class EnemyUnit implements IDamageable {
     };
     animateExplosion();
   }
+
+  // ============================================================================
+  //                    Boss Captain — abilities mirror player
+  // ============================================================================
+
+  /** Deep-red pulsing aura around the captain (more menacing than the
+   *  commander's orange aura). */
+  private createCaptainAura(): void {
+    const scene = this.mesh.getScene();
+    this.auraMesh = BABYLON.MeshBuilder.CreateSphere("captainAura", { diameter: 5.5, segments: 12 }, scene);
+    this.auraMesh.parent = this.mesh;
+    this.auraMesh.position = BABYLON.Vector3.Zero();
+    const auraMat = new BABYLON.StandardMaterial("captainAuraMat", scene);
+    auraMat.emissiveColor = new BABYLON.Color3(1.0, 0.08, 0.12);
+    auraMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+    auraMat.alpha = 0.16;
+    auraMat.backFaceCulling = false;
+    this.auraMesh.material = auraMat;
+  }
+
+  /** Big red beam-sabre prop parented to the captain so it's visible at
+   *  rest and during the attack swing. */
+  private createCaptainSabre(): void {
+    const scene = this.mesh.getScene();
+    const blade = BABYLON.MeshBuilder.CreateCylinder("captainSabre", {
+      height: 3.0,
+      diameter: 0.22,
+      tessellation: 8,
+    }, scene);
+    const mat = new BABYLON.StandardMaterial("captainSabreMat", scene);
+    mat.emissiveColor = new BABYLON.Color3(1.0, 0.12, 0.18);
+    mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+    mat.disableLighting = true;
+    blade.material = mat;
+    blade.parent = this.mesh;
+    // Hold it on the right side, tilted slightly forward.
+    blade.position.set(0.65, 0.4, 0.6);
+    blade.rotation.set(0, 0, 0.25);
+    this.captainSabre = blade;
+  }
+
+  /** Wide red arc-slash visual + brief sabre swing animation. The actual
+   *  damage is the standard `attackDamage` already returned by updateAttack. */
+  private captainSabreSlashEffect(playerPos: BABYLON.Vector3): void {
+    const scene = this.mesh.getScene();
+    const origin = this.mesh.position.clone();
+    origin.y += 1.0;
+
+    const dir = playerPos.subtract(origin);
+    dir.y = 0;
+    if (dir.lengthSquared() < 0.001) return;
+    dir.normalize();
+
+    // Arc disc projected on the ground in front of the captain.
+    const arc = BABYLON.MeshBuilder.CreateDisc("captainSlashArc", {
+      radius: this.config.attackRange + 1.5,
+      tessellation: 24,
+    }, scene);
+    arc.rotation.x = Math.PI / 2;
+    arc.position = origin.clone();
+    arc.position.addInPlace(dir.scale(1.5));
+    const mat = new BABYLON.StandardMaterial("captainSlashMat", scene);
+    mat.emissiveColor = new BABYLON.Color3(1.0, 0.18, 0.18);
+    mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+    mat.alpha = 0.65;
+    mat.backFaceCulling = false;
+    arc.material = mat;
+
+    // Sabre swing — quick rotation around its parent.
+    if (this.captainSabre && !this.captainSabre.isDisposed()) {
+      const sabre = this.captainSabre;
+      const startZ = sabre.rotation.z;
+      let f = 0;
+      const swing = () => {
+        f++;
+        sabre.rotation.z = startZ + Math.sin(f * 0.4) * 1.4;
+        if (f < 8) requestAnimationFrame(swing);
+        else sabre.rotation.z = startZ;
+      };
+      swing();
+    }
+
+    let frame = 0;
+    const animate = () => {
+      frame++;
+      arc.scaling.setAll(1 + frame * 0.06);
+      mat.alpha = Math.max(0, 0.65 - frame * 0.07);
+      if (frame < 10) requestAnimationFrame(animate);
+      else {
+        arc.dispose();
+        try { mat.dispose(); } catch {}
+      }
+    };
+    animate();
+  }
+
+  /** Fire a homing red orb at the player. Lerps toward the player position
+   *  each frame in tickCaptainTrackers and applies damage on impact. */
+  private captainCastTracker(playerPos: BABYLON.Vector3): void {
+    const scene = this.mesh.getScene();
+    const start = this.mesh.position.clone();
+    start.y += 1.4;
+
+    const orb = BABYLON.MeshBuilder.CreateSphere("captainTracker", { diameter: 0.85, segments: 12 }, scene);
+    orb.position = start.clone();
+    const mat = new BABYLON.StandardMaterial("captainTrackerMat", scene);
+    mat.emissiveColor = new BABYLON.Color3(1.0, 0.18, 0.22);
+    mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+    mat.disableLighting = true;
+    orb.material = mat;
+
+    const trail = BABYLON.MeshBuilder.CreateSphere("captainTrackerTrail", { diameter: 1.4, segments: 10 }, scene);
+    trail.position = start.clone();
+    const tmat = new BABYLON.StandardMaterial("captainTrackerTrailMat", scene);
+    tmat.emissiveColor = new BABYLON.Color3(0.85, 0.05, 0.1);
+    tmat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+    tmat.alpha = 0.32;
+    tmat.backFaceCulling = false;
+    trail.material = tmat;
+    trail.parent = orb;
+    trail.position = BABYLON.Vector3.Zero();
+
+    const tracker: CaptainTracker = {
+      mesh: orb,
+      trail,
+      ttl: 3.5,
+      speed: 22,
+      damage: this.config.attackDamage * 0.9,
+      done: false,
+    };
+    this.captainTrackers.push(tracker);
+  }
+
+  private tickCaptainTrackers(dt: number, playerPos: BABYLON.Vector3): void {
+    if (this.captainTrackers.length === 0) return;
+    for (let i = this.captainTrackers.length - 1; i >= 0; i--) {
+      const t = this.captainTrackers[i];
+      t.ttl -= dt;
+      if (t.done || t.ttl <= 0) {
+        if (!t.mesh.isDisposed()) try { t.mesh.dispose(); } catch {}
+        this.captainTrackers.splice(i, 1);
+        continue;
+      }
+
+      const aim = playerPos.clone();
+      aim.y += 1.0;
+      const toTarget = aim.subtract(t.mesh.position);
+      const dist = toTarget.length();
+      if (dist < 1.4) {
+        // Impact!
+        this.pendingDamage += t.damage;
+        this.bus.emit("effect:hitImpact", {
+          position: t.mesh.position.clone(),
+          color: new BABYLON.Color3(1.0, 0.2, 0.25),
+          scale: 1.4,
+        });
+        t.done = true;
+        continue;
+      }
+      const step = Math.min(dist, t.speed * dt);
+      t.mesh.position.addInPlace(toTarget.normalize().scale(step));
+    }
+  }
+
+  /** Spawn an expanding red dome centered on the captain. After `duration`s
+   *  the dome detonates and applies AoE damage if the player is within. */
+  private captainCastDome(): void {
+    if (this.captainDome) return;
+    const scene = this.mesh.getScene();
+    const origin = this.mesh.position.clone();
+    const radius = 9.0;
+
+    const dome = BABYLON.MeshBuilder.CreateSphere("captainDome", { diameter: 1.5, segments: 16 }, scene);
+    dome.position = origin.clone();
+    const mat = new BABYLON.StandardMaterial("captainDomeMat", scene);
+    mat.emissiveColor = new BABYLON.Color3(1.0, 0.1, 0.15);
+    mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+    mat.alpha = 0.45;
+    mat.backFaceCulling = false;
+    dome.material = mat;
+
+    this.captainDome = {
+      mesh: dome,
+      origin,
+      age: 0,
+      duration: 0.55,
+      radius,
+      damage: this.config.attackDamage * 1.35,
+      fired: false,
+    };
+
+    // Telegraph ring on the ground so the player sees the danger zone early.
+    const ring = BABYLON.MeshBuilder.CreateTorus("captainDomeRing", { diameter: radius * 2, thickness: 0.18, tessellation: 32 }, scene);
+    ring.position = origin.clone();
+    ring.position.y = 0.1;
+    const rmat = new BABYLON.StandardMaterial("captainDomeRingMat", scene);
+    rmat.emissiveColor = new BABYLON.Color3(1.0, 0.15, 0.18);
+    rmat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+    rmat.disableLighting = true;
+    ring.material = rmat;
+    setTimeout(() => {
+      if (!ring.isDisposed()) try { ring.dispose(); } catch {}
+      try { rmat.dispose(); } catch {}
+    }, 700);
+  }
+
+  private tickCaptainDome(dt: number): void {
+    const d = this.captainDome;
+    if (!d) return;
+    d.age += dt;
+    const t = Math.min(1, d.age / d.duration);
+    d.mesh.scaling.setAll(1 + t * d.radius * 1.3);
+    const mat = d.mesh.material as BABYLON.StandardMaterial;
+    if (mat) mat.alpha = Math.max(0, 0.55 - t * 0.55);
+
+    if (!d.fired && t >= 1) {
+      d.fired = true;
+      // AoE damage check against the captain's last sampled player position.
+      const dist = BABYLON.Vector3.Distance(this.lastPlayerPos, d.origin);
+      if (dist <= d.radius) {
+        this.pendingDamage += d.damage;
+        this.bus.emit("effect:hitImpact", {
+          position: this.lastPlayerPos.clone(),
+          color: new BABYLON.Color3(1.0, 0.2, 0.25),
+          scale: 1.6,
+        });
+      }
+    }
+    if (d.age >= d.duration + 0.2) {
+      if (!d.mesh.isDisposed()) try { d.mesh.dispose(); } catch {}
+      this.captainDome = null;
+    }
+  }
 }
 
 export class EnemySystem {
@@ -724,8 +1079,8 @@ export class EnemySystem {
   }
 
   private createEnemyMesh(type: EnemyType, position: BABYLON.Vector3): BABYLON.Mesh {
-    // Commanders use humanoid models instead of robots
-    if (type === "commander") {
+    // Commanders + Captains use humanoid models instead of robots.
+    if (type === "commander" || type === "captain") {
       const captainPresets = [
         "HumanoidCaptainAlpha",
         "HumanoidCaptainBeta",
@@ -740,14 +1095,35 @@ export class EnemySystem {
         const root = humanoid.getRoot();
         root.position = position;
 
+        // Captains stand a touch taller than commanders.
+        const hitH = type === "captain" ? 4.6 : 4.0;
+        const hitR = type === "captain" ? 1.0 : 0.9;
         const hitbox = BABYLON.MeshBuilder.CreateCapsule(`enemyHit_${type}_${Date.now()}`, {
-          height: 4.0,
-          radius: 0.9,
+          height: hitH,
+          radius: hitR,
         }, this.scene);
         hitbox.isVisible = false;
         hitbox.position.copyFrom(position);
         root.parent = hitbox;
         root.position = BABYLON.Vector3.Zero();
+
+        // Captains: tint every visible material toward dark-red so they read
+        // instantly as the boss-class enemy. Other commanders keep their preset.
+        if (type === "captain") {
+          for (const m of root.getChildMeshes()) {
+            const mat = m.material as BABYLON.StandardMaterial | null;
+            if (mat) {
+              if (mat.diffuseColor) mat.diffuseColor = mat.diffuseColor.scale(0.55);
+              if (mat.emissiveColor) {
+                mat.emissiveColor = new BABYLON.Color3(
+                  Math.min(1, mat.emissiveColor.r * 0.6 + 0.45),
+                  mat.emissiveColor.g * 0.4,
+                  mat.emissiveColor.b * 0.4,
+                );
+              }
+            }
+          }
+        }
 
         return hitbox;
       }
@@ -760,6 +1136,9 @@ export class EnemySystem {
       insectoid: ["InsectoidStalker"],
       hybrid: ["HybridOmega", "HybridApex"],
       commander: ["CommanderOmega"],
+      // Fallback only — captains are normally built in the humanoid branch
+      // above and never reach this map.
+      captain: ["CommanderOmega"],
     };
 
     const variants = presetMap[type] || ["ScoutPrime"];
@@ -830,6 +1209,21 @@ export class EnemySystem {
     const enemy = new EnemyUnit(mesh, "commander", waveMultiplier);
     this.enemies.push(enemy);
     this.bus.emit(GameEvents.ENEMY_SPAWNED, { type: "commander", position });
+  }
+
+  /** Spawn the BossCaptain at a precise world position. Used by the boss
+   *  fortress (after its outer turrets fall) and by the Level-2 spawner.
+   *  When `isBossCaptain` is true the death payload includes a flag so
+   *  Game.tsx can announce the kill + advance the level. Captains DO NOT
+   *  count against `maxEnemies` so they can always spawn. */
+  spawnCaptain(position: BABYLON.Vector3, opts?: { isBossCaptain?: boolean; healthMultiplier?: number }): EnemyUnit {
+    const mesh = this.createEnemyMesh("captain", position);
+    const waveMultiplier = (1 + (this.waveNumber - 1) * 0.25) * (opts?.healthMultiplier ?? 1);
+    const enemy = new EnemyUnit(mesh, "captain", waveMultiplier);
+    enemy.isBossCaptain = !!opts?.isBossCaptain;
+    this.enemies.push(enemy);
+    this.bus.emit(GameEvents.ENEMY_SPAWNED, { type: "captain", position, isBossCaptain: enemy.isBossCaptain });
+    return enemy;
   }
 
   private selectEnemyType(): EnemyType {
@@ -909,5 +1303,19 @@ export class EnemySystem {
 
   getWaveNumber(): number {
     return this.waveNumber;
+  }
+
+  /** Force the wave counter forward (used when starting Level 2 to make
+   *  every spawn meaningfully tougher). Bumps spawn interval / max-enemy
+   *  cap the same way nextWave() does, but without re-emitting every
+   *  WAVE_STARTED tick along the way. */
+  jumpToWave(targetWave: number): void {
+    if (targetWave <= this.waveNumber) return;
+    while (this.waveNumber < targetWave) {
+      this.waveNumber++;
+      this.spawnInterval = Math.max(2000, this.spawnInterval - 200);
+      this.maxEnemies = Math.min(50, this.maxEnemies + 2);
+    }
+    this.bus.emit(GameEvents.WAVE_STARTED, { wave: this.waveNumber });
   }
 }

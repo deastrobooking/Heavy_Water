@@ -73,6 +73,9 @@ export class SkySystem {
   private secondsPerDay = 300;
   private weather: WeatherType = "clear";
   private paused = false;
+  /** Multiplicative RGB tint applied on top of the palette. (1,1,1) = neutral.
+   *  Used by LevelSystem to shift the world (e.g. red sky for Level 2). */
+  private levelTint: BABYLON.Color3 = new BABYLON.Color3(1, 1, 1);
 
   constructor(
     scene: BABYLON.Scene,
@@ -248,7 +251,8 @@ export class SkySystem {
 
   private applyTimeOfDay(): void {
     if (!this.skyMat) return;
-    const { palette, nightFactor } = this.getPalette();
+    const { palette: rawPalette, nightFactor } = this.getPalette();
+    const palette = this.applyLevelTint(rawPalette);
     const sunDir = this.getSunDirection();
     const overcast = this.weather === "clear" ? 0 : this.weather === "overcast" ? 0.7 : 1.0;
 
@@ -290,6 +294,34 @@ export class SkySystem {
     if (this.skyMesh && this.camera) {
       this.skyMesh.position.copyFrom(this.camera.position);
     }
+    this.applyTimeOfDay();
+  }
+
+  /** Apply a per-level multiplicative RGB tint over an existing palette. */
+  private applyLevelTint(p: SkyPalette): SkyPalette {
+    const t = this.levelTint;
+    if (t.r === 1 && t.g === 1 && t.b === 1) return p;
+    const mul = (c: BABYLON.Color3) => new BABYLON.Color3(
+      Math.min(1, c.r * t.r),
+      Math.min(1, c.g * t.g),
+      Math.min(1, c.b * t.b),
+    );
+    return {
+      zenith: mul(p.zenith),
+      horizon: mul(p.horizon),
+      sunDisc: mul(p.sunDisc),
+      sunLight: mul(p.sunLight),
+      ambient: mul(p.ambient),
+      ambientGround: mul(p.ambientGround),
+      fog: mul(p.fog),
+      sunIntensity: p.sunIntensity,
+      ambientIntensity: p.ambientIntensity,
+    };
+  }
+
+  /** Apply (or clear) the per-level RGB tint and re-render the sky. */
+  setLevelTint(tint: { r: number; g: number; b: number }): void {
+    this.levelTint = new BABYLON.Color3(tint.r, tint.g, tint.b);
     this.applyTimeOfDay();
   }
 
