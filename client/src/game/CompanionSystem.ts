@@ -368,6 +368,13 @@ export class CompanionSystem {
     return this.companions.length;
   }
 
+  /** True iff a companion built from the given preset is currently alive in
+   *  the active roster. Used by the respawn flow to know whether the starter
+   *  Spark Pup or the unlocked Robot Dragon needs to be re-issued. */
+  hasCompanionByPreset(presetName: string): boolean {
+    return this.companions.some(c => c.presetName === presetName);
+  }
+
   getUpgradeInfo(id: string, getGearCount: () => number, getCoreCount: () => number): CompanionUpgradeInfo | null {
     const c = this.companions.find(x => x.id === id);
     if (!c) return null;

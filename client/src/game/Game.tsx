@@ -164,6 +164,11 @@ export const Game: React.FC = () => {
     sabreSpin: boolean; sabreTwin: boolean; sabreGiant: boolean;
     autoLoot: boolean; roboDragon: boolean;
   }>({ sabreSpin: false, sabreTwin: false, sabreGiant: false, autoLoot: false, roboDragon: false });
+  // Mirror of `specialsOwned` for use inside long-lived bus.on closures
+  // (e.g. PLAYER_DIED) where the latest React state isn't directly visible.
+  // Kept in sync via a useEffect below.
+  const specialsOwnedRef = useRef(specialsOwned);
+  useEffect(() => { specialsOwnedRef.current = specialsOwned; }, [specialsOwned]);
   const [resourceCounts, setResourceCounts] = useState({ gears: 0, scrap: 0, cores: 0, circuits: 0, nanofiber: 0, bioEssence: 0 });
   const [partCounts, setPartCounts] = useState<Record<string, number>>({});
   const [labOpen, setLabOpen] = useState(false);
@@ -949,6 +954,25 @@ export const Game: React.FC = () => {
               if (snap.companions && snap.companions.length > 0) {
                 companionSystem.applyLoadedCompanions(snap.companions, player.getPosition());
               }
+              // Permanent-helper backfill: even if the save was captured at a
+              // moment when Spark Pup or the unlocked Robot Dragon were dead,
+              // we re-issue them on reload so "once unlocked = always with you"
+              // holds across sessions. We read the dragon flag straight off
+              // the snap (specialsOwnedRef is React state and won't have
+              // refreshed yet inside this load handler).
+              const dragonUnlockedSaved = !!snap.specialsOwned?.roboDragon;
+              const backfill: string[] = [];
+              if (!companionSystem.hasCompanionByPreset("SparkPup")) backfill.push("SparkPup");
+              if (dragonUnlockedSaved && !companionSystem.hasCompanionByPreset("RoboDragon")) {
+                backfill.push("RoboDragon");
+              }
+              if (backfill.length > 0) {
+                const needed = companionSystem.getCompanionCount() + backfill.length;
+                if (companionSystem.getMaxCompanions() < needed) companionSystem.setMaxCompanions(needed);
+                for (const preset of backfill) {
+                  companionSystem.addCompanion(preset, player.getPosition(), { allowDuplicate: true });
+                }
+              }
               // Re-push armor-mod boosts to WeaponsSystem after restoring the
               // player upgrade levels, so the player's saved damage / fire-rate
               // mods take effect immediately after a reload.
@@ -1025,17 +1049,34 @@ export const Game: React.FC = () => {
             // not (0,0,0) which can be inside a downtown building.
             const spawn = new BABYLON.Vector3(0, 2, -15);
             cur.respawn(spawn);
-            // Re-issue the starter Spark Pup if the player's helper roster is
-            // empty after death. The pup is free at game start, so losing her
-            // permanently to a single death felt like a hidden punishment —
-            // especially since she's the player's go-to combat helper before
-            // the Lab is built. allowDuplicate lets us bypass the "already
-            // collected" guard inside CompanionSystem.
+            // Restore the player's permanent helper roster after death. Two
+            // helpers should never be lost to a single death:
+            //   - Spark Pup: the free starter pet that ships with every run.
+            //   - Robot Dragon: a paid SPECIALS unlock that, once acquired,
+            //     should follow the player forever.
+            // Both are re-added with allowDuplicate so the "already collected"
+            // guard inside CompanionSystem doesn't silently block them, and
+            // the cap is grown to fit if needed (we never SHRINK it).
             const compSys = companionRef.current;
-            if (compSys && compSys.getCompanionCount() === 0) {
-              if (compSys.getMaxCompanions() < 1) compSys.setMaxCompanions(1);
-              const ok = compSys.addCompanion("SparkPup", spawn, { allowDuplicate: true });
-              if (ok) showMessage("SPARK PUP REJOINS YOU", 2200);
+            if (compSys) {
+              const dragonUnlocked = !!specialsOwnedRef.current.roboDragon;
+              const reviveList: { preset: string; banner: string }[] = [];
+              if (!compSys.hasCompanionByPreset("SparkPup")) {
+                reviveList.push({ preset: "SparkPup", banner: "SPARK PUP REJOINS YOU" });
+              }
+              if (dragonUnlocked && !compSys.hasCompanionByPreset("RoboDragon")) {
+                reviveList.push({ preset: "RoboDragon", banner: "ROBOT DRAGON RETURNS" });
+              }
+              if (reviveList.length > 0) {
+                const needed = compSys.getCompanionCount() + reviveList.length;
+                if (compSys.getMaxCompanions() < needed) compSys.setMaxCompanions(needed);
+                let delay = 200;
+                for (const r of reviveList) {
+                  const ok = compSys.addCompanion(r.preset, spawn, { allowDuplicate: true });
+                  if (ok) window.setTimeout(() => showMessage(r.banner, 2000), delay);
+                  delay += 900;
+                }
+              }
             }
             showMessage("RESPAWNED — YOUR PROGRESS IS SAFE", 2500);
           }, 3000);
