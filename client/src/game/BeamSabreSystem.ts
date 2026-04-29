@@ -452,8 +452,10 @@ export class BeamSabreSystem {
   ): void {
     const giantMul = this.sabre.hasGiantBlade ? 1.5 : 1.0;
     // Arc-shaped slash wave (crescent), built as a tube along a curved path.
-    // The arc opens backward in local space so the convex (bulging) front
-    // leads as the wave travels in +Z.
+    // The crescent's TIPS lead in +Z and the convex back bulges toward the
+    // player at -Z, so from the third-person camera it reads like a proper
+    // anime slash wave (")"-shaped) instead of a horseshoe ("(") opening
+    // back at the player.
     const arcRadius = Math.max(2, this.sabre.energyWaveWidth * 0.7) * opts.sizeMul * giantMul;
     const arcSpan = Math.PI * 0.85;
     const segments = 18;
@@ -464,7 +466,10 @@ export class BeamSabreSystem {
       arcPath.push(new BABYLON.Vector3(
         Math.sin(angle) * arcRadius,
         0,
-        -(arcRadius - Math.cos(angle) * arcRadius),
+        // Flipped sign vs the original: tips (large |angle|) sit forward
+        // at +z, center sits at z=0, so the wave's convex back faces the
+        // player as it travels in +Z.
+        (arcRadius - Math.cos(angle) * arcRadius),
       ));
     }
     const baseTubeRadius = this.sabre.level >= 4 ? 0.28 : 0.22;
