@@ -1346,6 +1346,11 @@ export class PlayerController implements IDamageable {
     this.stats.armor = Math.min(this.stats.maxArmor, this.stats.armor + amount);
   }
 
+  /** Real wallet read used by ShopSystem. Credits live here, not on inventory. */
+  getCredits(): number {
+    return this.stats.credits;
+  }
+
   addCredits(amount: number): void {
     this.stats.credits += amount;
   }

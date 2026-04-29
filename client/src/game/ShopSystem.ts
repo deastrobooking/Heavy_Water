@@ -42,18 +42,38 @@ const ARMOR_SHOP_ITEMS: ItemDefinition[] = [
 
 const GENERAL_SHOP_ITEMS: ItemDefinition[] = [
   { id: "health_pack", name: "Health Pack", type: ItemType.Consumable, rarity: ItemRarity.Common, maxStack: 10, value: 25, description: "Restores 50 health", stats: { healAmount: 50 } },
+  // Universal upgrade materials. Previously these only dropped from enemies,
+  // which left players with surplus credits and no way to spend them on
+  // upgrades. Stocking them here turns the General Shop into the credit→material
+  // exchange the upgrade economy needs.
+  { id: "gear", name: "Gear", type: ItemType.Material, rarity: ItemRarity.Common, maxStack: 999, value: 8, description: "Universal upgrade currency salvaged from machines" },
   { id: "scrap_metal", name: "Scrap Metal", type: ItemType.Material, rarity: ItemRarity.Common, maxStack: 99, value: 5, description: "Salvaged metal fragments" },
   { id: "energy_core", name: "Energy Core", type: ItemType.Material, rarity: ItemRarity.Uncommon, maxStack: 50, value: 25, description: "A compact power source" },
   { id: "circuit_board", name: "Circuit Board", type: ItemType.Material, rarity: ItemRarity.Uncommon, maxStack: 50, value: 30, description: "Advanced electronics component" },
+  { id: "nano_fiber", name: "Nano Fiber", type: ItemType.Material, rarity: ItemRarity.Uncommon, maxStack: 50, value: 20, description: "Ultra-strong synthetic fibers (also sold by Armor Shops)" },
   { id: "bio_sample", name: "Bio Sample", type: ItemType.Material, rarity: ItemRarity.Rare, maxStack: 30, value: 40, description: "Organic compound for medical crafting" },
   { id: "xp_chip", name: "XP Chip", type: ItemType.Material, rarity: ItemRarity.Uncommon, maxStack: 50, value: 15, description: "Grants bonus experience", stats: { xpAmount: 25 } },
   { id: "crystal_shard", name: "Crystal Shard", type: ItemType.Material, rarity: ItemRarity.Rare, maxStack: 30, value: 50, description: "Resonant crystal fragment" },
 ];
 
+// Weapon parts power weapon upgrades and were previously loot-only — now sold
+// at Weapon Shops so credits can be converted into the part needed for the
+// next tier of any specific weapon.
+const WEAPON_PART_SHOP_ITEMS: ItemDefinition[] = [
+  { id: "weapon_part_pistol",  name: "Pistol Part",  type: ItemType.Material, rarity: ItemRarity.Uncommon, maxStack: 99, value: 18, description: "Salvaged plasma pistol component" },
+  { id: "weapon_part_rifle",   name: "Rifle Part",   type: ItemType.Material, rarity: ItemRarity.Uncommon, maxStack: 99, value: 22, description: "Salvaged pulse rifle component" },
+  { id: "weapon_part_shotgun", name: "Shotgun Part", type: ItemType.Material, rarity: ItemRarity.Uncommon, maxStack: 99, value: 22, description: "Salvaged scatter blaster component" },
+  { id: "weapon_part_rocket",  name: "Rocket Part",  type: ItemType.Material, rarity: ItemRarity.Rare,     maxStack: 50, value: 35, description: "Salvaged nova launcher / hunter-missile component" },
+  { id: "weapon_part_laser",   name: "Laser Part",   type: ItemType.Material, rarity: ItemRarity.Rare,     maxStack: 50, value: 35, description: "Salvaged photon beam component" },
+  { id: "weapon_part_grenade", name: "Grenade Part", type: ItemType.Material, rarity: ItemRarity.Rare,     maxStack: 50, value: 32, description: "Salvaged fusion grenade component" },
+];
+
 function getShopItemsForType(type: ShopType): ShopItem[] {
   let items: ItemDefinition[];
   switch (type) {
-    case "weapon": items = WEAPON_SHOP_ITEMS; break;
+    // Weapon shops now also stock the per-weapon parts so players can convert
+    // surplus credits into the upgrade material their loadout actually needs.
+    case "weapon": items = [...WEAPON_SHOP_ITEMS, ...WEAPON_PART_SHOP_ITEMS]; break;
     case "armor": items = ARMOR_SHOP_ITEMS; break;
     case "general": items = GENERAL_SHOP_ITEMS; break;
   }
@@ -86,6 +106,17 @@ export class ShopSystem {
   private onShopClose: (() => void) | null = null;
   private onTransactionComplete: ((message: string) => void) | null = null;
 
+  // Credits accessor. Credits live on `PlayerController.stats.credits`, NOT in
+  // the inventory grid — earlier `inventory.getItemCount("credits")` calls
+  // always returned 0, which made every shop purchase fail with "Not enough
+  // credits!" even when the player's wallet had thousands. Likewise, sells
+  // were dropping credits into a phantom inventory slot the player could
+  // never spend. This accessor is wired from Game.tsx initializeGame to the
+  // real PlayerController so buy/sell actually moves the right currency.
+  private getCreditsFn: (() => number) | null = null;
+  private spendCreditsFn: ((amount: number) => boolean) | null = null;
+  private addCreditsFn: ((amount: number) => void) | null = null;
+
   constructor(scene: BABYLON.Scene, camera: BABYLON.FreeCamera, inventory: InventorySystem) {
     this.scene = scene;
     this.camera = camera;
@@ -104,6 +135,39 @@ export class ShopSystem {
 
   setOnTransactionComplete(cb: (message: string) => void): void {
     this.onTransactionComplete = cb;
+  }
+
+  /** Bind the shop to the real player credit balance. Without this the shop
+   *  silently treats the player as having 0 credits. */
+  setCreditsAccessor(
+    get: () => number,
+    spend: (amount: number) => boolean,
+    add: (amount: number) => void,
+  ): void {
+    this.getCreditsFn = get;
+    this.spendCreditsFn = spend;
+    this.addCreditsFn = add;
+  }
+
+  private getPlayerCredits(): number {
+    return this.getCreditsFn ? this.getCreditsFn() : this.inventory.getItemCount("credits");
+  }
+
+  private trySpendCredits(amount: number): boolean {
+    if (this.spendCreditsFn) return this.spendCreditsFn(amount);
+    // Legacy fallback only — pre-accessor behavior.
+    if (this.inventory.getItemCount("credits") < amount) return false;
+    this.inventory.removeItem("credits", amount);
+    return true;
+  }
+
+  private grantCredits(amount: number): void {
+    if (this.addCreditsFn) { this.addCreditsFn(amount); return; }
+    const creditsDef = ITEM_DEFINITIONS["credits"] ?? {
+      id: "credits", name: "Credits", type: ItemType.Currency,
+      rarity: ItemRarity.Common, maxStack: 9999, value: 1, description: "Universal currency",
+    };
+    this.inventory.addItem(creditsDef, amount);
   }
 
   private setupControls(): void {
@@ -298,7 +362,7 @@ export class ShopSystem {
     }
 
     const totalCost = shopItem.buyPrice * quantity;
-    const credits = this.inventory.getItemCount("credits");
+    const credits = this.getPlayerCredits();
     if (credits < totalCost) {
       this.bus.emit(GameEvents.UI_MESSAGE, `Not enough credits! Need ${totalCost}, have ${credits}`);
       return false;
@@ -309,7 +373,12 @@ export class ShopSystem {
       return false;
     }
 
-    this.inventory.removeItem("credits", totalCost);
+    if (!this.trySpendCredits(totalCost)) {
+      // Defensive — getPlayerCredits already cleared the gate, so this should
+      // only fire if the player's wallet was drained between check and spend.
+      this.bus.emit(GameEvents.UI_MESSAGE, "Credit transfer failed");
+      return false;
+    }
 
     const itemDef = ITEM_DEFINITIONS[shopItem.item.id] ?? CRAFTING_MATERIALS[shopItem.item.id] ?? shopItem.item;
     this.inventory.addItem(itemDef, quantity);
@@ -353,11 +422,11 @@ export class ShopSystem {
 
     this.inventory.removeItem(inventoryItemId, quantity);
 
-    const creditsDef = ITEM_DEFINITIONS["credits"] ?? {
-      id: "credits", name: "Credits", type: ItemType.Currency,
-      rarity: ItemRarity.Common, maxStack: 9999, value: 1, description: "Universal currency",
-    };
-    this.inventory.addItem(creditsDef, sellPrice);
+    // Route the proceeds to the player's real wallet (PlayerController.stats.credits)
+    // so the credits actually appear in the HUD and can be spent — the previous
+    // `inventory.addItem(creditsDef, sellPrice)` path piled them into a phantom
+    // inventory slot that the player could never touch.
+    this.grantCredits(sellPrice);
 
     if (shopItem) {
       shopItem.stock = Math.min(shopItem.stock + quantity, shopItem.maxStock);

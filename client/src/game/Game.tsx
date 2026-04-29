@@ -8,6 +8,7 @@ import { WeaponsSystem, Weapon } from "./WeaponsSystem";
 import { EnemySystem } from "./EnemySystem";
 import { AerialEnemySystem } from "./AerialEnemySystem";
 import { EnemyHealthBarSystem, EnemyLike } from "./EnemyHealthBarSystem";
+import { FriendlyNPCSystem } from "./FriendlyNPCSystem";
 import { GamepadInput } from "./GamepadInput";
 import { ChestSystem, Loot } from "./ChestSystem";
 import { CombatSystem } from "./CombatSystem";
@@ -87,6 +88,13 @@ export const Game: React.FC = () => {
   const enemySystemRef = useRef<EnemySystem | null>(null);
   const aerialEnemyRef = useRef<AerialEnemySystem | null>(null);
   const enemyHealthBarsRef = useRef<EnemyHealthBarSystem | null>(null);
+  const friendlyNPCsRef = useRef<FriendlyNPCSystem | null>(null);
+  // Mirror modal-open React state into refs so systems wired during the
+  // single mount-time `initializeGame` (which captures stale state) can poll
+  // the live values from their per-frame closures.
+  const upgradeMenuOpenRef = useRef(false);
+  const labOpenRef = useRef(false);
+  const gardenOpenRef = useRef(false);
   const gamepadRef = useRef<GamepadInput | null>(null);
   const chestSystemRef = useRef<ChestSystem | null>(null);
   const combatSystemRef = useRef<CombatSystem | null>(null);
@@ -416,6 +424,15 @@ export const Game: React.FC = () => {
 
         const shopSystem = new ShopSystem(scene, engine.getCamera(), inventory);
         shopRef.current = shopSystem;
+        // Bind the shop's currency to the real player wallet. Credits live on
+        // PlayerController.stats.credits — without this accessor the shop
+        // looks at `inventory.getItemCount("credits")` (always 0) and every
+        // purchase silently fails with "Not enough credits!".
+        shopSystem.setCreditsAccessor(
+          () => player.getCredits(),
+          (n) => player.spendCredits(n),
+          (n) => player.addCredits(n),
+        );
 
         shopSystem.setOnShopOpen((shop) => {
           setShopOpen(true);
@@ -615,6 +632,25 @@ export const Game: React.FC = () => {
           return ground.concat(aerial).concat(baseUnits);
         });
         enemyHealthBarsRef.current = enemyHealthBars;
+
+        // Brightly-coloured friendly NPCs scattered around spawn — pop-up
+        // dialogue bubbles introduce the major systems (combat, shops, helper
+        // bots, rocket skates, elementals, biome dangers).
+        const friendlyNPCs = new FriendlyNPCSystem(scene, engine.getCamera());
+        friendlyNPCs.setPlayerPositionProvider(() => player.getPosition());
+        friendlyNPCs.setShopOpenProvider(() => shopRef.current?.isOpen() ?? false);
+        // Defer to other modals too — lab, garden, upgrade menu, base UI all
+        // own KeyE / interaction. Without this gate, pressing E inside any of
+        // those would also advance NPC dialogue in the background.
+        friendlyNPCs.setInputBlockedProvider(() => {
+          if (labOpenRef.current) return true;
+          if (gardenOpenRef.current) return true;
+          if (upgradeMenuOpenRef.current) return true;
+          if (gardenRef.current?.isGardenOpenCheck()) return true;
+          return false;
+        });
+        friendlyNPCs.spawnDefaults();
+        friendlyNPCsRef.current = friendlyNPCs;
 
         const gamepad = new GamepadInput(engine.getCamera());
         gamepad.onConnectionChange((connected, padId) => {
@@ -1380,6 +1416,7 @@ export const Game: React.FC = () => {
     if (miningRef.current) { try { miningRef.current.dispose(); } catch {} miningRef.current = null; }
     if (enemyBaseRef.current) { try { enemyBaseRef.current.dispose(); } catch {} enemyBaseRef.current = null; }
     if (enemyHealthBarsRef.current) { try { enemyHealthBarsRef.current.dispose(); } catch {} enemyHealthBarsRef.current = null; }
+    if (friendlyNPCsRef.current) { try { friendlyNPCsRef.current.dispose(); } catch {} friendlyNPCsRef.current = null; }
     if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} gamepadRef.current = null; }
     if (aerialEnemyRef.current) { try { aerialEnemyRef.current.dispose(); } catch {} aerialEnemyRef.current = null; }
     // CRITICAL: these systems also subscribe to EventBus / hold scene state.
@@ -1855,6 +1892,12 @@ export const Game: React.FC = () => {
     };
   }, [gamePhase, upgradeMenuOpen, labOpen, gardenOpen, showMessage]);
 
+  // Keep modal-open refs in sync with their React state so non-React systems
+  // (e.g. FriendlyNPCSystem) can poll the live values without re-binding.
+  useEffect(() => { upgradeMenuOpenRef.current = upgradeMenuOpen; }, [upgradeMenuOpen]);
+  useEffect(() => { labOpenRef.current = labOpen; }, [labOpen]);
+  useEffect(() => { gardenOpenRef.current = gardenOpen; }, [gardenOpen]);
+
   useEffect(() => {
     if (gamePhase !== "playing") return;
     const codeToInput: Record<string, keyof import("./VehicleSystem").VehicleInputState> = {
@@ -1923,6 +1966,7 @@ export const Game: React.FC = () => {
       if (soundRef.current) soundRef.current.dispose();
       if (skyRef.current) skyRef.current.dispose();
       if (enemyHealthBarsRef.current) enemyHealthBarsRef.current.dispose();
+      if (friendlyNPCsRef.current) friendlyNPCsRef.current.dispose();
       if (aerialEnemyRef.current) aerialEnemyRef.current.dispose();
       if (gamepadRef.current) gamepadRef.current.dispose();
       if (multiplayerRef.current) multiplayerRef.current.dispose();
