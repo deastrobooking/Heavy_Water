@@ -46,11 +46,22 @@ export interface PlayerUpgradeInfo extends PlayerUpgradeDef {
 }
 
 export const PLAYER_UPGRADES: PlayerUpgradeDef[] = [
-  { id: "maxHealth",         name: "Max Health",      description: "Increase total health pool",     baseAmount:  25, baseCost: 200, costGrowth: 0.6, maxLevel: 10 },
-  { id: "maxArmor",          name: "Max Armor",       description: "Increase armor capacity (70% absorb)", baseAmount: 15, baseCost: 200, costGrowth: 0.6, maxLevel: 10 },
-  { id: "maxShield",         name: "Max Shield",      description: "Increase recharging shield pool",baseAmount:  20, baseCost: 250, costGrowth: 0.6, maxLevel: 10 },
+  // Core defensive stats — bumped from level 10 → 20 so endgame players can
+  // keep investing past the previous wall.
+  { id: "maxHealth",         name: "Max Health",      description: "Increase total health pool",     baseAmount:  25, baseCost: 200, costGrowth: 0.6, maxLevel: 20 },
+  { id: "maxArmor",          name: "Max Armor",       description: "Increase armor capacity (70% absorb)", baseAmount: 15, baseCost: 200, costGrowth: 0.6, maxLevel: 20 },
+  { id: "maxShield",         name: "Max Shield",      description: "Increase recharging shield pool",baseAmount:  20, baseCost: 250, costGrowth: 0.6, maxLevel: 20 },
   { id: "shieldRegenRate",   name: "Shield Regen",    description: "Faster shield restore per second",baseAmount:  5, baseCost: 300, costGrowth: 0.5, maxLevel:  8 },
   { id: "shieldRegenDelay",  name: "Recharge Speed",  description: "Less delay before shield regenerates", baseAmount: -0.3, baseCost: 400, costGrowth: 0.5, maxLevel: 5 },
+
+  // ---- Armor Mods: special suit modules that boost weapons + survivability.
+  // Stored on `playerUpgradeLevels` like the others, but read out via
+  // `getPlayerBoosts()` which WeaponsSystem queries for damage / fire-rate
+  // multipliers, and applied directly to incoming damage in takeDamage().
+  { id: "damageBoost",       name: "Armor Mod: Power Core",   description: "+5% weapon damage per level (caps at +50%)",       baseAmount: 0.05, baseCost: 350, costGrowth: 0.55, maxLevel: 10 },
+  { id: "fireRateBoost",     name: "Armor Mod: Pulse Driver", description: "+4% fire rate per level (caps at +40%)",            baseAmount: 0.04, baseCost: 350, costGrowth: 0.55, maxLevel: 10 },
+  { id: "damageReduction",   name: "Armor Mod: Aegis Plating",description: "-3% incoming damage per level (caps at -30%)",     baseAmount: 0.03, baseCost: 400, costGrowth: 0.55, maxLevel: 10 },
+  { id: "staminaBoost",      name: "Armor Mod: Kinetic Cells",description: "+15 max stamina per level (caps at +75)",          baseAmount: 15,   baseCost: 250, costGrowth: 0.5,  maxLevel: 5  },
 ];
 
 function upgradeCost(def: PlayerUpgradeDef, level: number): number {
@@ -73,8 +84,11 @@ export class PlayerController implements IDamageable {
   private wallNormal: BABYLON.Vector3 = new BABYLON.Vector3(0, 0, 0); // unit vector pointing away from the last wall hit
   private wallJumpLockoutTimer: number = 0; // brief lockout after a wall-jump so we don't immediately re-stick
 
-  private walkSpeed: number = 0.3;
-  private sprintSpeed: number = 0.55;
+  // Slightly bumped from 0.3 / 0.55 to give the player a snappier feel.
+  // ~13% faster walk, ~13% faster sprint — small enough to keep level
+  // pacing intact, large enough to be felt within seconds.
+  private walkSpeed: number = 0.34;
+  private sprintSpeed: number = 0.62;
   private jumpForce: number = 0.5;
   private gravity: number = 0.02;
   private groundY: number = 1;
@@ -101,7 +115,10 @@ export class PlayerController implements IDamageable {
   // long-distance traversal.
   private sprintHoldTime: number = 0;
   private isRocketSkating: boolean = false;
-  private rocketSkateThreshold: number = 2.0;
+  // Lowered from 2.0 → 1.2 so players don't have to sprint forever to engage.
+  // Even short sprint bursts now light up the skates within ~1.2 s of holding
+  // shift while moving.
+  private rocketSkateThreshold: number = 1.2;
   private rocketSkateSpeed: number = 1.0;
 
   private isDodging: boolean = false;
@@ -673,15 +690,20 @@ export class PlayerController implements IDamageable {
         }
       }
     } else {
-      // Sprint released (or stamina gone, or stopped moving): stow skates.
-      if (this.isRocketSkating) {
+      // Sprint released (or stamina gone, or stopped moving). We DON'T zero
+      // the charge timer instantly — a brief grace period (~0.4 s) lets the
+      // timer survive small interruptions (turning, hitting a curb, weapon
+      // tap) so the player doesn't have to hold shift perfectly for the full
+      // threshold window. After the grace expires, the timer decays to 0 and
+      // any active skate state is stowed.
+      this.sprintHoldTime = Math.max(0, this.sprintHoldTime - dt * 2.5);
+      if (this.sprintHoldTime <= 0 && this.isRocketSkating) {
         this.bus.emit(GameEvents.UI_MESSAGE, {
           text: "Rocket Skates Stowed",
           duration: 1.0,
         });
+        this.isRocketSkating = false;
       }
-      this.sprintHoldTime = 0;
-      this.isRocketSkating = false;
     }
 
     if (this.staminaRegenDelay <= 0 && this.stats.stamina < this.stats.maxStamina) {
@@ -1130,6 +1152,15 @@ export class PlayerController implements IDamageable {
       amount *= (1 - resistance.resistancePercent);
     }
 
+    // Armor Mod: Aegis Plating — flat percent damage reduction applied
+    // before shield/armor absorption so it stacks multiplicatively with
+    // the existing 70%-armor-absorb pipeline. Capped at 30% inside
+    // getPlayerBoosts() to keep the player from going invincible.
+    const drLvl = this.playerUpgradeLevels["damageReduction"] ?? 0;
+    if (drLvl > 0) {
+      amount *= (1 - Math.min(0.30, 0.03 * drLvl));
+    }
+
     this.shieldRegenCooldown = this.stats.shieldRegenDelay;
 
     if (this.stats.shield > 0 && amount > 0) {
@@ -1257,6 +1288,13 @@ export class PlayerController implements IDamageable {
       case "maxShield": return 75;
       case "shieldRegenRate": return 30;
       case "shieldRegenDelay": return 1.2;
+      // Armor-mod baselines: damage and fire-rate boosts are pure
+      // multipliers added on top of 1.0; damage reduction reduces incoming
+      // damage; stamina boost stacks on top of the default 100 max.
+      case "damageBoost": return 0;
+      case "fireRateBoost": return 0;
+      case "damageReduction": return 0;
+      case "staminaBoost": return 0;
       default: return 0;
     }
   }
@@ -1283,7 +1321,43 @@ export class PlayerController implements IDamageable {
       case "shieldRegenDelay":
         this.stats.shieldRegenDelay = Math.max(0.5, value);
         break;
+      case "staminaBoost": {
+        // staminaBoost is +15 per level — `value` is the cumulative bonus
+        // (baseAmount * level), so the new cap is (100 + value). Top up the
+        // current stamina pool by the *delta* in cap so each level adds 15
+        // (not the cumulative total) when bought, and so initial recompute
+        // on load doesn't over-heal a freshly-spawned player.
+        const newMax = 100 + value;
+        const delta = Math.max(0, newMax - this.stats.maxStamina);
+        this.stats.maxStamina = newMax;
+        if (delta > 0) {
+          this.stats.stamina = Math.min(newMax, this.stats.stamina + delta);
+        } else if (this.stats.stamina > newMax) {
+          this.stats.stamina = newMax;
+        }
+        break;
+      }
+      // damageBoost / fireRateBoost / damageReduction don't write to a stat
+      // field — they're consumed via getPlayerBoosts() / takeDamage(). No-op.
+      case "damageBoost":
+      case "fireRateBoost":
+      case "damageReduction":
+        break;
     }
+  }
+
+  /** Snapshot of the player's armor-mod multipliers for WeaponsSystem to
+   *  consume. damageMul / fireRateMul are >= 1; damageReduction is in [0, 0.3]
+   *  and is applied directly inside takeDamage(). */
+  getPlayerBoosts(): { damageMul: number; fireRateMul: number; damageReduction: number } {
+    const dmgLvl = this.playerUpgradeLevels["damageBoost"] ?? 0;
+    const frLvl = this.playerUpgradeLevels["fireRateBoost"] ?? 0;
+    const drLvl = this.playerUpgradeLevels["damageReduction"] ?? 0;
+    return {
+      damageMul: 1 + 0.05 * dmgLvl,
+      fireRateMul: 1 + 0.04 * frLvl,
+      damageReduction: Math.min(0.30, 0.03 * drLvl),
+    };
   }
 
   private recomputeUpgradeStats(): void {

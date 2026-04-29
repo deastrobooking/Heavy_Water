@@ -77,7 +77,10 @@ export class BabylonEngine {
     camera.setTarget(new BABYLON.Vector3(300, 10, 100));
     camera.attachControl(this.canvas, true);
     camera.speed = 0;
-    camera.angularSensibility = 2000;
+    // angularSensibility is INVERSE — larger numbers = LESS sensitive.
+    // Bumped from 2000 → 2300 (~15% less sensitive) per player request so
+    // aiming feels less twitchy without making the camera sluggish.
+    camera.angularSensibility = 2300;
     camera.keysUp = [];
     camera.keysDown = [];
     camera.keysLeft = [];

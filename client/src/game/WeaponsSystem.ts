@@ -98,6 +98,11 @@ export class WeaponsSystem {
   private weapons: Map<WeaponType, Weapon> = new Map();
   private currentWeapon: WeaponType = "pistol";
   private vehicleMode: boolean = false;
+  // Player armor-mod boosts. Updated by Game.tsx whenever PLAYER_UPGRADED
+  // fires (and once on initial load). Stack multiplicatively with the
+  // vehicle bonuses inside fire() / createProjectile().
+  private playerDamageMul: number = 1;
+  private playerFireRateMul: number = 1;
   private projectiles: Projectile[] = [];
   private lastFireTime: number = 0;
   private isFiring: boolean = false;
@@ -211,11 +216,23 @@ export class WeaponsSystem {
     this.vehicleMode = active;
   }
 
+  /** Receives the player's armor-mod boosts. damageMul / fireRateMul are
+   *  >= 1; values <= 0 are ignored to avoid division-by-zero / negative
+   *  damage bugs. Called by Game.tsx whenever the player buys a Power Core
+   *  or Pulse Driver upgrade (and once on initial load). */
+  setPlayerBoosts(boosts: { damageMul: number; fireRateMul: number }): void {
+    if (boosts.damageMul > 0) this.playerDamageMul = boosts.damageMul;
+    if (boosts.fireRateMul > 0) this.playerFireRateMul = boosts.fireRateMul;
+  }
+
   private fire(): void {
     const weapon = this.weapons.get(this.currentWeapon);
     if (!weapon) return;
 
-    const fireRateMul = this.vehicleMode ? 1 / 1.25 : 1; // 25% faster cycle in vehicle
+    // Effective cooldown shrinks with both vehicle mode AND the player's
+    // Pulse-Driver armor mod. Both are applied as DIVISORS so the cycle
+    // gets faster as either grows.
+    const fireRateMul = (this.vehicleMode ? 1 / 1.25 : 1) / Math.max(0.1, this.playerFireRateMul);
     const now = Date.now();
     if (now - this.lastFireTime < weapon.fireRate * fireRateMul) return;
 
@@ -241,8 +258,10 @@ export class WeaponsSystem {
     const direction = forward.add(new BABYLON.Vector3(spreadX, spreadY, 0)).normalize();
 
     // Vehicle amplification: 1.5x size, damage, explosion, and 1.25x speed.
+    // Player Power-Core armor mod multiplies damage on top of the vehicle
+    // bonus so a fully-modded player in a vehicle hits hardest.
     const sizeMul = this.vehicleMode ? 1.5 : 1;
-    const dmgMul = this.vehicleMode ? 1.5 : 1;
+    const dmgMul = (this.vehicleMode ? 1.5 : 1) * this.playerDamageMul;
     const speedMul = this.vehicleMode ? 1.25 : 1;
 
     let projectileMesh: BABYLON.Mesh;

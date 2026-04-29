@@ -45,6 +45,12 @@ const formatUpgradeValue = (id: string, value: number): string => {
   switch (id) {
     case "shieldRegenRate":  return `${value.toFixed(0)}/s`;
     case "shieldRegenDelay": return `${value.toFixed(1)}s`;
+    // Armor-mod upgrades store fractional multipliers / reductions — format
+    // them as percent so the player can actually see the boost.
+    case "damageBoost":      return `+${Math.round(value * 100)}%`;
+    case "fireRateBoost":    return `+${Math.round(value * 100)}%`;
+    case "damageReduction":  return `-${Math.round(value * 100)}%`;
+    case "staminaBoost":     return `+${value.toFixed(0)}`;
     default:                  return value.toFixed(0);
   }
 };

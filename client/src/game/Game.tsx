@@ -949,6 +949,10 @@ export const Game: React.FC = () => {
               if (snap.companions && snap.companions.length > 0) {
                 companionSystem.applyLoadedCompanions(snap.companions, player.getPosition());
               }
+              // Re-push armor-mod boosts to WeaponsSystem after restoring the
+              // player upgrade levels, so the player's saved damage / fire-rate
+              // mods take effect immediately after a reload.
+              weapons.setPlayerBoosts(player.getPlayerBoosts());
               // Restore world-level progression. For L2, applyLoadedState
               // re-emits LEVEL_STARTED, which our listener uses to swap
               // banner/objective, tint the sky, seed the second fortress,
@@ -979,6 +983,12 @@ export const Game: React.FC = () => {
 
         bus.on(GameEvents.PLAYER_LEVEL_UP, () => { void doSaveProgress(); });
         bus.on(GameEvents.WEAPON_UPGRADED, () => { void doSaveProgress(); });
+        // Push the player's armor-mod boosts to WeaponsSystem any time the
+        // player buys an upgrade. Save the new state too.
+        bus.on(GameEvents.PLAYER_UPGRADED, () => {
+          weapons.setPlayerBoosts(player.getPlayerBoosts());
+          void doSaveProgress();
+        });
         bus.on(GameEvents.CREATURE_CAPTURED, () => { void doSaveProgress(); });
         // Helper-bot roster + helper-bot upgrades must persist or paid-for
         // upgrades evaporate on the next death.

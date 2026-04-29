@@ -15,7 +15,7 @@ Heavy Water is a 3D futuristic sci-fi action game developed with Babylon.js, set
 The game uses an EventBus for decoupled communication and a generic StateMachine for entity behaviors. A unified DamageSystem handles combat calculations. Babylon.js v8.x provides WebGL rendering with a cell-shaded anime aesthetic, including ink outlines, bloom, chromatic aberration, and FXAA. The frontend is built with React, TypeScript, and Vite.
 
 ### Player and Character Systems
-PlayerController manages humanoid characters with complex state machines for movement, combat, and a triple-jump flight system with free-flight. Camera supports first-person and third-person views. The HumanoidCharacter system enables procedural generation, modular body parts, and customization. An AnimationSystem provides procedural, multi-part animations. The CharacterEditor allows player customization. Shield, stamina, and cooldown timers are persistent. A Boost Dash provides i-frames and a short burst of speed, with specific integration for a "dash → slash" combo. Rocket Skates provide sustained high-speed ground traversal.
+PlayerController manages humanoid characters with complex state machines for movement, combat, and a triple-jump flight system with free-flight. Walk / sprint speeds are tuned at **0.34 / 0.62** (slightly bumped for snappier feel). Camera supports first-person and third-person views; aim sensitivity is set via `camera.angularSensibility = 2300` on `BabylonEngine.ts` (15% less twitchy than the previous 2000 default — note `angularSensibility` is INVERSE: bigger = less sensitive). The HumanoidCharacter system enables procedural generation, modular body parts, and customization. An AnimationSystem provides procedural, multi-part animations. The CharacterEditor allows player customization. Shield, stamina, and cooldown timers are persistent. A Boost Dash provides i-frames and a short burst of speed, with specific integration for a "dash → slash" combo. **Rocket Skates** engage after **1.2 s** of sustained on-foot sprinting (lowered from 2.0 s) and use a 0.4-s grace decay so brief sprint interruptions (turning, hitting a curb, weapon tap) no longer reset the charge timer.
 
 ### Robot and Armor Systems
 The ArmorMaterialFactory creates reusable materials. RobotArmorParts provides a data-driven registry of parametric armor parts, equipped to humanoid rigs by the RobotArmorSystem.
@@ -40,6 +40,15 @@ The PickupSystem spawns physical glowing world meshes from defeated enemies with
 
 ### Upgrades and Progression
 The WeaponsSystem implements per-weapon level progression. The CompanionSystem manages companion upgrades, including weapon tiers. The in-game UpgradeMenu features PLAYER, WEAPONS, ROBOTS, and SPECIALS tabs for comprehensive progression.
+
+**Player upgrades** (defined in `PLAYER_UPGRADES` on `PlayerController.ts`) cover both core defensive stats and a second tier of "Armor Mods":
+- **Core stats** — `maxHealth`, `maxArmor`, `maxShield` are upgradeable to **level 20** (was 10), `shieldRegenRate` to 8, `shieldRegenDelay` to 5.
+- **Armor Mods** — special suit modules that boost weapons + survivability:
+  - **Power Core** (`damageBoost`, max 10): +5% weapon damage per level
+  - **Pulse Driver** (`fireRateBoost`, max 10): +4% fire rate per level
+  - **Aegis Plating** (`damageReduction`, max 10): -3% incoming damage per level (capped at 30%)
+  - **Kinetic Cells** (`staminaBoost`, max 5): +15 max stamina per level
+  Damage / fire-rate mods are exposed via `PlayerController.getPlayerBoosts()` and pushed to `WeaponsSystem.setPlayerBoosts(...)` on every `PLAYER_UPGRADED` event (and once after ProgressSync load). They stack multiplicatively with the vehicle-mode bonuses inside `fire()` / `createProjectile()`. Aegis Plating is consumed directly inside `takeDamage()` before shield/armor absorption.
 
 ### Base Structures
 The BaseSystem tracks player-placed, multi-level structures like labs (companion roster, blueprints) and gardens (capture roster, bonuses), each with interactive UIs.
