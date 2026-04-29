@@ -1025,6 +1025,18 @@ export const Game: React.FC = () => {
             // not (0,0,0) which can be inside a downtown building.
             const spawn = new BABYLON.Vector3(0, 2, -15);
             cur.respawn(spawn);
+            // Re-issue the starter Spark Pup if the player's helper roster is
+            // empty after death. The pup is free at game start, so losing her
+            // permanently to a single death felt like a hidden punishment —
+            // especially since she's the player's go-to combat helper before
+            // the Lab is built. allowDuplicate lets us bypass the "already
+            // collected" guard inside CompanionSystem.
+            const compSys = companionRef.current;
+            if (compSys && compSys.getCompanionCount() === 0) {
+              if (compSys.getMaxCompanions() < 1) compSys.setMaxCompanions(1);
+              const ok = compSys.addCompanion("SparkPup", spawn, { allowDuplicate: true });
+              if (ok) showMessage("SPARK PUP REJOINS YOU", 2200);
+            }
             showMessage("RESPAWNED — YOUR PROGRESS IS SAFE", 2500);
           }, 3000);
         });
@@ -1775,11 +1787,17 @@ export const Game: React.FC = () => {
       runEffect = () => { pickup.setAutoLootEnabled(true); showMessage("AUTO-LOOT ENGAGED", 2000); return true; };
     } else if (id === "roboDragon") {
       const comp = companionRef.current;
-      const base = baseRef.current;
-      if (!comp || !base) { showMessage("LAB OFFLINE", 1500); return; }
+      if (!comp) { showMessage("HELPER SYSTEM OFFLINE", 1500); return; }
       runEffect = () => {
-        const cap = base.getLabCompanionCap();
-        if (comp.getCompanionCount() >= cap) comp.setMaxCompanions(cap + 1);
+        // The dragon is a premium SPECIALS unlock and must always summon —
+        // it cannot be blocked by the Lab cap or by the player having a full
+        // helper roster. Bump the max up to (current count + 1) at minimum
+        // so the addCompanion call below can never fail on capacity. We use
+        // Math.max with the existing max so we never SHRINK the cap (the
+        // previous version did, which silently broke the buy whenever the
+        // Lab cap was lower than the live roster count).
+        const needed = comp.getCompanionCount() + 1;
+        if (comp.getMaxCompanions() < needed) comp.setMaxCompanions(needed);
         const ok = comp.addCompanion("RoboDragon", player.getPosition(), { allowDuplicate: true });
         if (!ok) { showMessage("DRAGON SUMMON FAILED", 2000); return false; }
         showMessage("ROBOT DRAGON DESCENDS", 2400);
