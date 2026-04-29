@@ -1,5 +1,28 @@
 import type { PlayerStats } from "./PlayerController";
 
+/**
+ * One companion's persisted shape. Enough to fully rebuild it on load
+ * (preset + type) and restore the upgrade investment (level + weaponLevel).
+ */
+export interface CompanionSaveEntry {
+  presetName: string;
+  type: "ally" | "pet";
+  level: number;
+  weaponLevel: number;
+}
+
+/**
+ * One-time SPECIALS-tab unlocks. These are premium upgrades the player
+ * paid for and must survive death/restart no matter what.
+ */
+export interface SpecialsOwnedSnapshot {
+  sabreSpin: boolean;
+  sabreTwin: boolean;
+  sabreGiant: boolean;
+  autoLoot: boolean;
+  roboDragon: boolean;
+}
+
 export interface ProgressSnapshot {
   stats: PlayerStats;
   weaponLevels: Record<string, number>;
@@ -10,6 +33,20 @@ export interface ProgressSnapshot {
   highestWave: number;
   capturedCreatures: any[];
   savedAt: number;
+
+  // ---- Added so resource gains, helper-bot upgrades and SPECIALS unlocks
+  // ---- actually persist across death + restart (the prior shape was missing
+  // ---- everything below, so any hard restart wiped them out).
+  /** Helper-bot roster, including per-companion level + weaponLevel. */
+  companions?: CompanionSaveEntry[];
+  /** Effective companion cap (raised by the Robot Dragon unlock). */
+  maxCompanions?: number;
+  /** SPECIALS-tab one-time unlocks. */
+  specialsOwned?: SpecialsOwnedSnapshot;
+  /** Beam sabre upgrade level (1..5). */
+  beamSabreLevel?: number;
+  /** Per-element elemental specials levels. */
+  elementalLevels?: Record<string, number>;
 }
 
 export async function loadProgress(): Promise<ProgressSnapshot | null> {

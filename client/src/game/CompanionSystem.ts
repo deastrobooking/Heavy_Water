@@ -484,6 +484,65 @@ export class CompanionSystem {
     return true;
   }
 
+  /**
+   * Persisted shape of every active companion. Used by ProgressSync so that
+   * the helper-bot roster, their per-companion `level` and per-companion
+   * `weaponLevel` all survive death + restart. Without this, hard restarts
+   * wiped every helper upgrade the player paid for.
+   */
+  serializeForSave(): { presetName: string; type: CompanionType; level: number; weaponLevel: number }[] {
+    return this.companions.map(c => ({
+      presetName: c.presetName,
+      type: c.type,
+      level: c.level,
+      weaponLevel: c.weaponLevel,
+    }));
+  }
+
+  /**
+   * Rebuild the helper-bot roster from a saved snapshot. Each entry is
+   * spawned with `allowDuplicate` so the roster comes back exactly as saved
+   * (including the unique RoboDragon premium ally), and each companion's
+   * cumulative level + weaponLevel investment is replayed in-place.
+   */
+  applyLoadedCompanions(
+    saved: { presetName: string; type: CompanionType; level: number; weaponLevel: number }[],
+    playerPos: BABYLON.Vector3,
+  ): void {
+    // Wipe any current roster first so we never end up with a duplicated set.
+    for (const comp of this.companions) {
+      try { comp.hitbox.dispose(); } catch {}
+      try { comp.root.dispose(); } catch {}
+    }
+    this.companions = [];
+    this.collected.clear();
+
+    for (const entry of saved) {
+      const ok = this.addCompanion(entry.presetName, playerPos, {
+        allowDuplicate: true,
+        customType: entry.type,
+      });
+      if (!ok) continue;
+      const c = this.companions[this.companions.length - 1];
+      // Replay the level investment so behavior stats line up with the saved
+      // tier (mirrors upgradeCompanion's per-tier scaling).
+      const targetLevel = Math.max(1, Math.min(5, entry.level || 1));
+      while (c.level < targetLevel) {
+        c.level += 1;
+        const tier = c.level - 1;
+        c.behavior.attackDamage = c.baseDamage * (1 + 0.25 * tier);
+        c.behavior.healAmount = c.baseHeal * (1 + 0.25 * tier);
+        c.behavior.moveSpeed = c.baseMoveSpeed * (1 + 0.08 * tier);
+        const newMax = Math.floor(c.baseMaxHealth * (1 + 0.3 * tier));
+        c.maxHealth = newMax;
+        c.health = newMax;
+      }
+      // weaponLevel scales attack cooldown / damage at fire-time (no stored
+      // derived stats), so we just clamp + assign.
+      c.weaponLevel = Math.max(0, Math.min(3, entry.weaponLevel || 0));
+    }
+  }
+
   dispose(): void {
     for (const comp of this.companions) {
       comp.hitbox.dispose();

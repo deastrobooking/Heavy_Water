@@ -31,7 +31,9 @@ interface EnergyWave {
 
 // Beam Sabre is the on-foot signature weapon — damage is intentionally
 // massive so foot combat feels every bit as exciting as flying or driving.
-const LEVEL_CONFIGS: Omit<BeamSabre, "isActive">[] = [
+// `hasSpinAttack`/`hasTwinWave`/`hasGiantBlade` are orthogonal one-time SPECIALS
+// unlocks, not per-level stats, so they're omitted from the per-level table.
+const LEVEL_CONFIGS: Omit<BeamSabre, "isActive" | "hasSpinAttack" | "hasTwinWave" | "hasGiantBlade">[] = [
   { level: 1, damage: 120, energyWaveDamage: 220, slashCount: 2, energyWaveWidth: 3, energyWaveSpeed: 35, cooldown: 0.7 },
   { level: 2, damage: 170, energyWaveDamage: 320, slashCount: 2, energyWaveWidth: 4, energyWaveSpeed: 40, cooldown: 0.6 },
   { level: 3, damage: 240, energyWaveDamage: 460, slashCount: 3, energyWaveWidth: 5, energyWaveSpeed: 45, cooldown: 0.55 },
@@ -580,6 +582,52 @@ export class BeamSabreSystem {
   hasSpinAttack(): boolean { return this.sabre.hasSpinAttack; }
   hasTwinWave(): boolean { return this.sabre.hasTwinWave; }
   hasGiantBlade(): boolean { return this.sabre.hasGiantBlade; }
+
+  /** Snapshot of all sabre state worth persisting across death/restart. */
+  getSpecialsState(): { level: number; hasSpinAttack: boolean; hasTwinWave: boolean; hasGiantBlade: boolean } {
+    return {
+      level: this.sabre.level,
+      hasSpinAttack: this.sabre.hasSpinAttack,
+      hasTwinWave: this.sabre.hasTwinWave,
+      hasGiantBlade: this.sabre.hasGiantBlade,
+    };
+  }
+
+  /**
+   * Restore the sabre's persisted state on a fresh load. Sets stats *directly*
+   * from `LEVEL_CONFIGS[target-1]` rather than replaying `upgrade()` — the
+   * upgrade() path emits a `UI_MESSAGE` toast per step, which would spam
+   * "Beam Sabre upgraded to Level N!" during the loading screen on every
+   * death/restart cycle. Visual side-effects are routed through the canonical
+   * `unlockGiantBlade()` (idempotent) so the mesh-scaling 1.6× is preserved
+   * — not just the material color.
+   */
+  applyLoadedState(state: { level?: number; hasSpinAttack?: boolean; hasTwinWave?: boolean; hasGiantBlade?: boolean }): void {
+    if (typeof state.level === "number") {
+      const target = Math.max(1, Math.min(LEVEL_CONFIGS.length, state.level));
+      const config = LEVEL_CONFIGS[target - 1];
+      this.sabre.level = config.level;
+      this.sabre.damage = config.damage;
+      this.sabre.energyWaveDamage = config.energyWaveDamage;
+      this.sabre.slashCount = config.slashCount;
+      this.sabre.energyWaveWidth = config.energyWaveWidth;
+      this.sabre.energyWaveSpeed = config.energyWaveSpeed;
+      this.sabre.cooldown = config.cooldown;
+      // Mirror the L≥3 blade recolor that upgrade() applies, otherwise a
+      // restored level-3+ sabre would render with the level-1/2 cyan blade.
+      if (this.bladeMaterial && this.sabre.level >= 3) {
+        this.bladeMaterial.emissiveColor = new BABYLON.Color3(0.8, 0.1, 1);
+        this.bladeMaterial.diffuseColor = new BABYLON.Color3(0.9, 0.2, 1);
+      }
+    }
+    if (state.hasSpinAttack) this.sabre.hasSpinAttack = true;
+    if (state.hasTwinWave) this.sabre.hasTwinWave = true;
+    if (state.hasGiantBlade) {
+      // Reuse the canonical unlock so the mesh scale (1.6×) and the deep-red
+      // material recolor are both applied, idempotently.
+      this.unlockGiantBlade();
+    }
+  }
 
   upgrade(): void {
     if (this.sabre.level >= 5) return;

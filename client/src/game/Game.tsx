@@ -121,6 +121,11 @@ export const Game: React.FC = () => {
   const respawnTimeoutRef = useRef<number | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
   const lastSaveAtRef = useRef<number>(0);
+  // Bridges the engine's local `doSaveProgress` (closure) out to React-scope
+  // handlers (handleUnlockSpecial, helper-bot upgrade) so a SPECIALS unlock
+  // or a paid-for helper-weapon upgrade triggers an immediate forced save —
+  // even if the 2s save throttle would normally skip it.
+  const forceSaveRef = useRef<(() => void) | null>(null);
 
   const [gamePhase, setGamePhase] = useState<GamePhase>("auth");
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -730,6 +735,20 @@ export const Game: React.FC = () => {
             }
           }
           const captures = bioSystem.getCaptured ? bioSystem.getCaptured() : [];
+          // Pull premium / upgrade state straight from each owning system so
+          // helper-bot upgrades and SPECIALS unlocks survive a hard restart.
+          const sabreState = beamSabre.getSpecialsState();
+          const companions = companionSystem.serializeForSave();
+          const elementalLevels = elementalSpecials.getLevels() as Record<string, number>;
+          const specialsOwnedSnap = {
+            sabreSpin: sabreState.hasSpinAttack,
+            sabreTwin: sabreState.hasTwinWave,
+            sabreGiant: sabreState.hasGiantBlade,
+            autoLoot: pickupSystem.isAutoLootEnabled(),
+            // The roster carries the dragon by preset name; the flag mirrors
+            // the SPECIALS-tab state for affordability/UI on reload.
+            roboDragon: companions.some(c => c.presetName === "RoboDragon"),
+          };
           return {
             stats: player.getStats(),
             weaponLevels: weapons.getWeaponLevels(),
@@ -740,15 +759,36 @@ export const Game: React.FC = () => {
             highestWave: Math.max(highestWaveLocal, enemySystem.getWaveNumber()),
             capturedCreatures: captures as any[],
             savedAt: Date.now(),
+
+            companions,
+            maxCompanions: companionSystem.getMaxCompanions(),
+            specialsOwned: specialsOwnedSnap,
+            beamSabreLevel: sabreState.level,
+            elementalLevels,
           };
         };
 
-        const doSaveProgress = async (): Promise<void> => {
+        const doSaveProgress = async (force: boolean = false): Promise<void> => {
           if (!currentUser) return;
           const now = performance.now();
-          if (now - lastSaveAtRef.current < 2000) return; // throttle
+          // The 2s throttle protects against per-frame spam, but death + unlock
+          // saves opt-in to bypass it so we never lose the most recent gain.
+          if (!force && now - lastSaveAtRef.current < 2000) return;
           lastSaveAtRef.current = now;
           await saveProgress(buildSnapshot());
+        };
+        // Expose for handleUnlockSpecial (defined in outer React scope) so
+        // SPECIALS unlocks can request an immediate forced save.
+        forceSaveRef.current = () => { void doSaveProgress(true); };
+
+        // Start the periodic autosave only after the initial load completes
+        // (or fails). If we started it eagerly, a 5s timer could fire *before*
+        // the load resolves on a slow connection and write a fresh level-1
+        // snapshot over the player's real cloud save.
+        const startAutosaveTimer = () => {
+          if (!currentUser) return;
+          if (autosaveTimerRef.current !== null) return; // already running
+          autosaveTimerRef.current = window.setInterval(() => { void doSaveProgress(); }, 5000);
         };
 
         // Initial load + apply
@@ -767,30 +807,77 @@ export const Game: React.FC = () => {
               }
               totalKillsLocal = snap.totalKills || 0;
               highestWaveLocal = snap.highestWave || 1;
+
+              // Restore SPECIALS unlocks + their system-side side-effects.
+              if (snap.specialsOwned) {
+                setSpecialsOwned(prev => ({ ...prev, ...snap.specialsOwned! }));
+                if (snap.specialsOwned.autoLoot) pickupSystem.setAutoLootEnabled(true);
+              }
+              // Beam sabre level + sabre special unlocks.
+              if (snap.beamSabreLevel || snap.specialsOwned) {
+                beamSabre.applyLoadedState({
+                  level: snap.beamSabreLevel,
+                  hasSpinAttack: snap.specialsOwned?.sabreSpin,
+                  hasTwinWave: snap.specialsOwned?.sabreTwin,
+                  hasGiantBlade: snap.specialsOwned?.sabreGiant,
+                });
+                setBeamSabreLevel(beamSabre.getLevel);
+              }
+              // Elemental specials per-element levels.
+              if (snap.elementalLevels) elementalSpecials.setLevels(snap.elementalLevels as any);
+              // Companion roster + per-companion level + weaponLevel. Restore
+              // the cap *before* the roster so the dragon (which raised the
+              // cap when first unlocked) fits back in.
+              if (typeof snap.maxCompanions === "number" && snap.maxCompanions > 0) {
+                companionSystem.setMaxCompanions(snap.maxCompanions);
+              }
+              if (snap.companions && snap.companions.length > 0) {
+                companionSystem.applyLoadedCompanions(snap.companions, player.getPosition());
+              }
+
               showMessage(`PROGRESS LOADED — LVL ${snap.stats.level} | ${snap.stats.credits}cr`, 2500);
             } catch (err) {
               console.warn("[ProgressSync] apply failed:", err);
             }
+          }).catch((err) => {
+            console.warn("[ProgressSync] load failed:", err);
+          }).finally(() => {
+            // Autosave only AFTER load resolves, so the timer can never write
+            // a default snapshot on top of the real cloud save during a slow
+            // network round-trip. 5s is the new cadence (was 15s — too wide
+            // to catch resources/helper-bot upgrades earned right before death).
+            if (autosaveTimerRef.current !== null) window.clearInterval(autosaveTimerRef.current);
+            startAutosaveTimer();
           });
-        }
-
-        // Autosave every 15s
-        if (currentUser) {
-          if (autosaveTimerRef.current !== null) window.clearInterval(autosaveTimerRef.current);
-          autosaveTimerRef.current = window.setInterval(() => { void doSaveProgress(); }, 15000);
+        } else {
+          // No user logged in — still run autosave so an eventual login flow
+          // doesn't get stuck without one. (No-op until currentUser exists.)
+          startAutosaveTimer();
         }
 
         bus.on(GameEvents.PLAYER_LEVEL_UP, () => { void doSaveProgress(); });
         bus.on(GameEvents.WEAPON_UPGRADED, () => { void doSaveProgress(); });
         bus.on(GameEvents.CREATURE_CAPTURED, () => { void doSaveProgress(); });
+        // Helper-bot roster + helper-bot upgrades must persist or paid-for
+        // upgrades evaporate on the next death.
+        bus.on(GameEvents.COMPANION_BUILT, () => { void doSaveProgress(); });
+        bus.on(GameEvents.COMPANION_UPGRADED, () => { void doSaveProgress(); });
+        // Resource pickups (SCRAP / CORES / CIRCUITS / NANO) are why the
+        // player grinds — autosave the inventory whenever any pickup lands.
+        // The 2s throttle inside doSaveProgress dampens the per-frame pickup
+        // bursts so we don't spam the backend.
+        bus.on(GameEvents.PICKUP_COLLECTED, () => { void doSaveProgress(); });
 
         bus.on(GameEvents.PLAYER_DIED, () => {
           if (vehicleSystem.getActive()) {
             vehicleSystem.exit();
             player.setMounted(null);
           }
-          // Trigger save before respawn so progression survives crash/disconnect
-          if (currentUser) void doSaveProgress();
+          // Force-save (bypassing the throttle) so the very last loot pickup
+          // before death is captured. Without `force=true` a recent autosave
+          // could swallow this call and the player loses everything earned in
+          // the last few seconds.
+          if (currentUser) void doSaveProgress(true);
           // Friendly respawn flow — preserve all stats/inventory/weapons
           showMessage("YOU FELL — RESPAWNING IN 3...", 1100);
           if (respawnTimeoutRef.current !== null) {
@@ -1318,6 +1405,9 @@ export const Game: React.FC = () => {
       try { engineRef.current.dispose(); } catch {}
       engineRef.current = null;
     }
+    // Drop the previous run's force-save closure — it captures disposed
+    // systems and would crash if a late handler fired during reinit.
+    forceSaveRef.current = null;
     initializingRef.current = false;
     EventBus.getInstance().clear();
     setStats({
@@ -1480,8 +1570,12 @@ export const Game: React.FC = () => {
       if (c > 0) inv.removeItem("energy_core", c);
       return true;
     });
-    if (ok) showMessage("ROBOT UPGRADED", 1500);
-    else showMessage("ROBOT UPGRADE FAILED", 1500);
+    if (ok) {
+      showMessage("ROBOT UPGRADED", 1500);
+      // Force-save the new helper level immediately so it can't be lost to the
+      // next death.
+      forceSaveRef.current?.();
+    } else showMessage("ROBOT UPGRADE FAILED", 1500);
     syncResourcesNow();
   }, [showMessage, syncResourcesNow]);
 
@@ -1494,8 +1588,13 @@ export const Game: React.FC = () => {
       if (c > 0) inv.removeItem("energy_core", c);
       return true;
     });
-    if (ok) showMessage("HELPER WEAPON UPGRADED", 1500);
-    else showMessage("HELPER WEAPON UPGRADE FAILED", 1500);
+    if (ok) {
+      showMessage("HELPER WEAPON UPGRADED", 1500);
+      // Force-save the new helper-weapon tier immediately. The base
+      // upgradeCompanionWeapon path doesn't emit COMPANION_UPGRADED, so the
+      // event-driven save trigger doesn't catch this one.
+      forceSaveRef.current?.();
+    } else showMessage("HELPER WEAPON UPGRADE FAILED", 1500);
     syncResourcesNow();
   }, [showMessage, syncResourcesNow]);
 
@@ -1560,6 +1659,9 @@ export const Game: React.FC = () => {
     if (c.credits)       player.spendCredits(c.credits);
     setSpecialsOwned(prev => ({ ...prev, [id]: true }));
     syncResourcesNow();
+    // Force a save immediately so the unlock can never be lost to a crash or
+    // the death/restart cycle that prompted this whole fix.
+    forceSaveRef.current?.();
   }, [specialsOwned, showMessage, syncResourcesNow]);
 
   const handleLabBuild = useCallback((presetName: string) => {
