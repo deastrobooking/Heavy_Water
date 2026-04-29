@@ -18,6 +18,7 @@ import { BeamSabreSystem } from "./BeamSabreSystem";
 import { ArmorSystem } from "./ArmorSystem";
 import { CraftingSystem } from "./CraftingSystem";
 import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
+import { CRAFTING_MATERIALS } from "./CraftingSystem";
 import { CompanionSystem } from "./CompanionSystem";
 import { ArmorCapsuleSystem, ArmorUpgrade } from "./ArmorCapsuleSystem";
 import { ShopSystem, ShopDefinition } from "./ShopSystem";
@@ -910,7 +911,12 @@ export const Game: React.FC = () => {
               if (snap.inventoryCounts) {
                 inventory.clear();
                 for (const [itemId, qty] of Object.entries(snap.inventoryCounts)) {
-                  const def = ITEM_DEFINITIONS[itemId];
+                  // Crafting materials (energy_core, circuit_board, nano_fiber,
+                  // scrap_metal, …) live in CRAFTING_MATERIALS, NOT
+                  // ITEM_DEFINITIONS. Without the fallback they were silently
+                  // dropped on load — which is why cores/nano/circuits "reset"
+                  // every time the player died and the page reloaded.
+                  const def = ITEM_DEFINITIONS[itemId] || CRAFTING_MATERIALS[itemId];
                   if (def && qty > 0) inventory.addItem(def, qty);
                 }
               }
