@@ -678,8 +678,22 @@ export class AerialEnemySystem {
   // for this long before any can respawn (5 minutes). Prevents the fortresses
   // from re-appearing seconds after a hard-fought victory.
   private static readonly FORTRESS_REGROUP_SECONDS = 300;
+  /** When the player wipes out the ENTIRE aerial roster (fighters,
+   *  battleships, AND fortresses), all aerial spawns are suppressed for
+   *  this long. This is what players really mean when they say "the air
+   *  cleared after I beat them" — they want a real break, not just a
+   *  fortress break. */
+  private static readonly SKIES_CLEARED_REGROUP_SECONDS = 300;
   /** Counts down after the last live fortress dies; while > 0, no fortress respawn. */
   private fortressRegroupTimer: number = 0;
+  /** Timer that suppresses ALL aerial spawns (fighters, battleships, and
+   *  fortresses) once the entire roster has been wiped. Independent of
+   *  the fortress-only timer so the two regroups can co-exist. */
+  private skiesClearedTimer: number = 0;
+  /** True once the player has had at least one aerial unit alive since
+   *  the last skies-cleared event — gates the "skies just emptied"
+   *  edge detection so we don't trigger the lockout at game start. */
+  private aerialEverAlive: boolean = false;
   /** Tracks whether at least one fortress was alive last tick, so we know when "all" just died. */
   private fortressesEverAlive: boolean = false;
 
@@ -781,8 +795,9 @@ export class AerialEnemySystem {
     // landmarks). Fighters/battleships only spawn after the player picks a
     // fight (engages a base, mothership, or any aerial unit).
     this.spawnCooldown -= dt;
-    // Tick down the post-victory regroup timer regardless of the spawn cooldown.
+    // Tick down both regroup timers regardless of spawn cooldown state.
     if (this.fortressRegroupTimer > 0) this.fortressRegroupTimer -= dt;
+    if (this.skiesClearedTimer > 0) this.skiesClearedTimer -= dt;
 
     // Detect the "last fortress just died" transition: when we previously had
     // any fortresses alive and now have zero, start the 5-minute lockout.
@@ -796,7 +811,23 @@ export class AerialEnemySystem {
       this.bus.emit(GameEvents.UI_MESSAGE, "FLYING FORTRESSES ROUTED — REGROUPING");
     }
 
-    if (this.spawnCooldown <= 0) {
+    // Detect the "skies are clear" transition: every aerial unit (fighter,
+    // battleship, fortress) is dead. Trigger the global aerial lockout so
+    // the player gets a real 5-minute breather before the next wave shows.
+    const liveAerial = this.units.filter(u => u.isAlive).length;
+    if (liveAerial > 0) {
+      this.aerialEverAlive = true;
+    } else if (this.aerialEverAlive && this.skiesClearedTimer <= 0) {
+      this.skiesClearedTimer = AerialEnemySystem.SKIES_CLEARED_REGROUP_SECONDS;
+      this.aerialEverAlive = false;
+      console.log("[AerialEnemySystem] Skies cleared — all aerial spawns suppressed for 5 minutes");
+      this.bus.emit(GameEvents.UI_MESSAGE, "SKIES CLEARED — AERIAL FORCES REGROUPING (5 MIN)");
+    }
+
+    // The skies-cleared lockout suppresses ALL aerial spawns (fighters,
+    // battleships, AND fortresses). When active, just skip the spawn block
+    // entirely so existing units still tick + clean up below.
+    if (this.spawnCooldown <= 0 && this.skiesClearedTimer <= 0) {
       this.spawnCooldown = 6 + Math.random() * 4;
       const fighters = this.units.filter(u => u.kind === "fighter" && u.isAlive).length;
       const battleships = this.units.filter(u => u.kind === "battleship" && u.isAlive).length;

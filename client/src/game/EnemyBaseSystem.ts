@@ -76,6 +76,11 @@ export class EnemyBaseSystem {
   private playerPos: BABYLON.Vector3 = BABYLON.Vector3.Zero();
   private idCounter = 0;
   private damageOut: number = 0;
+  /** Pending setTimeout IDs (e.g. delayed boss telegraph UI messages).
+   *  Tracked here so dispose() can clear them — otherwise a scene restart
+   *  could fire a stale "FIRE AT THE GLOWING RED CORE" message into the
+   *  wrong session. */
+  private pendingTimeouts: Set<ReturnType<typeof setTimeout>> = new Set();
 
   static readonly TURRET_RANGE = 60;
   static readonly TURRET_HP = 250;
@@ -286,6 +291,18 @@ export class EnemyBaseSystem {
           text: "FORTRESS DEFENSES DOWN — BOSS CAPTAIN INCOMING",
           duration: 4000,
         });
+        // Second message a beat later so the player knows what to actually
+        // shoot. Without this many players don't realize the glowing red
+        // core on the spire is the kill target. Tracked so dispose() can
+        // cancel it if the scene tears down before it fires.
+        const handle = setTimeout(() => {
+          this.pendingTimeouts.delete(handle);
+          this.bus.emit(GameEvents.UI_MESSAGE, {
+            text: "FIRE AT THE GLOWING RED CORE — SPIRE VULNERABLE",
+            duration: 5000,
+          });
+        }, 4200);
+        this.pendingTimeouts.add(handle);
       }
     }
   }
@@ -650,8 +667,8 @@ export class EnemyBaseSystem {
   //                            BOSS FORTRESS
   // ============================================================================
 
-  static readonly BOSS_TURRET_HP = 380;
-  static readonly BOSS_SPIRE_HP = 1800;
+  static readonly BOSS_TURRET_HP = 280;
+  static readonly BOSS_SPIRE_HP = 900;
 
   /** Build the giant boss fortress at `center`: outer wall ring, 12 turrets
    *  in two concentric rings, central command spire (high-HP vault analog),
@@ -948,6 +965,10 @@ export class EnemyBaseSystem {
       this.scene.onBeforeRenderObservable.remove(this.observer);
       this.observer = null;
     }
+    // Cancel any in-flight delayed UI messages so they don't leak into the
+    // next session.
+    this.pendingTimeouts.forEach(t => clearTimeout(t));
+    this.pendingTimeouts.clear();
     for (const tr of this.tracers) {
       const mat = tr.mesh.material;
       tr.mesh.dispose();
