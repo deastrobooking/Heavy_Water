@@ -5,7 +5,7 @@ import { DamageInfo, DamageResult, DamageResistance, IDamageable, DamageType } f
 import { AnimationSystem, AnimationState } from "./AnimationSystem";
 import { HumanoidCharacter } from "./HumanoidCharacter";
 import { HUMANOID_PRESETS } from "./HumanoidPresets";
-import { equipArmorSet, deserializeArmorSet, EquippedArmor, ArmorSetSerialized } from "./RobotArmorSystem";
+import { equipArmorSet, deserializeArmorSet, EquippedArmor, ArmorSetSerialized, DEFAULT_ARMOR_SET } from "./RobotArmorSystem";
 import type { WallCollider, FloorPlatform } from "./CityGenerator";
 
 export type PlayerState = "idle" | "moving" | "sprinting" | "dodging" | "attacking" | "stunned" | "dead" | "jetpack" | "flying" | "hovering";
@@ -305,6 +305,10 @@ export class PlayerController implements IDamageable {
       console.warn("[PlayerController] Could not load saved character:", e);
     }
 
+    if (!armorSetSerialized) {
+      armorSetSerialized = DEFAULT_ARMOR_SET;
+      console.log("[PlayerController] No saved armor — equipping Mega Man default kit");
+    }
     if (armorSetSerialized) {
       humanoidDef = { ...humanoidDef, hasArmor: false };
     }

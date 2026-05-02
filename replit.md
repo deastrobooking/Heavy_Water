@@ -20,6 +20,11 @@ PlayerController manages humanoid characters with complex state machines for mov
 ### Robot and Armor Systems
 The ArmorMaterialFactory creates reusable materials. RobotArmorParts provides a data-driven registry of parametric armor parts, equipped to humanoid rigs by the RobotArmorSystem.
 
+**Mega Man-style robot builder** (`client/src/game/MegaManArmorParts.ts`): a dedicated humanoid-robot pack with six new parts — `helmet_megaman` (rounded dome + forward V-fin crest + round ear pods + chin guard + glowing visor), `chest_megaman` (cyan torso plate w/ diagonal V-trim, gold reactor ring + belt), `shoulder_megaman` (large hemispheric pad with gold trim ring + neon accent), `arm_megaman_glove` (cuffed forearm + fist), `weapon_megaman_buster` (signature arm cannon: shroud + tapered barrel + glowing muzzle), and `legs_megaman` (chunky boots with flared tops, gold knee disc + toe stripe). All parts are registered through the standard `ARMOR_PART_REGISTRY` and selectable in the CharacterEditor. `DEFAULT_ARMOR_SET` ships fresh players in the full Mega Man kit (cyan primary, dark blue secondary, gold trim, cyan glow).
+
+### Humanoid Visual Scale
+`HumanoidDefinition.visualScale` (default 1.0) is a uniform multiplier applied to a `visualRoot` sub-node inside `HumanoidCharacter`. The original presets were authored at ~18-unit "mech" scale, but the player's collision capsule (`height: 2 radius: 0.5`) and camera height (`2.2`) assume a 2 m humanoid — so the visible body was rendering ~9× larger than its collider. All `HUMANOID_PRESETS` (player + four captains) now use `visualScale: 0.12` so the visible silhouette renders ~2.16 m and actually fits the capsule. The capsule, weapon attach points, and camera anchors continue to parent to the unscaled `root` (not `visualRoot`), so collision and gameplay distances are unaffected; only the rendered mesh + armor shrink. Armor parts inherit the scale automatically because they parent to limbs, which live under `visualRoot`.
+
 ### Combat, Inventory, and Crafting
 Combat features melee combo chains and input buffering. The InventorySystem offers a 24-slot grid. The CraftingSystem supports recipe-based crafting. Ranged weapons have unlimited ammo. The Hunter Missile is a homing projectile weapon with AoE damage.
 

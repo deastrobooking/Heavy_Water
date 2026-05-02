@@ -37,21 +37,21 @@ export interface ArmorSetSerialized {
 }
 
 export const DEFAULT_ARMOR_SET: ArmorSetSerialized = {
-  helmet: "helmet_basic",
-  chest: "chest_plate",
+  helmet: "helmet_megaman",
+  chest: "chest_megaman",
   back: "back_none",
-  leftShoulder: "shoulder_pad",
-  rightShoulder: "shoulder_pad",
-  leftArm: "arm_gauntlet",
-  rightArm: "arm_gauntlet",
+  leftShoulder: "shoulder_megaman",
+  rightShoulder: "shoulder_megaman",
+  leftArm: "arm_megaman_glove",
+  rightArm: "arm_megaman_glove",
   leftWeapon: "weapon_none",
-  rightWeapon: "weapon_none",
-  legs: "legs_greaves",
+  rightWeapon: "weapon_megaman_buster",
+  legs: "legs_megaman",
   colors: {
-    primary: [0.18, 0.45, 0.85],
-    secondary: [0.08, 0.18, 0.36],
-    trim: [0.95, 0.78, 0.25],
-    glow: [0.25, 0.95, 1.0],
+    primary: [0.18, 0.55, 0.95],
+    secondary: [0.06, 0.18, 0.42],
+    trim: [1.0, 0.85, 0.25],
+    glow: [0.35, 0.95, 1.0],
   },
 };
 

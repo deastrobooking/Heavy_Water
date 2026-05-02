@@ -15,7 +15,16 @@ export interface HumanoidDefinition {
     hair: BABYLON.Color3;
   };
   hasArmor: boolean;
-  armorType?: "light" | "heavy" | "captain";
+  armorType?: "light" | "heavy" | "captain" | "megaman";
+  /**
+   * Final visual size multiplier applied to the rendered body mesh + armor.
+   * The original presets were authored at ~18 unit "mech" scale, but the
+   * player's collision capsule and camera assume a 2 m humanoid. Setting
+   * `visualScale: 0.12` shrinks an 18-unit body to ~2.16 m so it actually
+   * fits inside the capsule and reads as a Mega-Man-style humanoid robot.
+   * Defaults to 1.0 for backward compatibility.
+   */
+  visualScale?: number;
 }
 
 export interface HumanoidLimbs {
@@ -30,6 +39,15 @@ export interface HumanoidLimbs {
 
 export class HumanoidCharacter {
   private root: BABYLON.TransformNode;
+  /**
+   * Visual sub-root that holds every rendered body / armor mesh. Parented
+   * to `root` and uniformly scaled by `definition.visualScale`. Keeping
+   * the visible mesh on a separate scaled node means callers (player
+   * capsule, camera anchors, weapon attach points) can keep parenting to
+   * the unscaled `root` without inheriting the shrink — so collision and
+   * gameplay stay at world scale while the silhouette renders human-sized.
+   */
+  private visualRoot: BABYLON.TransformNode;
   private definition: HumanoidDefinition;
   private materials: Map<string, BABYLON.StandardMaterial> = new Map();
 
@@ -43,6 +61,10 @@ export class HumanoidCharacter {
   constructor(scene: BABYLON.Scene, definition: HumanoidDefinition) {
     this.definition = definition;
     this.root = new BABYLON.TransformNode("humanoidRoot", scene);
+    this.visualRoot = new BABYLON.TransformNode("humanoidVisual", scene);
+    this.visualRoot.parent = this.root;
+    const scale = definition.visualScale ?? 1.0;
+    this.visualRoot.scaling.setAll(scale);
     this.createMaterials(scene);
     this.buildBody(scene);
     if (definition.hasArmor) {
@@ -108,7 +130,7 @@ export class HumanoidCharacter {
     }, scene);
     torso.position.y = chestY;
     torso.material = this.materials.get("primary")!;
-    torso.parent = this.root;
+    torso.parent = this.visualRoot;
     this.torsoMesh = torso;
 
     const head = BABYLON.MeshBuilder.CreateSphere("head", {
@@ -119,7 +141,7 @@ export class HumanoidCharacter {
     }, scene);
     head.position.y = neckY + headScale * 0.6;
     head.material = this.materials.get("skin")!;
-    head.parent = this.root;
+    head.parent = this.visualRoot;
     this.headMesh = head;
 
     this.buildHair(scene, head.position.y);
@@ -154,7 +176,7 @@ export class HumanoidCharacter {
   ): BABYLON.TransformNode {
     const pivot = new BABYLON.TransformNode(`${name}Pivot`, scene);
     pivot.position = jointPos.clone();
-    pivot.parent = this.root;
+    pivot.parent = this.visualRoot;
 
     const upper = BABYLON.MeshBuilder.CreateCapsule(`${name}Upper`, {
       height: upperLen,
@@ -183,7 +205,7 @@ export class HumanoidCharacter {
   ): BABYLON.TransformNode {
     const pivot = new BABYLON.TransformNode(`${name}Pivot`, scene);
     pivot.position = jointPos.clone();
-    pivot.parent = this.root;
+    pivot.parent = this.visualRoot;
 
     const thigh = BABYLON.MeshBuilder.CreateCapsule(`${name}Thigh`, {
       height: thighLen,
@@ -218,7 +240,7 @@ export class HumanoidCharacter {
 
   private buildHair(scene: BABYLON.Scene, headY: number): void {
     const hairGroup = new BABYLON.TransformNode("hairGroup", scene);
-    hairGroup.parent = this.root;
+    hairGroup.parent = this.visualRoot;
 
     for (let i = 0; i < 12; i++) {
       const strand = BABYLON.MeshBuilder.CreatePlane(`hairStrand_${i}`, {

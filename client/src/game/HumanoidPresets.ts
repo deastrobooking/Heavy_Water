@@ -1,6 +1,15 @@
 import * as BABYLON from "@babylonjs/core";
 import { HumanoidDefinition } from "./HumanoidCharacter";
 
+/**
+ * Sub-root visual scale that turns the original ~18-unit "mech" body
+ * authoring into a ~2 m humanoid silhouette that actually fits the player's
+ * 2 m collision capsule and 2.2 m camera height. Applied uniformly via
+ * `HumanoidCharacter.visualRoot.scaling`. Tuning this in one place keeps
+ * every preset (player, captains, friendly NPCs) consistent.
+ */
+const HUMANOID_VISUAL_SCALE = 0.12;
+
 export const HUMANOID_PRESETS: Record<string, HumanoidDefinition> = {
   PlayerDefault: {
     height: 18,
@@ -11,13 +20,14 @@ export const HUMANOID_PRESETS: Record<string, HumanoidDefinition> = {
     legLength: 10,
     bodyType: "athletic",
     colors: {
-      primary: new BABYLON.Color3(0.1, 0.3, 0.6),
-      secondary: new BABYLON.Color3(0.05, 0.15, 0.3),
-      skin: new BABYLON.Color3(0.9, 0.75, 0.65),
-      hair: new BABYLON.Color3(0.1, 0.1, 0.1),
+      primary: new BABYLON.Color3(0.18, 0.55, 0.95),
+      secondary: new BABYLON.Color3(0.06, 0.18, 0.42),
+      skin: new BABYLON.Color3(0.92, 0.78, 0.68),
+      hair: new BABYLON.Color3(0.08, 0.08, 0.08),
     },
-    hasArmor: true,
-    armorType: "light",
+    hasArmor: false,
+    armorType: "megaman",
+    visualScale: HUMANOID_VISUAL_SCALE,
   },
 
   HumanoidCaptainAlpha: {
@@ -36,6 +46,7 @@ export const HUMANOID_PRESETS: Record<string, HumanoidDefinition> = {
     },
     hasArmor: true,
     armorType: "heavy",
+    visualScale: HUMANOID_VISUAL_SCALE,
   },
 
   HumanoidCaptainBeta: {
@@ -54,6 +65,7 @@ export const HUMANOID_PRESETS: Record<string, HumanoidDefinition> = {
     },
     hasArmor: true,
     armorType: "captain",
+    visualScale: HUMANOID_VISUAL_SCALE,
   },
 
   HumanoidCaptainGamma: {
@@ -72,6 +84,7 @@ export const HUMANOID_PRESETS: Record<string, HumanoidDefinition> = {
     },
     hasArmor: true,
     armorType: "captain",
+    visualScale: HUMANOID_VISUAL_SCALE,
   },
 
   HumanoidCaptainOmega: {
@@ -90,5 +103,6 @@ export const HUMANOID_PRESETS: Record<string, HumanoidDefinition> = {
     },
     hasArmor: true,
     armorType: "captain",
+    visualScale: HUMANOID_VISUAL_SCALE,
   },
 };

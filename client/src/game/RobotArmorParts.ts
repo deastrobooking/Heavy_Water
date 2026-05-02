@@ -653,18 +653,26 @@ import {
   LEG_PARTS_EXTRA,
   BACK_PARTS_EXTRA,
 } from "./RobotArmorPartsExtra";
+import {
+  MEGAMAN_HELMET_PARTS,
+  MEGAMAN_CHEST_PARTS,
+  MEGAMAN_SHOULDER_PARTS,
+  MEGAMAN_ARM_PARTS,
+  MEGAMAN_WEAPON_PARTS,
+  MEGAMAN_LEG_PARTS,
+} from "./MegaManArmorParts";
 
 export const ARMOR_PART_REGISTRY: Record<ArmorSlot, ArmorPartDefinition[]> = {
-  helmet: [...HELMET_PARTS, ...HELMET_PARTS_EXTRA],
-  chest: [...CHEST_PARTS, ...CHEST_PARTS_EXTRA],
+  helmet: [...HELMET_PARTS, ...HELMET_PARTS_EXTRA, ...MEGAMAN_HELMET_PARTS],
+  chest: [...CHEST_PARTS, ...CHEST_PARTS_EXTRA, ...MEGAMAN_CHEST_PARTS],
   back: [...BACK_PARTS, ...BACK_PARTS_EXTRA],
-  leftShoulder: [...SHOULDER_PARTS, ...SHOULDER_PARTS_EXTRA],
-  rightShoulder: [...SHOULDER_PARTS, ...SHOULDER_PARTS_EXTRA],
-  leftArm: ARM_PARTS,
-  rightArm: ARM_PARTS,
-  leftWeapon: [...WEAPON_PARTS, ...WEAPON_PARTS_EXTRA],
-  rightWeapon: [...WEAPON_PARTS, ...WEAPON_PARTS_EXTRA],
-  legs: [...LEG_PARTS, ...LEG_PARTS_EXTRA],
+  leftShoulder: [...SHOULDER_PARTS, ...SHOULDER_PARTS_EXTRA, ...MEGAMAN_SHOULDER_PARTS],
+  rightShoulder: [...SHOULDER_PARTS, ...SHOULDER_PARTS_EXTRA, ...MEGAMAN_SHOULDER_PARTS],
+  leftArm: [...ARM_PARTS, ...MEGAMAN_ARM_PARTS],
+  rightArm: [...ARM_PARTS, ...MEGAMAN_ARM_PARTS],
+  leftWeapon: [...WEAPON_PARTS, ...WEAPON_PARTS_EXTRA, ...MEGAMAN_WEAPON_PARTS],
+  rightWeapon: [...WEAPON_PARTS, ...WEAPON_PARTS_EXTRA, ...MEGAMAN_WEAPON_PARTS],
+  legs: [...LEG_PARTS, ...LEG_PARTS_EXTRA, ...MEGAMAN_LEG_PARTS],
 };
 
 export function findPart(slot: ArmorSlot, id: string): ArmorPartDefinition | null {
