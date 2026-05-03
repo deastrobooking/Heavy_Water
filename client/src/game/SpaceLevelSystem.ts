@@ -123,6 +123,11 @@ export class SpaceLevelSystem {
     }
     this.sky.setSpaceMode(false);
     this.restoreWorldGeometry();
+    // Clear the orbital aerial squadron (the 2 fighters + 1 battleship we
+    // force-seeded on mount, plus any drip-spawned reinforcements). Without
+    // this, repeated L5 visits stack extra aerial enemies that follow the
+    // player back to ground levels, breaking difficulty pacing.
+    try { this.aerial.disengageAndClear(); } catch {}
     // Defensive re-enable — even though we no longer disable on mount,
     // anything else that flipped these off would otherwise leak across
     // the warp.

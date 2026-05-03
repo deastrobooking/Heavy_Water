@@ -2456,20 +2456,21 @@ export const Game: React.FC = () => {
     const player = playerRef.current;
     if (!ls || !player) return;
     if (level < 1 || level > 5) return;
-    ls.forceStart(level as WorldLevel);
     const sp = LevelSystem.getSpawnPointFor(level as WorldLevel);
-    // Always nudge slightly above ground — the spawnPoint Y is owned by
-    // terrain, not the LevelSystem. The orbital level reuses world-origin
-    // so the existing terrain is still at y≈0 underneath the asteroids;
-    // landing on it keeps the player from falling forever if they don't
-    // have flight armor. The asteroid field above (25–105 m) and the
-    // distant Earth read as the "in space" framing.
     // Spacelike levels need a high spawn Y so the player wakes up amid the
     // 25–105 m asteroid band (the orbital fighter is auto-entered there);
     // ground levels keep the slight 2 m nudge above terrain so they don't
     // fall through if they don't have flight armor.
     const spawnY = LevelSystem.isSpacelike(level as WorldLevel) ? 60 : 2;
+    // CRITICAL ORDER: teleport BEFORE forceStart. `forceStart` synchronously
+    // emits LEVEL_STARTED, which mounts SpaceLevelSystem; that system reads
+    // `playerPosProvider()` immediately to spawn/auto-mount the orbital
+    // fighter, build the asteroid field, and seed nearby aerial enemies.
+    // If we forceStart first, all of those things spawn at the player's
+    // *previous* world position, then we teleport away and the level reads
+    // empty.
     player.setPosition(new BABYLON.Vector3(sp.x, spawnY, sp.z));
+    ls.forceStart(level as WorldLevel);
     setUpgradeMenuOpen(false);
     showMessage(`WARPED TO ${LevelSystem.getDisplayNameFor(level as WorldLevel)}`, 2200);
   }, [showMessage]);
