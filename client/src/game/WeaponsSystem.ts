@@ -112,6 +112,15 @@ export class WeaponsSystem {
   private onAmmoChange: ((ammo: number, maxAmmo: number) => void) | null = null;
   private onWeaponChange: ((weapon: Weapon) => void) | null = null;
   private aimOriginProvider: (() => BABYLON.Vector3) | null = null;
+  /** Optional override that is consulted only while `vehicleMode` is true.
+   *  Returning a non-null `{origin, forward}` makes the next fire ignore the
+   *  camera entirely and shoot from the vehicle's nose along its own forward
+   *  vector — i.e. the orbital fighter's "nose gun". When this returns null
+   *  (e.g. the player is on foot or in an ATV) the fire path falls back to
+   *  the player camera as before. */
+  private vehicleAimProvider:
+    | (() => { origin: BABYLON.Vector3; forward: BABYLON.Vector3 } | null)
+    | null = null;
 
   setInventory(inv: InventorySystem): void {
     this.inventory = inv;
@@ -121,8 +130,30 @@ export class WeaponsSystem {
     this.aimOriginProvider = fn;
   }
 
+  /** Wire a vehicle-aim source. While `vehicleMode` is active and the
+   *  provider returns a payload, weapons fire from the vehicle's nose
+   *  along its forward vector instead of the player's shoulder. */
+  setVehicleAimProvider(
+    fn: (() => { origin: BABYLON.Vector3; forward: BABYLON.Vector3 } | null) | null,
+  ): void {
+    this.vehicleAimProvider = fn;
+  }
+
+  private getVehicleAim(): { origin: BABYLON.Vector3; forward: BABYLON.Vector3 } | null {
+    if (!this.vehicleMode || !this.vehicleAimProvider) return null;
+    return this.vehicleAimProvider();
+  }
+
   private getAimOrigin(): BABYLON.Vector3 {
+    const va = this.getVehicleAim();
+    if (va) return va.origin;
     return this.aimOriginProvider ? this.aimOriginProvider() : this.camera.position;
+  }
+
+  private getAimForward(): BABYLON.Vector3 {
+    const va = this.getVehicleAim();
+    if (va) return va.forward.clone();
+    return this.camera.getDirection(BABYLON.Vector3.Forward());
   }
 
   constructor(scene: BABYLON.Scene, camera: BABYLON.FreeCamera) {
@@ -262,7 +293,7 @@ export class WeaponsSystem {
   }
 
   private createProjectile(weapon: Weapon): void {
-    const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
+    const forward = this.getAimForward();
 
     const spreadX = (Math.random() - 0.5) * weapon.spread;
     const spreadY = (Math.random() - 0.5) * weapon.spread;

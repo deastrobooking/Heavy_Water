@@ -465,6 +465,26 @@ export const Game: React.FC = () => {
         beamSabre.setAimOriginProvider(aimOrigin);
         megaCannon.setAimOriginProvider(aimOrigin);
 
+        // Vehicle "nose gun": when the player is mounted on a non-ATV vehicle
+        // (the orbital fighter, primarily) override the weapons-fire path so
+        // projectiles spawn at the vehicle's nose and travel along the
+        // vehicle's forward vector instead of the player camera. This is
+        // what makes shooting in space-fighter mode actually do something —
+        // the camera tracks the player, but the player rides the vehicle, so
+        // the camera's "forward" wasn't aligned with the vehicle's heading.
+        // Returning null falls through to the normal camera-aim pipeline.
+        weapons.setVehicleAimProvider(() => {
+          const v = vehicleSystem.getActive();
+          if (!v || v.kind === "atv") return null;
+          if (!playerRef.current?.isMounted()) return null;
+          const root = v.meshes.root;
+          const fwd = root.getDirection(BABYLON.Vector3.Forward()).normalize();
+          // Spawn the projectile a few metres forward of the vehicle root so
+          // it doesn't intersect the fighter mesh on frame 1.
+          const origin = root.position.add(fwd.scale(5));
+          return { origin, forward: fwd };
+        });
+
         const inventory = new InventorySystem();
         inventoryRef.current = inventory;
 
@@ -833,6 +853,19 @@ export const Game: React.FC = () => {
                 || upgradeMenuOpenRef.current
                 || (gardenRef.current?.isGardenOpenCheck() ?? false),
               baseSystem,
+              {
+                // Mirrors the SpaceLevelSystem handles bag — sanctuary hides
+                // the city + mountains + foliage + props on mount and
+                // restores them on warp-out so Level 4 is a truly distinct
+                // green-plains village world rather than dressing on top of
+                // Detroit. Each handle is null-tolerant.
+                city: cityGenerator,
+                worldVisibles: [
+                  mountainRingRef.current,
+                  alienFoliageRef.current,
+                  propSystemRef.current,
+                ],
+              },
             );
           } else if (!isPeaceful && sanctuarySystemRef.current) {
             try { sanctuarySystemRef.current.dispose(); } catch {}

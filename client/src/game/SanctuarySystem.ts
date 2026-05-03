@@ -3,6 +3,17 @@ import { EventBus, GameEvents } from "./EventBus";
 import { FriendlyNPCSystem } from "./FriendlyNPCSystem";
 import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
 import type { BaseSystem } from "./BaseSystem";
+import type { CityGenerator } from "./CityGenerator";
+
+/** Optional handles SanctuarySystem hides on mount + restores on dispose so
+ *  Level 4 reads as a *truly distinct* world (rolling green plains village)
+ *  rather than a corner of Detroit with cottages dropped on top. Mirrors
+ *  the same "worldVisibles" pattern SpaceLevelSystem uses for the orbital
+ *  zone — both levels share the city + mountain + foliage + props bag. */
+export interface SanctuaryHandles {
+  city?: CityGenerator | null;
+  worldVisibles?: Array<{ setVisible(visible: boolean): void } | null | undefined>;
+}
 
 /**
  * SanctuarySystem
@@ -39,6 +50,10 @@ export class SanctuarySystem {
   /** Position where the synthetic garden plinth was registered with the
    *  BaseSystem — kept so dispose() can remove it on fast-travel out. */
   private gardenPlinthPos: BABYLON.Vector3 | null = null;
+  /** Bag of world systems hidden on mount; restored on dispose. */
+  private handles: SanctuaryHandles;
+  private hiddenVisibles: Array<{ setVisible(v: boolean): void }> = [];
+  private cityHidden: boolean = false;
 
   /** Sanctuary footprint center (matches LevelSystem.spawnPoint for L4). */
   private static readonly CENTER = new BABYLON.Vector3(-480, 0, -480);
@@ -50,6 +65,7 @@ export class SanctuarySystem {
     playerPosProvider: () => BABYLON.Vector3,
     inputBlockedProvider: () => boolean,
     baseSystem?: BaseSystem,
+    handles: SanctuaryHandles = {},
   ) {
     this.scene = scene;
     this.camera = camera;
@@ -57,9 +73,18 @@ export class SanctuarySystem {
     this.inventory = inventory;
     this.playerPos = playerPosProvider;
     this.base = baseSystem ?? null;
+    this.handles = handles;
 
     this.root = new BABYLON.TransformNode("sanctuaryRoot", scene);
 
+    // Build OUR ground first, then hide the city + mountains + foliage so
+    // Level 4 reads as a self-contained green-plains village instead of a
+    // corner of Detroit. Order matters: the player's ray-down still needs
+    // SOMETHING to land on once the city ground is hidden, and the
+    // PlayerController already falls back to its analytical groundY=1
+    // floor — but the grass plane gives a clean visual surface.
+    this.buildGrassPlains();
+    this.hideOuterWorld();
     this.buildSign();
     this.buildPerimeter();
     this.buildVillage();
@@ -105,7 +130,72 @@ export class SanctuarySystem {
       try { this.base.removeStructureAt(this.gardenPlinthPos, 1.5); } catch {}
       this.gardenPlinthPos = null;
     }
+    // Restore the outer world (city, mountains, foliage, props) we hid
+    // when this level mounted. Done BEFORE root.dispose so any mistake
+    // here doesn't strand the player on a black void if dispose throws.
+    this.restoreOuterWorld();
     try { this.root.dispose(); } catch {}
+  }
+
+  // -------------------------------------------------------- world swap
+
+  /** Hide everything outside the sanctuary so Level 4 is its own world.
+   *  Mirrors `SpaceLevelSystem.hideWorldGeometry` — same handles bag,
+   *  same null-checks, same restore-on-dispose contract. */
+  private hideOuterWorld(): void {
+    if (this.handles.city) {
+      try {
+        this.handles.city.setVisible(false);
+        // Only mark hidden AFTER setVisible(false) actually returned, so a
+        // throw upstream doesn't leave us trying to restore a city we
+        // never successfully hid (which could double-toggle visibility on
+        // warp-out).
+        this.cityHidden = true;
+      } catch {}
+    }
+    for (const w of this.handles.worldVisibles ?? []) {
+      if (!w) continue;
+      try {
+        w.setVisible(false);
+        this.hiddenVisibles.push(w);
+      } catch {}
+    }
+  }
+
+  private restoreOuterWorld(): void {
+    if (this.cityHidden) {
+      try { this.handles.city?.setVisible(true); } catch {}
+      this.cityHidden = false;
+    }
+    for (const w of this.hiddenVisibles) {
+      try { w.setVisible(true); } catch {}
+    }
+    this.hiddenVisibles = [];
+  }
+
+  /** Build a large green-grass disc centred on the sanctuary so the player
+   *  visually stands on rolling plains rather than the city's hidden
+   *  ground. 1500 m diameter is wider than the camera's far-cull at this
+   *  altitude, so the player never sees a hard edge — even when wandering
+   *  outside the perimeter ring to look at the surrounding sky. */
+  private buildGrassPlains(): void {
+    const c = SanctuarySystem.CENTER;
+    const ground = BABYLON.MeshBuilder.CreateGround(
+      "sanctuaryGrass",
+      { width: 1500, height: 1500, subdivisions: 1 },
+      this.scene,
+    );
+    ground.position.set(c.x, 0.02, c.z);
+    ground.parent = this.root;
+    ground.isPickable = false;
+    ground.receiveShadows = false;
+    const mat = new BABYLON.StandardMaterial("sanctuaryGrassMat", this.scene);
+    // Warm-meadow green: lifted from a reference frontier-village palette
+    // so it reads "cozy farm" rather than "alien biome".
+    mat.diffuseColor = new BABYLON.Color3(0.34, 0.58, 0.28);
+    mat.emissiveColor = new BABYLON.Color3(0.05, 0.10, 0.04);
+    mat.specularColor = new BABYLON.Color3(0, 0, 0);
+    ground.material = mat;
   }
 
   // -------------------------------------------------------------- visuals
