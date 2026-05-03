@@ -94,6 +94,7 @@ interface GameUIProps {
   gardenCaptureBonus?: number;
   gardenCapacityMax?: number;
   gardenCaptured?: CapturedCreature[];
+  gardenDexCaughtIds?: string[];
   bioEssenceCount?: number;
   gardenUpgradeCost?: { gears: number; nano: number; cores: number } | null;
   gardenCanUpgrade?: boolean;
@@ -200,6 +201,7 @@ export const GameUI: React.FC<GameUIProps> = ({
   gardenCaptureBonus = 0,
   gardenCapacityMax = 3,
   gardenCaptured = [],
+  gardenDexCaughtIds = [],
   bioEssenceCount = 0,
   gardenUpgradeCost = null,
   gardenCanUpgrade = false,
@@ -852,6 +854,7 @@ export const GameUI: React.FC<GameUIProps> = ({
         captureBonus={gardenCaptureBonus}
         capacityMax={gardenCapacityMax}
         captured={gardenCaptured}
+        dexCaughtIds={gardenDexCaughtIds}
         bioEssenceCount={bioEssenceCount}
         upgradeCost={gardenUpgradeCost}
         canUpgradeGarden={gardenCanUpgrade}

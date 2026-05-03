@@ -32,6 +32,11 @@ export interface ProgressSnapshot {
   totalKills: number;
   highestWave: number;
   capturedCreatures: any[];
+  /** Persistent dex history — every species id ever caught. Survives
+   *  DEPLOY (which removes the creature from the live roster) so dex
+   *  completion only ever grows. Optional for backward compat with
+   *  pre-dex saves. */
+  bioDexCaughtIds?: string[];
   savedAt: number;
 
   // ---- Added so resource gains, helper-bot upgrades and SPECIALS unlocks

@@ -1,72 +1,17 @@
 import * as BABYLON from "@babylonjs/core";
 import { EventBus, GameEvents } from "./EventBus";
 import { RobotFactory } from "./RobotFactory";
-import { RobotDescriptor } from "./RobotDesigner";
+import { RobotDescriptor, RobotStyle } from "./RobotDesigner";
 import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
+import {
+  BIO_SPECIES, BioCreatureSpecies, Archetype, ElementalType,
+  getSpeciesById, pickWeightedSpecies, statsFromRarity,
+} from "./BioSpecies";
 
-export interface BioCreatureSpecies {
-  id: string;
-  name: string;
-  baseCaptureChance: number;
-  scale: number;
-  primary: BABYLON.Color3;
-  secondary: BABYLON.Color3;
-  emissive: BABYLON.Color3;
-  speciesArchetype: "fox" | "beetle" | "serpent" | "owl" | "frog";
-}
-
-export const BIO_SPECIES: BioCreatureSpecies[] = [
-  {
-    id: "robofox",
-    name: "RoboFox",
-    baseCaptureChance: 0.45,
-    scale: 0.55,
-    primary: new BABYLON.Color3(1.0, 0.55, 0.15),
-    secondary: new BABYLON.Color3(1.0, 0.85, 0.4),
-    emissive: new BABYLON.Color3(1.0, 0.6, 0.2),
-    speciesArchetype: "fox",
-  },
-  {
-    id: "crystalbeetle",
-    name: "Crystal Beetle",
-    baseCaptureChance: 0.55,
-    scale: 0.4,
-    primary: new BABYLON.Color3(0.4, 0.9, 1.0),
-    secondary: new BABYLON.Color3(0.8, 1.0, 1.0),
-    emissive: new BABYLON.Color3(0.5, 1.0, 1.0),
-    speciesArchetype: "beetle",
-  },
-  {
-    id: "hoverserpent",
-    name: "Hover Serpent",
-    baseCaptureChance: 0.3,
-    scale: 0.6,
-    primary: new BABYLON.Color3(0.3, 1.0, 0.4),
-    secondary: new BABYLON.Color3(0.6, 1.0, 0.8),
-    emissive: new BABYLON.Color3(0.5, 1.0, 0.6),
-    speciesArchetype: "serpent",
-  },
-  {
-    id: "neonowl",
-    name: "Neon Owl",
-    baseCaptureChance: 0.35,
-    scale: 0.5,
-    primary: new BABYLON.Color3(0.6, 0.3, 1.0),
-    secondary: new BABYLON.Color3(0.85, 0.6, 1.0),
-    emissive: new BABYLON.Color3(0.8, 0.4, 1.0),
-    speciesArchetype: "owl",
-  },
-  {
-    id: "voltfrog",
-    name: "Volt Frog",
-    baseCaptureChance: 0.5,
-    scale: 0.45,
-    primary: new BABYLON.Color3(1.0, 0.95, 0.3),
-    secondary: new BABYLON.Color3(0.95, 1.0, 0.55),
-    emissive: new BABYLON.Color3(1.0, 1.0, 0.4),
-    speciesArchetype: "frog",
-  },
-];
+// Re-export catalog types so existing imports (`BIO_SPECIES`,
+// `BioCreatureSpecies`) keep working unchanged.
+export { BIO_SPECIES };
+export type { BioCreatureSpecies };
 
 export interface CapturedCreature {
   id: string;
@@ -104,6 +49,10 @@ interface CaptureOrb {
 
 const CAPTURE_DURATION = 1.6;
 const CAPTURE_ORB_RANGE = 22;
+/** Wild population the world tries to maintain. */
+const TARGET_WILD_POP = 36;
+/** Seconds between respawn ticks (one creature added per tick when below target). */
+const RESPAWN_INTERVAL = 14;
 
 export class BioCreatureSystem {
   private scene: BABYLON.Scene;
@@ -112,10 +61,16 @@ export class BioCreatureSystem {
   private factory: RobotFactory;
   private creatures: ActiveCreature[] = [];
   private captured: CapturedCreature[] = [];
+  /** Persistent "ever caught" dex history. Survives DEPLOY (which removes
+   *  the creature from the live roster) so the dex completion percentage
+   *  only ever grows. Only species ids that resolve via getSpeciesById are
+   *  kept here, so legacy/unknown ids can't inflate the count. */
+  private dexCaughtIds: Set<string> = new Set();
   private orbs: CaptureOrb[] = [];
   private observer: BABYLON.Observer<BABYLON.Scene> | null = null;
   private playerPos: BABYLON.Vector3 = BABYLON.Vector3.Zero();
   private idCounter: number = 0;
+  private respawnTimer: number = RESPAWN_INTERVAL;
   private getCaptureBonus: () => number = () => 0;
   private getCaptureCap: () => number = () => 6;
 
@@ -128,7 +83,7 @@ export class BioCreatureSystem {
       const dt = scene.getEngine().getDeltaTime() / 1000;
       this.tick(dt);
     });
-    console.log("[BioCreatureSystem] Initialized");
+    console.log(`[BioCreatureSystem] Initialized — ${BIO_SPECIES.length} species in dex`);
   }
 
   setHooks(getBonus: () => number, getCap: () => number): void {
@@ -168,52 +123,74 @@ export class BioCreatureSystem {
     this.bus.emit(GameEvents.CREATURE_SPAWNED, { id, speciesId: species.id, position });
   }
 
+  /**
+   * Scatter a rarity-weighted starting population around the world. Spots
+   * are placed on a coarse 6×6 grid centered on the origin, with jitter, so
+   * every quadrant of the open world has wild creatures to find.
+   */
   spawnInitialCreatures(): void {
-    const spots: { pos: BABYLON.Vector3; speciesIdx: number }[] = [
-      { pos: new BABYLON.Vector3(-180, 1, -140), speciesIdx: 0 },
-      { pos: new BABYLON.Vector3(160, 1, 90), speciesIdx: 1 },
-      { pos: new BABYLON.Vector3(-220, 1, 220), speciesIdx: 2 },
-      { pos: new BABYLON.Vector3(240, 1, -180), speciesIdx: 3 },
-      { pos: new BABYLON.Vector3(40, 1, 280), speciesIdx: 4 },
-      { pos: new BABYLON.Vector3(-90, 1, -240), speciesIdx: 0 },
-      { pos: new BABYLON.Vector3(280, 1, 30), speciesIdx: 1 },
-      { pos: new BABYLON.Vector3(-260, 1, -40), speciesIdx: 4 },
-    ];
-    for (const s of spots) {
-      this.spawnCreature(BIO_SPECIES[s.speciesIdx], s.pos);
+    const radius = 280; // matches typical city/biome footprint
+    const cols = 6, rows = 6;
+    let placed = 0;
+    for (let i = 0; i < cols && placed < TARGET_WILD_POP; i++) {
+      for (let j = 0; j < rows && placed < TARGET_WILD_POP; j++) {
+        const fx = (i + 0.5) / cols - 0.5;
+        const fz = (j + 0.5) / rows - 0.5;
+        const jx = (Math.random() - 0.5) * (2 * radius / cols) * 0.7;
+        const jz = (Math.random() - 0.5) * (2 * radius / rows) * 0.7;
+        // Skip the dead center (player spawn area) so creatures don't clip
+        // into the spawn pad / starter NPCs.
+        if (Math.abs(fx) < 0.08 && Math.abs(fz) < 0.08) continue;
+        const pos = new BABYLON.Vector3(fx * 2 * radius + jx, 1, fz * 2 * radius + jz);
+        const species = pickWeightedSpecies();
+        this.spawnCreature(species, pos);
+        placed++;
+      }
     }
   }
 
+  // ---------------------------------------------------------------- visuals
+  /**
+   * Build a rich, "robotic Pokemon"-style descriptor. Each archetype owns
+   * its silhouette (proportions, ears via antennae, wings, tail, shell,
+   * etc.); colors come from the species palette which is itself derived
+   * from `elementalType` unless overridden.
+   */
   private makeDescriptor(species: BioCreatureSpecies): RobotDescriptor {
-    const isFlyer = species.speciesArchetype === "owl" || species.speciesArchetype === "serpent";
-    const headShape = species.speciesArchetype === "beetle" ? "sphere" : "sphere";
-    return {
-      name: species.name,
-      faction: "pet",
-      style: {
-        archetype: "pet",
-        scale: species.scale,
-        torsoWidth: 0.8, torsoHeight: 0.55, torsoDepth: 0.9,
-        headSize: 0.45, headShape,
-        armLength: 0.45, armThickness: 0.12, armStyle: "cylinder",
-        legLength: species.speciesArchetype === "frog" ? 0.6 : 0.4, legThickness: 0.18, legStyle: "box",
-        shoulderPadSize: 0.18, hipPadSize: 0.22,
-        hasWings: isFlyer, wingSpan: 1.0, wingAngle: 0.4,
-        hasCannons: false, cannonSize: 0.2,
-        hasBackpack: false, backpackSize: 0.4,
-        hasVisor: true, visorStyle: "round",
-        hasHorns: species.speciesArchetype === "beetle", hornLength: 0.3,
-        hasTail: species.speciesArchetype !== "beetle", tailLength: 0.55, tailSegments: 4,
-        hasAntennae: species.speciesArchetype === "beetle" || species.speciesArchetype === "frog", antennaLength: 0.25,
-        hasShield: false, shieldSize: 0.6,
-        extraPlating: 0, asymmetry: 0,
-        colors: {
-          primary: species.primary,
-          secondary: species.secondary,
-          emissive: species.emissive,
-        },
+    const t = species.elementalType;
+    const a = species.archetype;
+
+    // Defaults: chibi proportions — short stout torso, oversized head, big
+    // visor eyes — that read as cute robot mascots.
+    const style: RobotStyle = {
+      archetype: "pet",
+      scale: species.scale,
+      torsoWidth: 0.85, torsoHeight: 0.55, torsoDepth: 0.85,
+      headSize: 0.55, headShape: "sphere",
+      armLength: 0.42, armThickness: 0.13, armStyle: "cylinder",
+      legLength: 0.42, legThickness: 0.18, legStyle: "box",
+      shoulderPadSize: 0.18, hipPadSize: 0.22,
+      hasWings: false, wingSpan: 1.0, wingAngle: 0.4,
+      hasCannons: false, cannonSize: 0.2,
+      hasBackpack: false, backpackSize: 0.4,
+      hasVisor: true, visorStyle: "round",
+      hasHorns: false, hornLength: 0.25,
+      hasTail: false, tailLength: 0.5, tailSegments: 4,
+      hasAntennae: false, antennaLength: 0.25,
+      hasShield: false, shieldSize: 0.6,
+      extraPlating: 0, asymmetry: 0,
+      hasPanelLines: true, panelLineDensity: 1.2,
+      colors: {
+        primary: species.primary,
+        secondary: species.secondary,
+        emissive: species.emissive,
       },
     };
+
+    applyArchetype(a, style);
+    applyTypeAccents(t, style);
+
+    return { name: species.name, faction: "pet", style };
   }
 
   attemptCaptureNearest(): boolean {
@@ -287,7 +264,7 @@ export class BioCreatureSystem {
         c.position.x += (dx / d) * sp * dt;
         c.position.z += (dz / d) * sp * dt;
       }
-      const flying = c.species.speciesArchetype === "owl" || c.species.speciesArchetype === "serpent";
+      const flying = isFlyer(c.species.archetype);
       const baseY = flying ? 2.4 : 0.6;
       c.position.y = baseY + Math.sin(c.bobTimer) * (flying ? 0.3 : 0.1);
       c.hitbox.position.copyFrom(c.position);
@@ -314,22 +291,39 @@ export class BioCreatureSystem {
         this.resolveCapture(o.target);
       }
     }
+
+    // Gradual respawn: the wild world stays alive even after captures.
+    this.respawnTimer -= dt;
+    if (this.respawnTimer <= 0) {
+      this.respawnTimer = RESPAWN_INTERVAL;
+      const alive = this.creatures.filter(c => !c.captured).length;
+      if (alive < TARGET_WILD_POP) {
+        const radius = 280;
+        const angle = Math.random() * Math.PI * 2;
+        const r = 60 + Math.random() * (radius - 60);
+        const pos = new BABYLON.Vector3(Math.cos(angle) * r, 1, Math.sin(angle) * r);
+        this.spawnCreature(pickWeightedSpecies(), pos);
+      }
+    }
   }
 
   private resolveCapture(c: ActiveCreature): void {
     const baseChance = c.species.baseCaptureChance + this.getCaptureBonus();
     if (Math.random() < baseChance) {
       c.captured = true;
+      const baseStats = statsFromRarity(c.species.rarity);
       const cap: CapturedCreature = {
         id: c.id,
         speciesId: c.species.id,
         name: c.species.name,
         level: 1,
-        hp: 60,
-        attackPower: 10,
-        speed: 1.0,
+        hp: baseStats.hp,
+        attackPower: baseStats.attack,
+        speed: baseStats.speed,
       };
       this.captured.push(cap);
+      // Permanent dex flag (only valid known species — guards legacy/unknown ids).
+      if (getSpeciesById(c.species.id)) this.dexCaughtIds.add(c.species.id);
       this.bus.emit("effect:capture", {
         position: c.position.clone(),
         color: c.species.emissive.clone(),
@@ -358,6 +352,47 @@ export class BioCreatureSystem {
     return this.captured.slice();
   }
 
+  /** Persistent set of species ids the player has ever caught — used for
+   *  dex completion. Filtered to known species only. */
+  getDexCaughtIds(): string[] {
+    return Array.from(this.dexCaughtIds);
+  }
+
+  /** Hydrate captured roster from a save. Unknown species ids are
+   *  silently skipped; legacy entries that resolve via `getSpeciesById`
+   *  are restored with their persisted stats (or rebuilt from rarity if
+   *  the saved entry is malformed). */
+  loadCaptured(saved: any[] | undefined): void {
+    if (!Array.isArray(saved)) return;
+    let counter = 0;
+    for (const e of saved) {
+      if (!e || typeof e.speciesId !== "string") continue;
+      const sp = getSpeciesById(e.speciesId);
+      if (!sp) continue; // unknown id — skip rather than crash
+      const fallback = statsFromRarity(sp.rarity);
+      const cap: CapturedCreature = {
+        id: typeof e.id === "string" ? e.id : `bio_load_${counter++}`,
+        speciesId: sp.id,
+        name: typeof e.name === "string" ? e.name : sp.name,
+        level: typeof e.level === "number" ? e.level : 1,
+        hp: typeof e.hp === "number" ? e.hp : fallback.hp,
+        attackPower: typeof e.attackPower === "number" ? e.attackPower : fallback.attack,
+        speed: typeof e.speed === "number" ? e.speed : fallback.speed,
+      };
+      this.captured.push(cap);
+      this.dexCaughtIds.add(sp.id); // restoring a creature also flags the dex
+    }
+  }
+
+  /** Hydrate the dex-caught history from a save (independent of roster). */
+  loadDexCaughtIds(ids: string[] | undefined): void {
+    if (!Array.isArray(ids)) return;
+    for (const id of ids) {
+      if (typeof id !== "string") continue;
+      if (getSpeciesById(id)) this.dexCaughtIds.add(id);
+    }
+  }
+
   removeCaptured(id: string): CapturedCreature | null {
     const idx = this.captured.findIndex(c => c.id === id);
     if (idx < 0) return null;
@@ -366,7 +401,7 @@ export class BioCreatureSystem {
   }
 
   getSpecies(id: string): BioCreatureSpecies | null {
-    return BIO_SPECIES.find(s => s.id === id) ?? null;
+    return getSpeciesById(id);
   }
 
   dispose(): void {
@@ -382,4 +417,205 @@ export class BioCreatureSystem {
     this.creatures = [];
     this.factory.dispose();
   }
+}
+
+// ============================================================ archetype rigs
+// Each archetype mutates the base style to give the pet a recognizable
+// silhouette. The player sees a bunny by its tall ear-antennae, a dragon
+// by its wings + horns + tail, a turtle by its shell-backpack, etc.
+
+function applyArchetype(a: Archetype, s: RobotStyle): void {
+  switch (a) {
+    case "fox":
+      s.headSize = 0.6; s.headShape = "sphere";
+      s.hasTail = true; s.tailLength = 0.7; s.tailSegments = 5;
+      s.hasAntennae = true; s.antennaLength = 0.35; // ears
+      s.legStyle = "digitigrade"; s.legLength = 0.45;
+      s.visorStyle = "round";
+      break;
+    case "cat":
+      s.headSize = 0.6; s.headShape = "sphere";
+      s.hasTail = true; s.tailLength = 0.65; s.tailSegments = 5;
+      s.hasAntennae = true; s.antennaLength = 0.3;
+      s.legStyle = "digitigrade"; s.legLength = 0.42;
+      s.torsoWidth = 0.8; s.torsoHeight = 0.5;
+      break;
+    case "bunny":
+      s.headSize = 0.55; s.headShape = "sphere";
+      s.hasAntennae = true; s.antennaLength = 0.7; // tall ears
+      s.hasTail = true; s.tailLength = 0.18; s.tailSegments = 2;
+      s.legStyle = "digitigrade"; s.legLength = 0.55;
+      s.legThickness = 0.22;
+      s.visorStyle = "round";
+      break;
+    case "mouse":
+      s.scale *= 0.85;
+      s.headSize = 0.6; s.headShape = "sphere";
+      s.hasAntennae = true; s.antennaLength = 0.35;
+      s.hasTail = true; s.tailLength = 0.85; s.tailSegments = 6;
+      s.torsoHeight = 0.45;
+      break;
+    case "pup":
+      s.headSize = 0.6; s.headShape = "sphere";
+      s.hasTail = true; s.tailLength = 0.4; s.tailSegments = 3;
+      s.hasAntennae = true; s.antennaLength = 0.28;
+      s.legStyle = "digitigrade"; s.legLength = 0.45;
+      s.torsoWidth = 0.85;
+      break;
+    case "beetle":
+      s.headSize = 0.5; s.headShape = "sphere";
+      s.hasHorns = true; s.hornLength = 0.45;
+      s.hasAntennae = true; s.antennaLength = 0.4;
+      s.hasBackpack = true; s.backpackSize = 0.55; // shell
+      s.extraPlating = 2;
+      s.legLength = 0.32;
+      break;
+    case "frog":
+      s.headSize = 0.65; s.headShape = "sphere";
+      s.legLength = 0.6; s.legThickness = 0.22;
+      s.hasAntennae = true; s.antennaLength = 0.18;
+      s.torsoWidth = 0.95; s.torsoHeight = 0.5;
+      s.visorStyle = "full";
+      break;
+    case "lizard":
+      s.headSize = 0.55; s.headShape = "cone";
+      s.hasTail = true; s.tailLength = 0.85; s.tailSegments = 6;
+      s.legStyle = "digitigrade"; s.legLength = 0.4;
+      s.extraPlating = 1;
+      break;
+    case "salamander":
+      s.headSize = 0.55; s.headShape = "cone";
+      s.hasTail = true; s.tailLength = 0.95; s.tailSegments = 7;
+      s.legLength = 0.32; s.legThickness = 0.16;
+      s.torsoHeight = 0.45;
+      break;
+    case "serpent":
+      s.headSize = 0.5; s.headShape = "cone";
+      s.hasTail = true; s.tailLength = 1.4; s.tailSegments = 9;
+      s.hasWings = true; s.wingSpan = 0.9; s.wingAngle = 0.2;
+      s.legLength = 0.18; s.legThickness = 0.1;
+      s.torsoHeight = 0.4; s.torsoWidth = 0.6;
+      break;
+    case "owl":
+      s.headSize = 0.65; s.headShape = "sphere";
+      s.hasWings = true; s.wingSpan = 1.3; s.wingAngle = 0.45;
+      s.hasAntennae = true; s.antennaLength = 0.3; // ear tufts
+      s.legLength = 0.35;
+      s.visorStyle = "full";
+      break;
+    case "bird":
+      s.headSize = 0.55; s.headShape = "cone";
+      s.hasWings = true; s.wingSpan = 1.4; s.wingAngle = 0.5;
+      s.hasTail = true; s.tailLength = 0.55; s.tailSegments = 4;
+      s.legStyle = "digitigrade"; s.legLength = 0.4;
+      break;
+    case "dragon":
+      s.headSize = 0.6; s.headShape = "cone";
+      s.hasHorns = true; s.hornLength = 0.5;
+      s.hasWings = true; s.wingSpan = 1.5; s.wingAngle = 0.5;
+      s.hasTail = true; s.tailLength = 0.95; s.tailSegments = 6;
+      s.extraPlating = 2;
+      s.legStyle = "digitigrade"; s.legLength = 0.5;
+      break;
+    case "fish":
+      s.headSize = 0.6; s.headShape = "cone";
+      s.hasWings = true; s.wingSpan = 0.7; s.wingAngle = 0.7; // fins
+      s.hasTail = true; s.tailLength = 0.7; s.tailSegments = 3;
+      s.legLength = 0.15; s.legThickness = 0.08;
+      s.torsoWidth = 0.6; s.torsoHeight = 0.6; s.torsoDepth = 1.0;
+      break;
+    case "crab":
+      s.torsoWidth = 1.05; s.torsoHeight = 0.45; s.torsoDepth = 0.95;
+      s.shoulderPadSize = 0.4;
+      s.hasAntennae = true; s.antennaLength = 0.25;
+      s.armLength = 0.55; s.armStyle = "tapered";
+      s.legLength = 0.3;
+      s.extraPlating = 2;
+      break;
+    case "turtle":
+      s.torsoWidth = 0.9; s.torsoHeight = 0.55;
+      s.hasBackpack = true; s.backpackSize = 0.85; // shell
+      s.hasTail = true; s.tailLength = 0.3; s.tailSegments = 2;
+      s.legLength = 0.32; s.legThickness = 0.22;
+      s.extraPlating = 3;
+      break;
+    case "bear":
+      s.scale *= 1.05;
+      s.headSize = 0.6; s.headShape = "sphere";
+      s.hasAntennae = true; s.antennaLength = 0.2;
+      s.torsoWidth = 1.1; s.torsoHeight = 0.7; s.torsoDepth = 0.95;
+      s.armThickness = 0.22; s.armLength = 0.55;
+      s.legLength = 0.5; s.legThickness = 0.28;
+      s.extraPlating = 2;
+      break;
+    case "monkey":
+      s.headSize = 0.55; s.headShape = "sphere";
+      s.armLength = 0.7; s.armStyle = "tapered";
+      s.hasTail = true; s.tailLength = 1.0; s.tailSegments = 7;
+      s.legStyle = "digitigrade"; s.legLength = 0.5;
+      break;
+    case "golem":
+      s.scale *= 1.15;
+      s.headShape = "box"; s.headSize = 0.55;
+      s.torsoWidth = 1.2; s.torsoHeight = 0.85; s.torsoDepth = 1.05;
+      s.armThickness = 0.28; s.armStyle = "box";
+      s.legThickness = 0.32; s.legLength = 0.55;
+      s.extraPlating = 3;
+      s.shoulderPadSize = 0.45;
+      break;
+    case "flutter":
+      s.scale *= 0.9;
+      s.headSize = 0.5;
+      s.hasWings = true; s.wingSpan = 1.5; s.wingAngle = 0.6;
+      s.hasAntennae = true; s.antennaLength = 0.45;
+      s.legLength = 0.25; s.legThickness = 0.1;
+      s.torsoHeight = 0.4; s.torsoWidth = 0.55;
+      break;
+    case "slime":
+      s.headSize = 0.85; s.headShape = "sphere";
+      s.torsoWidth = 1.0; s.torsoHeight = 0.4; s.torsoDepth = 1.0;
+      s.armLength = 0.25; s.armThickness = 0.1;
+      s.legLength = 0.15; s.legThickness = 0.18;
+      s.visorStyle = "round";
+      break;
+  }
+}
+
+/** Type-themed accent flourishes that don't override archetype silhouette. */
+function applyTypeAccents(t: ElementalType, s: RobotStyle): void {
+  switch (t) {
+    case "fire":
+      s.hasHorns = s.hasHorns || true; s.hornLength = Math.max(s.hornLength, 0.3);
+      break;
+    case "electric":
+      s.hasAntennae = true; s.antennaLength = Math.max(s.antennaLength, 0.4);
+      break;
+    case "ice":
+    case "crystal":
+      s.extraPlating = Math.max(s.extraPlating, 2);
+      break;
+    case "psychic":
+      s.visorStyle = "full";
+      break;
+    case "dark":
+      s.panelLineDensity = (s.panelLineDensity ?? 1.0) * 1.5;
+      break;
+    case "steel":
+      s.extraPlating = Math.max(s.extraPlating, 2);
+      s.armStyle = s.armStyle === "tapered" ? "tapered" : "box";
+      break;
+    case "dragon":
+      s.hasWings = true; s.wingSpan = Math.max(s.wingSpan, 1.2);
+      s.hasHorns = true; s.hornLength = Math.max(s.hornLength, 0.45);
+      break;
+    case "water":
+    case "grass":
+    case "normal":
+    default:
+      break;
+  }
+}
+
+function isFlyer(a: Archetype): boolean {
+  return a === "owl" || a === "bird" || a === "serpent" || a === "dragon" || a === "flutter" || a === "fish";
 }

@@ -176,6 +176,9 @@ export const Game: React.FC = () => {
   const [gardenOpen, setGardenOpen] = useState(false);
   const [gardenStructure, setGardenStructure] = useState<BaseStructure | null>(null);
   const [capturedCreatures, setCapturedCreatures] = useState<CapturedCreature[]>([]);
+  // Persistent "ever caught" species ids for the dex completion UI. Only
+  // grows; survives DEPLOY which removes a creature from the live roster.
+  const [dexCaughtIds, setDexCaughtIds] = useState<string[]>([]);
   const [planMode, setPlanMode] = useState(false);
   const [prefabHotbar, setPrefabHotbar] = useState<PrefabSummary[]>([]);
   const [selectedPrefabIndex, setSelectedPrefabIndex] = useState(0);
@@ -888,6 +891,9 @@ export const Game: React.FC = () => {
             totalKills: totalKillsLocal,
             highestWave: Math.max(highestWaveLocal, enemySystem.getWaveNumber()),
             capturedCreatures: captures as any[],
+            // Persistent dex history — preserves the "ever caught" set even
+            // after DEPLOY removes a creature from the live roster.
+            bioDexCaughtIds: bioSystem.getDexCaughtIds(),
             savedAt: Date.now(),
 
             companions,
@@ -1002,6 +1008,15 @@ export const Game: React.FC = () => {
               // and bump enemy difficulty.
               if (snap.worldLevel && levelSystemRef.current) {
                 levelSystemRef.current.applyLoadedState({ worldLevel: snap.worldLevel });
+              }
+              // Restore captured pets and dex history. loadCaptured silently
+              // skips entries whose speciesId no longer resolves, so legacy
+              // saves don't crash on unknown ids.
+              if (bioRef.current) {
+                bioRef.current.loadCaptured(snap.capturedCreatures);
+                bioRef.current.loadDexCaughtIds(snap.bioDexCaughtIds);
+                setCapturedCreatures(bioRef.current.getCaptured());
+                setDexCaughtIds(bioRef.current.getDexCaughtIds());
               }
 
               showMessage(`PROGRESS LOADED — LVL ${snap.stats.level} | ${snap.stats.credits}cr`, 2500);
@@ -1457,6 +1472,7 @@ export const Game: React.FC = () => {
               .filter((r): r is NonNullable<typeof r> => !!r);
             setCompanionWeaponInfo(cwRows);
             setCapturedCreatures(bioSystem.getCaptured());
+            setDexCaughtIds(bioSystem.getDexCaughtIds());
           }
 
           if (player.getStats().health <= 0 && !deathHandledRef.current) {
@@ -1751,7 +1767,10 @@ export const Game: React.FC = () => {
         .filter((r): r is NonNullable<typeof r> => !!r);
       setCompanionWeaponInfo(rows);
     }
-    if (bio) setCapturedCreatures(bio.getCaptured());
+    if (bio) {
+      setCapturedCreatures(bio.getCaptured());
+      setDexCaughtIds(bio.getDexCaughtIds());
+    }
   }, []);
 
   const handleUpgradeWeapon = useCallback((type: string) => {
@@ -2299,6 +2318,7 @@ export const Game: React.FC = () => {
           gardenCaptureBonus={baseRef.current?.getGardenCaptureBonus() ?? 0}
           gardenCapacityMax={Math.max(6, baseRef.current?.getGardenCaptureCap() ?? 6)}
           gardenCaptured={capturedCreatures}
+          gardenDexCaughtIds={dexCaughtIds}
           bioEssenceCount={resourceCounts.bioEssence}
           gardenUpgradeCost={gardenUpgradeCost}
           gardenCanUpgrade={gardenCanUpgrade}
