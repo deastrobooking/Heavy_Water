@@ -8,6 +8,7 @@ import { PlayerController, PlayerStats, PlayerUpgradeInfo } from "./PlayerContro
 import { WeaponsSystem, Weapon } from "./WeaponsSystem";
 import { EnemySystem } from "./EnemySystem";
 import { AerialEnemySystem } from "./AerialEnemySystem";
+import { SmashAttackSystem } from "./SmashAttackSystem";
 import { EnemyHealthBarSystem, EnemyLike } from "./EnemyHealthBarSystem";
 import { FriendlyNPCSystem } from "./FriendlyNPCSystem";
 import { GamepadInput } from "./GamepadInput";
@@ -103,6 +104,7 @@ export const Game: React.FC = () => {
   const weaponsRef = useRef<WeaponsSystem | null>(null);
   const enemySystemRef = useRef<EnemySystem | null>(null);
   const aerialEnemyRef = useRef<AerialEnemySystem | null>(null);
+  const smashAttackRef = useRef<SmashAttackSystem | null>(null);
   const enemyHealthBarsRef = useRef<EnemyHealthBarSystem | null>(null);
   const friendlyNPCsRef = useRef<FriendlyNPCSystem | null>(null);
   const sanctuarySystemRef = useRef<SanctuarySystem | null>(null);
@@ -819,6 +821,11 @@ export const Game: React.FC = () => {
         // allocate a fresh array dozens of times per second.
         {
           const autoAimScratch: BABYLON.Vector3[] = [];
+          // Spinning Downward Smash: hold KeyJ (gamepad LT in foot context)
+          // for 1 s while airborne to dive-bomb straight down and detonate
+          // a circular shockwave on landing.
+          smashAttackRef.current = new SmashAttackSystem(player, enemySystem, aerialEnemySystem, bus);
+
           weapons.setEnemyTargetProvider(() => {
             autoAimScratch.length = 0;
             const ground = enemySystem.getEnemyMeshes();
@@ -1564,6 +1571,10 @@ export const Game: React.FC = () => {
 
           vehicleSystem.update(dt);
           player.update(dt);
+          // Smash dive runs after the player physics tick so its visual
+          // spin and per-frame land-check see the up-to-date isGrounded
+          // state.
+          smashAttackRef.current?.update(dt);
           // Amplify weapons while mounted in a vehicle (1.5x size/damage/explosion).
           const mounted = player.isMounted();
           weapons.setVehicleMode(mounted);
@@ -1931,6 +1942,8 @@ export const Game: React.FC = () => {
         enemySystemRef.current = null;
         if (aerialEnemyRef.current) { try { aerialEnemyRef.current.dispose(); } catch {} }
         aerialEnemyRef.current = null;
+        if (smashAttackRef.current) { try { smashAttackRef.current.dispose(); } catch {} }
+        smashAttackRef.current = null;
         chestSystemRef.current = null;
         combatSystemRef.current = null;
         specialWeaponsRef.current = null;
@@ -2041,6 +2054,7 @@ export const Game: React.FC = () => {
     if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }
     if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} gamepadRef.current = null; }
     if (aerialEnemyRef.current) { try { aerialEnemyRef.current.dispose(); } catch {} aerialEnemyRef.current = null; }
+    if (smashAttackRef.current) { try { smashAttackRef.current.dispose(); } catch {} smashAttackRef.current = null; }
     // CRITICAL: these systems also subscribe to EventBus / hold scene state.
     // Skipping their dispose was the root cause of the multi-restart freeze:
     // every restart left a fresh listener stack on the bus, so each event
@@ -2487,8 +2501,18 @@ export const Game: React.FC = () => {
           if (megaCannonRef.current && (weaponHeldRef.current || now - weaponPressTimeRef.current < COMBO_WINDOW_MS)) {
             megaCannonRef.current.fire();
           }
-          if (beamSabreRef.current) {
+          // Smash takes priority while airborne: if the player is in the
+          // air, route KeyJ exclusively to the smash so the sabre charge
+          // doesn't compete (the spinning-blade release on keyup would
+          // also fire alongside the smash). Sabre slash + charge still
+          // own the key when grounded.
+          const playerCtl = playerRef.current;
+          const routeToSmash = !!playerCtl && !playerCtl.getIsGrounded() && !playerCtl.isMounted();
+          if (!routeToSmash && beamSabreRef.current) {
             beamSabreRef.current.startCharge();
+          }
+          if (routeToSmash) {
+            smashAttackRef.current?.notifyKeyDown();
           }
         }
       } else if (e.code === "Semicolon") {
@@ -2537,12 +2561,17 @@ export const Game: React.FC = () => {
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === "KeyY" || e.code === "KeyJ") {
         beamHeldRef.current = false;
-        // Resolve a held attack — fires the Spinning Blade if the upgrade is
-        // owned and the key was held long enough; otherwise it's a no-op
-        // (the slash already fired on press).
-        if (beamSabreRef.current) {
+        // Mirror the keydown routing: the sabre release only fires if
+        // the press was for the sabre (i.e. wasn't routed to the smash).
+        // notifyKeyUp is always safe — it's a no-op when nothing is
+        // charging, and it's how a player aborts an in-progress charge
+        // by releasing the trigger before the 1 s threshold.
+        const smash = smashAttackRef.current;
+        const routedToSmash = !!smash && smash.consumedLastPress();
+        if (!routedToSmash && beamSabreRef.current) {
           beamSabreRef.current.releaseCharge();
         }
+        smash?.notifyKeyUp();
       }
     };
     // Mouse left button drives the Mega Beam Cannon combo too: pressing it
@@ -2657,6 +2686,7 @@ export const Game: React.FC = () => {
       if (pontiacLabSystemRef.current) { try { pontiacLabSystemRef.current.dispose(); } catch {} pontiacLabSystemRef.current = null; }
       if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }
       if (aerialEnemyRef.current) aerialEnemyRef.current.dispose();
+      if (smashAttackRef.current) { try { smashAttackRef.current.dispose(); } catch {} smashAttackRef.current = null; }
       if (gamepadRef.current) gamepadRef.current.dispose();
       if (multiplayerRef.current) multiplayerRef.current.dispose();
       if (engineRef.current) engineRef.current.dispose();

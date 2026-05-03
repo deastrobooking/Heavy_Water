@@ -77,6 +77,12 @@ export class PlayerController implements IDamageable {
   private meshRoot!: BABYLON.TransformNode | BABYLON.Mesh;
   private velocity: BABYLON.Vector3 = BABYLON.Vector3.Zero();
   private isGrounded: boolean = true;
+  // Spinning Downward Smash (KeyJ-hold air-attack). When true, updatePhysics
+  // forces velocity to a fast pure-down dive and ignores horizontal input
+  // until the player touches a surface; on landing it fires the stored
+  // callback so SmashAttackSystem can spawn the shockwave + AoE damage.
+  private isAirSmashing: boolean = false;
+  private airSmashLandCb: (() => void) | null = null;
   private wallColliders: WallCollider[] = [];
   private floorPlatforms: FloorPlatform[] = [];
   // Wall slide / wall jump state
@@ -899,7 +905,17 @@ export class PlayerController implements IDamageable {
     // Touching a wall in mid-air resets after landing
     if (this.isGrounded) this.wallTouchTimer = 0;
 
-    if (!this.isGrounded && !this.isJetpacking) {
+    // Spinning Downward Smash: while active, ignore gravity / fall multiplier
+    // and slam straight down at terminal velocity. Horizontal momentum is
+    // killed so the player drops on a true vertical line. The mode self-
+    // cancels at the bottom of updatePhysics() once isGrounded flips true.
+    if (this.isAirSmashing && !this.isGrounded) {
+      this.velocity.x = 0;
+      this.velocity.z = 0;
+      this.velocity.y = -1.4; // matches maxFallSpeed below
+    }
+
+    if (!this.isGrounded && !this.isJetpacking && !this.isAirSmashing) {
       // Asymmetric "fall multiplier" — classic platformer trick: gravity
       // is normal on the way up so jump height/feel is unchanged, but
       // ramps up by 2.2× while descending so the player doesn't float
@@ -983,6 +999,18 @@ export class PlayerController implements IDamageable {
 
     if (this.isGrounded && this.armorEnergy < this.maxArmorEnergy) {
       this.armorEnergy = Math.min(this.maxArmorEnergy, this.armorEnergy + this.armorEnergyRegen * dt);
+    }
+
+    // Smash-dive landed this frame — fire the callback so the system that
+    // started the smash can spawn its shockwave + AoE damage. Clear state
+    // first in case the callback re-enters the controller.
+    if (this.isAirSmashing && this.isGrounded) {
+      this.isAirSmashing = false;
+      const cb = this.airSmashLandCb;
+      this.airSmashLandCb = null;
+      if (cb) {
+        try { cb(); } catch (err) { console.warn("airSmash land callback failed", err); }
+      }
     }
   }
 
@@ -1138,6 +1166,11 @@ export class PlayerController implements IDamageable {
 
   setMounted(vehicleRoot: BABYLON.TransformNode | null): void {
     if (vehicleRoot) {
+      // Cancel any in-flight smash dive: while mounted the controller's
+      // updatePhysics() doesn't run, so the auto-clear-on-land path can
+      // never fire and the player would warp out still flagged as
+      // smashing. Drop the callback too so a stale onLand can't fire.
+      this.cancelAirSmash();
       this.mountedVehicleRoot = vehicleRoot;
       this.mountedVehiclePos = vehicleRoot.position;
       this.velocity.setAll(0);
@@ -1600,6 +1633,59 @@ export class PlayerController implements IDamageable {
 
   getPlayerState(): PlayerState {
     return this.stateMachine.getState() ?? "idle";
+  }
+
+  /** True only when the capsule is resting on a surface this frame. */
+  getIsGrounded(): boolean {
+    return this.isGrounded;
+  }
+
+  /** Used by SmashAttackSystem to gate charge-start (no smash while
+   *  jetpacking or in DBZ free-flight — those modes own velocity.y). */
+  getIsJetpacking(): boolean {
+    return this.isJetpacking;
+  }
+
+  /** True if the player is currently mid-smash. Lets external systems
+   *  (e.g. SmashAttackSystem) know they should keep ticking damage. */
+  getIsAirSmashing(): boolean {
+    return this.isAirSmashing;
+  }
+
+  /** Begin a downward smash. Returns true if the request was accepted.
+   *  Rejected when the player is already grounded, jetpacking, in
+   *  free-flight, dodging, or already smashing. The callback fires
+   *  exactly once when the player touches a surface again. */
+  startAirSmash(onLand: () => void): boolean {
+    if (this.isGrounded || this.isJetpacking || this.isFlying || this.isDodging || this.isAirSmashing) {
+      return false;
+    }
+    this.isAirSmashing = true;
+    this.airSmashLandCb = onLand;
+    // Kill any residual horizontal momentum immediately so the dive reads
+    // as a pure straight-down plunge from frame one.
+    this.velocity.x = 0;
+    this.velocity.z = 0;
+    this.velocity.y = -1.4;
+    return true;
+  }
+
+  /** Force-cancel an in-flight smash dive without firing the land
+   *  callback. Used by mount / fast-travel transitions where the dive
+   *  would otherwise be stranded (updatePhysics doesn't run while the
+   *  player is mounted, and the new world's ground plane doesn't carry
+   *  the dive's intent). */
+  cancelAirSmash(): void {
+    this.isAirSmashing = false;
+    this.airSmashLandCb = null;
+  }
+
+  /** Visual-only spin: the calling system rotates the player mesh once per
+   *  frame for the cosmetic spinning-blade look. Bypasses the yaw lock
+   *  used by the normal locomotion path because that lock only runs while
+   *  the player is moving on the ground. */
+  applySmashSpin(angleDelta: number): void {
+    this.mesh.rotation.y += angleDelta;
   }
 
   setMeleeCallbacks(light: () => void, heavy: () => void): void {
