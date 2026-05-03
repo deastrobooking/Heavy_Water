@@ -141,11 +141,14 @@ export class MegaBeamCannonSystem {
       cyl.isPickable = false;
       cyl.position.copyFrom(center);
       // Orient cylinder along forward. Default cylinder long axis is +Y.
-      cyl.rotationQuaternion = BABYLON.Quaternion.FromUnitVectorsToRef(
-        BABYLON.Vector3.Up(),
-        forward,
-        new BABYLON.Quaternion(),
-      );
+      // NOTE: `FromUnitVectorsToRef` returns void (it writes into the ref
+      // param), so the previous code accidentally assigned `undefined` to
+      // rotationQuaternion and the beam stayed vertical, shooting straight
+      // up ~110m in front of the player — invisible from the camera. Build
+      // the quaternion explicitly and assign it after.
+      const q = new BABYLON.Quaternion();
+      BABYLON.Quaternion.FromUnitVectorsToRef(BABYLON.Vector3.Up(), forward, q);
+      cyl.rotationQuaternion = q;
       meshes.push(cyl);
     }
 
