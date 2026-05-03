@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { MusicSystem } from "./MusicSystem";
 import { MusicPlayerUI } from "./MusicPlayerUI";
+import { GameplayGuide } from "./GameplayGuide";
 
 interface MainMenuProps {
   onStart: () => void;
@@ -8,6 +9,7 @@ interface MainMenuProps {
 }
 
 export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize }) => {
+  const [showGuide, setShowGuide] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void MusicSystem.init().then(() => {
@@ -132,8 +134,18 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize }) => {
               CUSTOMIZE
             </button>
           )}
+          <button
+            onClick={() => setShowGuide(true)}
+            className="px-8 py-4 text-xl font-bold text-amber-200 bg-black/40 border-2 border-amber-300
+                       rounded-lg transform hover:scale-105 transition-all duration-300
+                       shadow-lg shadow-amber-500/30 hover:bg-amber-500/15"
+          >
+            GUIDE
+          </button>
         </div>
       </div>
+
+      {showGuide && <GameplayGuide onClose={() => setShowGuide(false)} />}
 
       {/* === GAMEPLAY INSTRUCTIONS — reserved space at bottom === */}
       <div className="relative z-10 w-full max-w-4xl mt-auto mb-6 px-6">

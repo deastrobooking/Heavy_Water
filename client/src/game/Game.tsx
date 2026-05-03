@@ -326,7 +326,7 @@ export const Game: React.FC = () => {
 
     setGamePhase("playing");
 
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
         if (!canvasRef.current) {
           throw new Error("Canvas not available");
@@ -335,7 +335,11 @@ export const Game: React.FC = () => {
         const bus = EventBus.getInstance();
         bus.clear();
 
-        const engine = new BabylonEngine(canvasRef.current);
+        // `BabylonEngine.create()` is async because it may spin up a
+        // WebGPU backend (which requires `await initAsync()`). It always
+        // resolves to a fully-initialized engine, falling back to WebGL2
+        // if WebGPU is opted-out / unsupported / fails to init.
+        const engine = await BabylonEngine.create(canvasRef.current);
         engineRef.current = engine;
 
         const scene = engine.getScene();

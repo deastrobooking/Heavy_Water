@@ -7,9 +7,20 @@ export interface OutlineConfig {
   enabled: boolean;
 }
 
+/**
+ * LocalStorage flag — set `localStorage.setItem("heavywater:webgpu", "1")`
+ * to opt this session into the experimental WebGPU backend. Off by default
+ * because our custom cell-shading outline shader is GLSL-ES-1.0 and only
+ * compiles on the WebGL2 backend; WebGPU still gets bloom / FXAA /
+ * chromatic aberration via Babylon's built-in pipeline (which auto-
+ * recompiles its shaders for whichever backend is active).
+ */
+const WEBGPU_FLAG_KEY = "heavywater:webgpu";
+
 export class BabylonEngine {
   private canvas: HTMLCanvasElement;
-  private engine: BABYLON.Engine;
+  private engine: BABYLON.AbstractEngine;
+  private isWebGPU: boolean;
   private scene: BABYLON.Scene;
   private camera: BABYLON.FreeCamera;
   private outlinePostProcess: BABYLON.PostProcess | null = null;
@@ -22,7 +33,80 @@ export class BabylonEngine {
     enabled: true,
   };
 
-  constructor(canvas: HTMLCanvasElement) {
+  /**
+   * Async factory — picks the best supported backend.
+   *
+   * Order:
+   *   1. If `localStorage["heavywater:webgpu"] === "1"` AND WebGPU is
+   *      reported supported, try to spin up `BABYLON.WebGPUEngine`.
+   *      `initAsync()` can still fail (no adapter, driver bug, etc), in
+   *      which case we fall through.
+   *   2. Otherwise (or on WebGPU failure), use the classic
+   *      WebGL2/`BABYLON.Engine`.
+   *
+   * The constructor is sync and just stores the already-built engine.
+   */
+  static async create(canvas: HTMLCanvasElement): Promise<BabylonEngine> {
+    if (canvas.width === 0 || canvas.height === 0) {
+      canvas.width = canvas.clientWidth || window.innerWidth;
+      canvas.height = canvas.clientHeight || window.innerHeight;
+    }
+
+    const wantsWebGPU =
+      typeof window !== "undefined" &&
+      window.localStorage?.getItem(WEBGPU_FLAG_KEY) === "1";
+
+    let engine: BABYLON.AbstractEngine | null = null;
+    let isWebGPU = false;
+
+    if (wantsWebGPU) {
+      try {
+        const WG = (BABYLON as any).WebGPUEngine;
+        const supported = WG && typeof WG.IsSupportedAsync !== "undefined"
+          ? await WG.IsSupportedAsync
+          : false;
+        if (supported) {
+          const wgEngine = new WG(canvas, {
+            antialias: true,
+            stencil: true,
+          });
+          await wgEngine.initAsync();
+          engine = wgEngine;
+          isWebGPU = true;
+          console.log("[BabylonEngine] WebGPU backend active");
+        } else {
+          console.log("[BabylonEngine] WebGPU requested but not supported here — using WebGL2");
+        }
+      } catch (e) {
+        console.warn("[BabylonEngine] WebGPU init failed, falling back to WebGL2:", e);
+        engine = null;
+        isWebGPU = false;
+      }
+    }
+
+    if (!engine) {
+      engine = new BABYLON.Engine(canvas, true, {
+        preserveDrawingBuffer: true,
+        stencil: true,
+      });
+      isWebGPU = false;
+      console.log("[BabylonEngine] WebGL2 backend active");
+    }
+
+    return new BabylonEngine(canvas, engine, isWebGPU);
+  }
+
+  /**
+   * Direct constructor — kept public for back-compat with tests/callers
+   * that don't need the WebGPU path. Builds a classic WebGL2 engine.
+   * Most callers should use `BabylonEngine.create()` instead so the
+   * WebGPU opt-in is honored.
+   */
+  constructor(
+    canvas: HTMLCanvasElement,
+    prebuiltEngine?: BABYLON.AbstractEngine,
+    isWebGPU: boolean = false,
+  ) {
     this.canvas = canvas;
 
     if (canvas.width === 0 || canvas.height === 0) {
@@ -30,10 +114,16 @@ export class BabylonEngine {
       canvas.height = canvas.clientHeight || window.innerHeight;
     }
 
-    this.engine = new BABYLON.Engine(canvas, true, {
-      preserveDrawingBuffer: true,
-      stencil: true,
-    });
+    if (prebuiltEngine) {
+      this.engine = prebuiltEngine;
+      this.isWebGPU = isWebGPU;
+    } else {
+      this.engine = new BABYLON.Engine(canvas, true, {
+        preserveDrawingBuffer: true,
+        stencil: true,
+      });
+      this.isWebGPU = false;
+    }
 
     // Disable parallel shader compilation. With it on, a freshly-built
     // material can hit a render frame before its GLSL program is linked,
@@ -42,11 +132,15 @@ export class BabylonEngine {
     // `bindSamplers`. We hit this consistently during scene rebuilds (death /
     // respawn / restart). Synchronous compile costs a one-off ~tens of ms per
     // rebuild but eliminates the dropped-frame errors entirely.
-    try {
-      const caps = this.engine.getCaps();
-      (caps as { parallelShaderCompile?: unknown }).parallelShaderCompile = undefined;
-    } catch (e) {
-      console.warn("Could not disable parallel shader compile:", e);
+    // (WebGPU has its own async pipeline-compile flow; the WebGL hack is
+    //  not applicable there.)
+    if (!this.isWebGPU) {
+      try {
+        const caps = this.engine.getCaps();
+        (caps as { parallelShaderCompile?: unknown }).parallelShaderCompile = undefined;
+      } catch (e) {
+        console.warn("Could not disable parallel shader compile:", e);
+      }
     }
 
     this.scene = new BABYLON.Scene(this.engine);
@@ -59,13 +153,27 @@ export class BabylonEngine {
       console.warn("Post-processing setup failed, continuing without it:", e);
     }
 
-    try {
-      this.setupCellShadingOutline();
-    } catch (e) {
-      console.warn("Cell-shading outline setup failed, continuing without it:", e);
+    // Custom GLSL-ES-1.0 cell-shading outline only compiles on WebGL2.
+    // WebGPU expects WGSL / GLSL3, so we skip it there — the player still
+    // gets bloom + FXAA + chromatic aberration from Babylon's built-in
+    // pipeline. We can port the outline shader to WGSL later.
+    if (!this.isWebGPU) {
+      try {
+        this.setupCellShadingOutline();
+      } catch (e) {
+        console.warn("Cell-shading outline setup failed, continuing without it:", e);
+      }
+    } else {
+      console.log("[BabylonEngine] Skipping ink-outline post-process on WebGPU backend");
     }
 
     this.boostMaterialBrightness();
+  }
+
+  /** True if the active backend is WebGPU. Useful for UI badges and for
+   *  GPU-only effect paths (GPU particles, compute-driven systems). */
+  isUsingWebGPU(): boolean {
+    return this.isWebGPU;
   }
 
   private createCamera(): BABYLON.FreeCamera {
@@ -308,7 +416,7 @@ export class BabylonEngine {
     return this.camera;
   }
 
-  getEngine(): BABYLON.Engine {
+  getEngine(): BABYLON.AbstractEngine {
     return this.engine;
   }
 
