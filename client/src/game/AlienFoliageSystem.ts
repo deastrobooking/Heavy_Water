@@ -239,6 +239,77 @@ export class AlienFoliageSystem {
     }
   }
 
+  /**
+   * Densely scatter plants inside a circular zone (used by the Sanctuary
+   * to crank up organic life around the village). Bypasses the global
+   * wilderness-band restriction and uses a tighter spacing so the area
+   * actually feels like an alien biome.
+   *
+   * Returns a disposer that removes only the plants this call placed —
+   * so the Sanctuary can wipe its added foliage when the player warps
+   * out without nuking the world's regular plants.
+   *
+   * @param center   World position to scatter around (XZ; y is ignored).
+   * @param radius   Cluster radius in metres.
+   * @param count    Target number of plants to place.
+   * @param spacing  Minimum XZ distance between plants in this cluster.
+   * @param seed     PRNG seed (deterministic for the same input).
+   */
+  scatterZone(
+    center: BABYLON.Vector3,
+    radius: number,
+    count: number,
+    spacing: number = 6,
+    seed: number = 0xA5A5A5,
+  ): () => void {
+    const rng = AlienFoliageSystem.makeRng(seed);
+    const presetKeys = Object.keys(LSystemPresets) as LSystemPresetKey[];
+    const localPlants: Array<{ root: BABYLON.TransformNode; pos: BABYLON.Vector3 }> = [];
+    const sp2 = spacing * spacing;
+
+    let placed = 0;
+    let attempts = 0;
+    const maxAttempts = count * 6;
+    while (placed < count && attempts < maxAttempts) {
+      attempts++;
+      // Polar in the local zone.
+      const a = rng() * Math.PI * 2;
+      const r = Math.sqrt(rng()) * radius; // sqrt → uniform area distribution
+      const x = center.x + Math.cos(a) * r;
+      const z = center.z + Math.sin(a) * r;
+
+      // Local spacing only against this cluster — global plants are far
+      // enough away that they won't conflict with sanctuary plants.
+      let ok = true;
+      for (const p of localPlants) {
+        const dx = x - p.pos.x;
+        const dz = z - p.pos.z;
+        if (dx * dx + dz * dz < sp2) { ok = false; break; }
+      }
+      if (!ok) continue;
+
+      const presetKey = presetKeys[Math.floor(rng() * presetKeys.length)];
+      // Snapshot length so we know which entries we just appended.
+      const before = this.plants.length;
+      this.spawnPlant(presetKey, new BABYLON.Vector3(x, 0, z), rng);
+      const after = this.plants.length;
+      if (after > before) {
+        localPlants.push(this.plants[after - 1]);
+      }
+      placed++;
+    }
+
+    // Disposer: removes only the entries we appended, in reverse order.
+    return () => {
+      for (const p of localPlants) {
+        const idx = this.plants.indexOf(p);
+        if (idx !== -1) this.plants.splice(idx, 1);
+        try { p.root.dispose(false, false); } catch {}
+      }
+      localPlants.length = 0;
+    };
+  }
+
   dispose(): void {
     if (this.observer) {
       this.scene.onBeforeRenderObservable.remove(this.observer);

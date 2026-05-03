@@ -4,15 +4,19 @@ import { FriendlyNPCSystem } from "./FriendlyNPCSystem";
 import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
 import type { BaseSystem } from "./BaseSystem";
 import type { CityGenerator } from "./CityGenerator";
+import type { AlienFoliageSystem } from "./AlienFoliageSystem";
 
 /** Optional handles SanctuarySystem hides on mount + restores on dispose so
  *  Level 4 reads as a *truly distinct* world (rolling green plains village)
  *  rather than a corner of Detroit with cottages dropped on top. Mirrors
  *  the same "worldVisibles" pattern SpaceLevelSystem uses for the orbital
- *  zone — both levels share the city + mountain + foliage + props bag. */
+ *  zone — both levels share the city + mountain + foliage + props bag.
+ *  `foliage` is also passed in directly (not just hidden) so the sanctuary
+ *  can densely scatter L-system plants of its own around the village. */
 export interface SanctuaryHandles {
   city?: CityGenerator | null;
   worldVisibles?: Array<{ setVisible(visible: boolean): void } | null | undefined>;
+  foliage?: AlienFoliageSystem | null;
 }
 
 /**
@@ -54,6 +58,22 @@ export class SanctuarySystem {
   private handles: SanctuaryHandles;
   private hiddenVisibles: Array<{ setVisible(v: boolean): void }> = [];
   private cityHidden: boolean = false;
+  /** Removes only the alien plants this sanctuary placed (set by
+   *  AlienFoliageSystem.scatterZone). null when foliage handle is missing. */
+  private foliageDisposer: (() => void) | null = null;
+  /** Per-frame creature wander observer — disposed with the sanctuary. */
+  private wildlifeObserver: BABYLON.Observer<BABYLON.Scene> | null = null;
+  /** Wildlife critters; their root meshes are children of `this.root` and
+   *  therefore disposed automatically when the sanctuary tears down. The
+   *  state lives here so the observer can advance their wander phase. */
+  private wildlife: Array<{
+    root: BABYLON.TransformNode;
+    home: BABYLON.Vector3;
+    radius: number;
+    speed: number;
+    phase: number;
+    bobPhase: number;
+  }> = [];
 
   /** Sanctuary footprint center (matches LevelSystem.spawnPoint for L4). */
   private static readonly CENTER = new BABYLON.Vector3(-480, 0, -480);
@@ -88,6 +108,14 @@ export class SanctuarySystem {
     this.buildSign();
     this.buildPerimeter();
     this.buildVillage();
+    // Wilder additions — mountains ring the valley, an alien cave sits on
+    // its eastern edge as an adventure pocket, and dense L-system foliage
+    // + wandering bio-critters bring the place to life. Order matters
+    // only for visual layering; none of these are colliders.
+    this.buildMountainRing();
+    this.buildCave();
+    this.scatterAlienFoliage();
+    this.buildWildlife();
     this.spawnNPCs(inputBlockedProvider);
     if (this.base) this.buildGardenPlinth(this.base);
     this.farming = new FarmingSystem(
@@ -129,6 +157,20 @@ export class SanctuarySystem {
     if (this.base && this.gardenPlinthPos) {
       try { this.base.removeStructureAt(this.gardenPlinthPos, 1.5); } catch {}
       this.gardenPlinthPos = null;
+    }
+    // Tear down the per-frame wildlife wander loop BEFORE root.dispose
+    // so the observer never references disposed transforms.
+    if (this.wildlifeObserver) {
+      try { this.scene.onBeforeRenderObservable.remove(this.wildlifeObserver); } catch {}
+      this.wildlifeObserver = null;
+    }
+    this.wildlife = [];
+    // Strip the alien plants we appended to the world's AlienFoliageSystem
+    // — they live in the shared array, not under our root, so root.dispose
+    // wouldn't catch them.
+    if (this.foliageDisposer) {
+      try { this.foliageDisposer(); } catch {}
+      this.foliageDisposer = null;
     }
     // Restore the outer world (city, mountains, foliage, props) we hid
     // when this level mounted. Done BEFORE root.dispose so any mistake
@@ -638,6 +680,384 @@ export class SanctuarySystem {
     const pos = new BABYLON.Vector3(px, 0, pz);
     base.registerStructure("garden", pos);
     this.gardenPlinthPos = pos.clone();
+  }
+
+  // ----------------------------------------------------- mountains / cave
+
+  /** Ring the sanctuary valley with a circle of stylized mountain peaks so
+   *  the world reads as a hidden basin instead of an open prairie. Twelve
+   *  cones at radius 95 m — well beyond the 32 m perimeter ring — keep the
+   *  gameplay area unobstructed while giving the horizon real depth. The
+   *  cones use a simple 4-side tessellation so each peak reads angular and
+   *  faceted (anime-cell-shaded silhouette). All meshes parent to root. */
+  private buildMountainRing(): void {
+    const c = SanctuarySystem.CENTER;
+    const scene = this.scene;
+
+    const rockMat = new BABYLON.StandardMaterial("sanctuaryMountainMat", scene);
+    rockMat.diffuseColor = new BABYLON.Color3(0.32, 0.30, 0.40);
+    rockMat.emissiveColor = new BABYLON.Color3(0.06, 0.05, 0.10);
+    rockMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const snowMat = new BABYLON.StandardMaterial("sanctuarySnowMat", scene);
+    snowMat.diffuseColor = new BABYLON.Color3(0.92, 0.95, 1.00);
+    snowMat.emissiveColor = new BABYLON.Color3(0.20, 0.22, 0.28);
+    snowMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const RING_R = 95;
+    const PEAKS = 12;
+    // Mulberry32 — local deterministic so the layout is stable across mounts.
+    let s = 0x5A1C2A;
+    const rand = () => {
+      s = (s + 0x6D2B79F5) >>> 0;
+      let t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+
+    for (let i = 0; i < PEAKS; i++) {
+      const a = (i / PEAKS) * Math.PI * 2 + (rand() - 0.5) * 0.18;
+      const r = RING_R + (rand() - 0.5) * 18;
+      const x = c.x + Math.cos(a) * r;
+      const z = c.z + Math.sin(a) * r;
+      const height = 28 + rand() * 22;            // 28..50 m
+      const baseDiam = 22 + rand() * 14;          // 22..36 m
+
+      const peak = BABYLON.MeshBuilder.CreateCylinder(
+        `sanctuaryPeak_${i}`,
+        { diameterTop: 0.4, diameterBottom: baseDiam, height, tessellation: 5 },
+        scene,
+      );
+      // Height/2 so the cone rests flush on the grass plane (y=0.02).
+      peak.position.set(x, height / 2, z);
+      peak.rotation.y = rand() * Math.PI * 2;
+      peak.material = rockMat;
+      peak.parent = this.root;
+      peak.isPickable = false;
+      peak.freezeWorldMatrix();
+
+      // A snow cap on the upper third — visually anchors the peak as a
+      // mountain rather than a generic spike.
+      const capH = height * 0.32;
+      const cap = BABYLON.MeshBuilder.CreateCylinder(
+        `sanctuaryCap_${i}`,
+        { diameterTop: 0.4, diameterBottom: baseDiam * 0.45, height: capH, tessellation: 5 },
+        scene,
+      );
+      cap.position.set(x, height - capH / 2 + 0.05, z);
+      cap.rotation.y = peak.rotation.y;
+      cap.material = snowMat;
+      cap.parent = this.root;
+      cap.isPickable = false;
+      cap.freezeWorldMatrix();
+    }
+  }
+
+  /** A small mouth-and-chamber cave on the eastern edge of the valley.
+   *  Built entirely from primitives — torus arch + a rocky shell + a
+   *  pulsing crystal cluster + stalagmites. Not collision-bound (you walk
+   *  through it), but reads visually as an explorable pocket. The
+   *  crystal's glow doubles as ambient lighting inside the chamber. */
+  private buildCave(): void {
+    const c = SanctuarySystem.CENTER;
+    const scene = this.scene;
+
+    // Cave anchor: 60 m east of the village center, just outside the
+    // perimeter ring but inside the mountain ring (RING_R=95).
+    const cx = c.x + 60;
+    const cz = c.z + 4;
+
+    const rockMat = new BABYLON.StandardMaterial("sanctuaryCaveRockMat", scene);
+    rockMat.diffuseColor = new BABYLON.Color3(0.22, 0.20, 0.26);
+    rockMat.emissiveColor = new BABYLON.Color3(0.04, 0.03, 0.06);
+    rockMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const crystalMat = new BABYLON.StandardMaterial("sanctuaryCrystalMat", scene);
+    crystalMat.diffuseColor = new BABYLON.Color3(0.20, 0.85, 1.00);
+    crystalMat.emissiveColor = new BABYLON.Color3(0.30, 0.95, 1.00);
+    crystalMat.specularColor = new BABYLON.Color3(0, 0, 0);
+    crystalMat.alpha = 0.85;
+
+    // ---- Outer rocky shell (slightly flattened sphere, half-buried) ----
+    const shell = BABYLON.MeshBuilder.CreateSphere(
+      "sanctuaryCaveShell",
+      { diameter: 18, segments: 12 },
+      scene,
+    );
+    shell.scaling.set(1.0, 0.85, 1.1);
+    shell.position.set(cx, 7.0, cz);
+    shell.material = rockMat;
+    shell.parent = this.root;
+    shell.isPickable = false;
+    shell.freezeWorldMatrix();
+
+    // ---- Cave mouth: a torus standing upright as a stone arch ----
+    const arch = BABYLON.MeshBuilder.CreateTorus(
+      "sanctuaryCaveArch",
+      { diameter: 7.5, thickness: 1.4, tessellation: 24 },
+      scene,
+    );
+    arch.rotation.x = Math.PI / 2;
+    // Face the village (-x direction).
+    arch.position.set(cx - 8.0, 3.6, cz);
+    arch.material = rockMat;
+    arch.parent = this.root;
+    arch.isPickable = false;
+    arch.freezeWorldMatrix();
+
+    // ---- Floor disc inside the mouth so it reads as a "doorway" ----
+    const floor = BABYLON.MeshBuilder.CreateDisc(
+      "sanctuaryCaveFloor",
+      { radius: 5.5, tessellation: 24 },
+      scene,
+    );
+    floor.rotation.x = Math.PI / 2;
+    floor.position.set(cx - 1.0, 0.05, cz);
+    floor.material = rockMat;
+    floor.parent = this.root;
+    floor.isPickable = false;
+    floor.freezeWorldMatrix();
+
+    // ---- Crystal cluster at the chamber center ----
+    const crystalAnchor = new BABYLON.TransformNode("sanctuaryCrystalAnchor", scene);
+    crystalAnchor.parent = this.root;
+    crystalAnchor.position.set(cx + 1.0, 0, cz);
+    for (let i = 0; i < 5; i++) {
+      const h = 1.4 + (i % 3) * 0.5; // 1.4..2.4
+      const crystal = BABYLON.MeshBuilder.CreateCylinder(
+        `sanctuaryCrystal_${i}`,
+        { diameterTop: 0.05, diameterBottom: 0.7, height: h, tessellation: 6 },
+        scene,
+      );
+      const ang = (i / 5) * Math.PI * 2;
+      const r = 0.6 + (i * 0.15);
+      crystal.position.set(
+        Math.cos(ang) * r,
+        h / 2,
+        Math.sin(ang) * r,
+      );
+      crystal.rotation.z = (i % 2 === 0 ? 1 : -1) * 0.18;
+      crystal.material = crystalMat;
+      crystal.parent = crystalAnchor;
+      crystal.isPickable = false;
+    }
+
+    // Pulsing crystal light — gives the chamber its blue glow.
+    const crystalLight = new BABYLON.PointLight(
+      "sanctuaryCrystalLight",
+      new BABYLON.Vector3(cx + 1.0, 1.6, cz),
+      scene,
+    );
+    crystalLight.diffuse = new BABYLON.Color3(0.3, 0.85, 1.0);
+    crystalLight.intensity = 0.9;
+    crystalLight.range = 18;
+    crystalLight.parent = this.root;
+
+    // ---- Stalagmites scattered around the floor ----
+    const stalCount = 8;
+    for (let i = 0; i < stalCount; i++) {
+      const ang = (i / stalCount) * Math.PI * 2 + 0.3;
+      const r = 2.6 + (i % 3) * 0.6;
+      const sx = cx + Math.cos(ang) * r;
+      const sz = cz + Math.sin(ang) * r;
+      const sh = 0.7 + ((i * 13) % 7) * 0.18; // 0.7..1.86
+      const stal = BABYLON.MeshBuilder.CreateCylinder(
+        `sanctuaryStal_${i}`,
+        { diameterTop: 0.08, diameterBottom: 0.55, height: sh, tessellation: 6 },
+        scene,
+      );
+      stal.position.set(sx, sh / 2, sz);
+      stal.material = rockMat;
+      stal.parent = this.root;
+      stal.isPickable = false;
+      stal.freezeWorldMatrix();
+    }
+  }
+
+  // ----------------------------------------------------- foliage scatter
+
+  /** Crank the L-system organic life up around the village by piggy-backing
+   *  on the world's AlienFoliageSystem. Plants are added in two clusters:
+   *  one tight ring just outside the perimeter so the village feels nestled
+   *  in jungle, and one looser scatter farther out so the eye reads density
+   *  without choking the playable area. The disposer this returns is what
+   *  the sanctuary uses on warp-out so we don't leave alien plants stranded
+   *  at (-480,-480) when the player is back in Detroit. */
+  private scatterAlienFoliage(): void {
+    const foliage = this.handles.foliage;
+    if (!foliage) return;
+    const c = SanctuarySystem.CENTER;
+
+    // Inner band: dense alien thicket hugging the perimeter (40..80 m).
+    // Center the cluster slightly offset so it doesn't perfectly mirror the
+    // mountain ring behind it.
+    const innerCenter = new BABYLON.Vector3(c.x, 0, c.z);
+    const innerDispose = foliage.scatterZone(innerCenter, 80, 70, 4.5, 0xA51C2A);
+
+    // Outer band: looser scatter filling the gap toward the mountains
+    // (75..120 m), thinned out so the silhouette of the peaks still reads.
+    const outerCenter = new BABYLON.Vector3(c.x + 5, 0, c.z - 5);
+    const outerDispose = foliage.scatterZone(outerCenter, 110, 50, 7.0, 0xC0FFEE);
+
+    this.foliageDisposer = () => {
+      try { innerDispose(); } catch {}
+      try { outerDispose(); } catch {}
+    };
+  }
+
+  // ------------------------------------------------------------ wildlife
+
+  /** Populate the sanctuary with wandering bio-critters. These are *peaceful*
+   *  on purpose: Level 4 contracts as `peaceful: true` (wave spawner is off),
+   *  so giving the player aggressive enemies here would break that promise.
+   *  Instead we lean into the "rehabilitated Animatons roam free" lore — the
+   *  critters are decorative passive wildlife that wander inside their home
+   *  radius, bobbing as they walk. Each is a small parametric mech: a body
+   *  sphere, four leg cylinders, a head pod, and two glowing eyes. */
+  private buildWildlife(): void {
+    const c = SanctuarySystem.CENTER;
+    const scene = this.scene;
+
+    // Three palettes so the herd doesn't read as clones.
+    const palettes = [
+      { body: new BABYLON.Color3(0.45, 0.85, 0.55), eye: new BABYLON.Color3(1.0, 1.0, 0.4) },
+      { body: new BABYLON.Color3(0.85, 0.55, 0.85), eye: new BABYLON.Color3(0.4, 1.0, 1.0) },
+      { body: new BABYLON.Color3(0.55, 0.75, 0.95), eye: new BABYLON.Color3(1.0, 0.6, 0.4) },
+    ];
+    const bodyMats = palettes.map((p, i) => {
+      const m = new BABYLON.StandardMaterial(`sanctuaryCritterBody_${i}`, scene);
+      m.diffuseColor = p.body;
+      m.emissiveColor = p.body.scale(0.25);
+      m.specularColor = new BABYLON.Color3(0, 0, 0);
+      return m;
+    });
+    const eyeMats = palettes.map((p, i) => {
+      const m = new BABYLON.StandardMaterial(`sanctuaryCritterEye_${i}`, scene);
+      m.diffuseColor = new BABYLON.Color3(0, 0, 0);
+      m.emissiveColor = p.eye;
+      m.specularColor = new BABYLON.Color3(0, 0, 0);
+      m.disableLighting = true;
+      return m;
+    });
+    const legMat = new BABYLON.StandardMaterial("sanctuaryCritterLeg", scene);
+    legMat.diffuseColor = new BABYLON.Color3(0.18, 0.16, 0.22);
+    legMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    // 9 critters scattered around the village + 3 living near the cave.
+    // Coords are (offsetX, offsetZ) relative to CENTER, plus a wander radius.
+    type Spawn = { dx: number; dz: number; radius: number };
+    const spawns: Spawn[] = [
+      { dx: -16, dz: 6,   radius: 6 },
+      { dx: -22, dz: -8,  radius: 7 },
+      { dx: -8,  dz: 22,  radius: 6 },
+      { dx: 10,  dz: 24,  radius: 6 },
+      { dx: 22,  dz: 12,  radius: 7 },
+      { dx: 25,  dz: -6,  radius: 6 },
+      { dx: 14,  dz: -22, radius: 7 },
+      { dx: -6,  dz: -24, radius: 6 },
+      { dx: -24, dz: -22, radius: 7 },
+      // Cave-side trio (cave is at +60,+4 with 5.5 m floor radius).
+      { dx: 50,  dz: 8,   radius: 5 },
+      { dx: 55,  dz: -4,  radius: 5 },
+      { dx: 48,  dz: -10, radius: 5 },
+    ];
+
+    spawns.forEach((s, i) => {
+      const palIdx = i % palettes.length;
+      const home = new BABYLON.Vector3(c.x + s.dx, 0, c.z + s.dz);
+      const root = new BABYLON.TransformNode(`sanctuaryCritter_${i}`, scene);
+      root.parent = this.root;
+      root.position.copyFrom(home);
+
+      // Body — squashed sphere ~0.7 m wide.
+      const body = BABYLON.MeshBuilder.CreateSphere(
+        `sanctuaryCritterBody_${i}`,
+        { diameter: 1.0, segments: 10 },
+        scene,
+      );
+      body.scaling.set(1.1, 0.7, 1.4);
+      body.position.set(0, 0.85, 0);
+      body.material = bodyMats[palIdx];
+      body.parent = root;
+      body.isPickable = false;
+
+      // Head pod — smaller sphere forward of body.
+      const head = BABYLON.MeshBuilder.CreateSphere(
+        `sanctuaryCritterHead_${i}`,
+        { diameter: 0.55, segments: 8 },
+        scene,
+      );
+      head.position.set(0, 1.05, 0.65);
+      head.material = bodyMats[palIdx];
+      head.parent = root;
+      head.isPickable = false;
+
+      // Two glowing eyes on the head.
+      for (const sx of [-0.13, 0.13]) {
+        const eye = BABYLON.MeshBuilder.CreateSphere(
+          `sanctuaryCritterEye_${i}_${sx}`,
+          { diameter: 0.16, segments: 6 },
+          scene,
+        );
+        eye.position.set(sx, 1.12, 0.92);
+        eye.material = eyeMats[palIdx];
+        eye.parent = root;
+        eye.isPickable = false;
+      }
+
+      // Four legs — short cylinders at the corners.
+      const legY = 0.32;
+      const legPositions = [
+        [-0.32, legY,  0.45], [ 0.32, legY,  0.45],
+        [-0.32, legY, -0.45], [ 0.32, legY, -0.45],
+      ];
+      legPositions.forEach((p, li) => {
+        const leg = BABYLON.MeshBuilder.CreateCylinder(
+          `sanctuaryCritterLeg_${i}_${li}`,
+          { diameter: 0.18, height: 0.64, tessellation: 6 },
+          scene,
+        );
+        leg.position.set(p[0], p[1], p[2]);
+        leg.material = legMat;
+        leg.parent = root;
+        leg.isPickable = false;
+      });
+
+      this.wildlife.push({
+        root,
+        home,
+        radius: s.radius,
+        speed: 0.35 + (i % 4) * 0.08,    // 0.35..0.59 m/s
+        phase: (i * 0.7) % (Math.PI * 2),
+        bobPhase: (i * 1.3) % (Math.PI * 2),
+      });
+    });
+
+    // Per-frame wander: each critter walks a slow Lissajous around its
+    // home, bobs vertically, and faces its motion direction. Pure cosmetic —
+    // no AI, no targeting, no damage.
+    let lastT = performance.now();
+    this.wildlifeObserver = scene.onBeforeRenderObservable.add(() => {
+      const now = performance.now();
+      const dt = Math.min(0.1, (now - lastT) / 1000);
+      lastT = now;
+      for (const w of this.wildlife) {
+        w.phase += dt * w.speed;
+        w.bobPhase += dt * 2.4;
+        const px = w.home.x + Math.cos(w.phase) * w.radius;
+        const pz = w.home.z + Math.sin(w.phase * 0.7) * w.radius * 0.6;
+        // Velocity direction for facing.
+        const vx = -Math.sin(w.phase) * w.radius * w.speed;
+        const vz =  Math.cos(w.phase * 0.7) * w.radius * 0.6 * w.speed * 0.7;
+        w.root.position.x = px;
+        w.root.position.z = pz;
+        w.root.position.y = Math.abs(Math.sin(w.bobPhase)) * 0.06;
+        if (vx * vx + vz * vz > 1e-4) {
+          w.root.rotation.y = Math.atan2(vx, vz);
+        }
+      }
+    });
   }
 }
 

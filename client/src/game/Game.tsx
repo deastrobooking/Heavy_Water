@@ -903,6 +903,10 @@ export const Game: React.FC = () => {
                   alienFoliageRef.current,
                   propSystemRef.current,
                 ],
+                // Pass the foliage system directly so the sanctuary can
+                // densely scatter L-system plants of its own around the
+                // village (and dispose only those plants on warp-out).
+                foliage: alienFoliageRef.current,
               },
             );
           } else if (!isSanctuary && sanctuarySystemRef.current) {

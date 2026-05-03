@@ -42,7 +42,7 @@ The game utilizes Babylon.js v8.x for WebGL/WebGPU rendering, focusing on an ani
 
 **Levels & Zones:**
 - LevelSystem defines six distinct world levels: three combat fronts (Star City, Hold the Line, Purge the Void), a peaceful sanctuary side-zone (Ashur Sanctuary), an off-canon spacelike combat zone (Orbital Front), and a peaceful indoor lore side-zone (Pontiac Secret Lab). Each level has unique time of day and city themes.
-- Ashur Sanctuary (Level 4) is a distinct world with a village, farming system, NPCs, and a garden plinth for creature deployment.
+- Ashur Sanctuary (Level 4) is a distinct world with a village, farming system, NPCs, and a garden plinth for creature deployment. The valley is ringed by 12 stylized snow-capped mountain peaks, has an alien crystal cave on its eastern edge (torus arch + rocky shell + glowing crystal cluster + stalagmites), is densely populated with two L-system foliage clusters (~120 added plants via `AlienFoliageSystem.scatterZone`, disposed on warp-out), and hosts 12 wandering peaceful bio-critters (parametric body + head + 4 legs + glowing eyes) that bob along Lissajous wander loops around their home positions.
 - Orbital Front (Level 5) is a vacuum-only zone focused on aerial combat, with players starting in a spacecraft.
 - Pontiac Secret Lab (Level 6) is a peaceful indoor side-zone owned by `PontiacLabSystem`. It hides the city + mountains + foliage + props and builds a 60×60 m bunker interior: dark metallic floor with cyan tech grid, glowing wall trim, six pulsing cryo pods, four LED-strip server racks, three holographic terminals, a central command desk, and two NPCs (Dr. Cynthia You and the ZIRCON research AI). Reached from the TRAVEL tab.
 
