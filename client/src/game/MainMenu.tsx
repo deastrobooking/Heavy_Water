@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { MusicSystem } from "./MusicSystem";
 import { MusicPlayerUI } from "./MusicPlayerUI";
 import { GameplayGuide } from "./GameplayGuide";
+import { VersusLobby, VersusJoinPayload } from "./VersusLobby";
 
 /** High-level summary of the player's cloud save — surfaced on the main
  *  menu so the player can see exactly what's been persisted before they
@@ -17,8 +18,16 @@ export interface SaveSummary {
   companionCount?: number;
 }
 
+/** What gets handed to Game.tsx when the player presses START or joins a
+ *  Versus room. `mode === "versus"` skips the open-world city + all enemies
+ *  and mounts the compact PvP arena instead, auto-joining the given room. */
+export interface StartPayload {
+  mode: "campaign" | "versus";
+  versus?: { roomCode: string; isHost: boolean };
+}
+
 interface MainMenuProps {
-  onStart: () => void;
+  onStart: (payload: StartPayload) => void;
   onCustomize?: () => void;
   saveSummary?: SaveSummary | null;
 }
@@ -42,6 +51,7 @@ const formatSavedAt = (ts: number): string => {
 
 export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize, saveSummary }) => {
   const [showGuide, setShowGuide] = useState(false);
+  const [showVersus, setShowVersus] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void MusicSystem.init().then(() => {
@@ -182,7 +192,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize, saveSu
         {/* === ACTION BUTTONS === */}
         <div className="flex gap-4 justify-center mt-6">
           <button
-            onClick={onStart}
+            onClick={() => onStart({ mode: "campaign" })}
             className="px-12 py-4 text-xl font-bold text-black bg-gradient-to-r from-cyan-300 to-blue-500
                        rounded-lg transform hover:scale-105 transition-all duration-300
                        shadow-lg shadow-cyan-500/50 hover:shadow-blue-500/60
@@ -201,6 +211,15 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize, saveSu
             </button>
           )}
           <button
+            onClick={() => setShowVersus(true)}
+            className="px-8 py-4 text-xl font-bold text-fuchsia-200 bg-black/40 border-2 border-fuchsia-400
+                       rounded-lg transform hover:scale-105 transition-all duration-300
+                       shadow-lg shadow-fuchsia-500/40 hover:bg-fuchsia-500/15"
+            style={{ textShadow: "0 0 8px rgba(255,72,214,0.7)" }}
+          >
+            VERSUS
+          </button>
+          <button
             onClick={() => setShowGuide(true)}
             className="px-8 py-4 text-xl font-bold text-amber-200 bg-black/40 border-2 border-amber-300
                        rounded-lg transform hover:scale-105 transition-all duration-300
@@ -212,6 +231,15 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize, saveSu
       </div>
 
       {showGuide && <GameplayGuide onClose={() => setShowGuide(false)} />}
+      {showVersus && (
+        <VersusLobby
+          onJoined={(p: VersusJoinPayload) => {
+            setShowVersus(false);
+            onStart({ mode: "versus", versus: p });
+          }}
+          onClose={() => setShowVersus(false)}
+        />
+      )}
 
       {/* === GAMEPLAY INSTRUCTIONS — reserved space at bottom === */}
       <div className="relative z-10 w-full max-w-4xl mt-auto mb-6 px-6">

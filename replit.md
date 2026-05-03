@@ -61,6 +61,20 @@ The game utilizes Babylon.js v8.x for WebGL/WebGPU rendering, focusing on an ani
 
 **Multiplayer:**
 - MultiplayerSystem provides client-side WebSocket integration for up to 16 players per room, supporting room management, synchronization, chat, and enemy damage syncing.
+- Rooms carry a `mode: "coop" | "versus"` tag. `coop` is the default campaign / wave-defense session; `versus` is the home-screen PvP arena (see Versus Mode below).
+
+**Versus Mode (PvP-only home-screen game mode):**
+- Selectable from the main menu via the new **VERSUS** button (between CUSTOMIZE and GUIDE). Opens the `VersusLobby` modal which talks `/ws` directly: a player can **CREATE NEW ARENA** (auto-generates a 6-char room code) or **JOIN BY CODE**. On join the lobby tears its WS down and `Game.tsx` boots into a fresh session that auto-creates / -joins the same room via `MultiplayerSystem`.
+- `MainMenu` exports a `StartPayload` (`{ mode: "campaign" | "versus", versus?: { roomCode, isHost } }`) which `handleStart` writes into `versusModeRef` BEFORE `initializeGame()` runs (the ref is read inside the long-lived init closure).
+- `client/src/game/VersusArena.ts` builds a compact 320×320 walled PvP map: ~28 jittered cube buildings (deterministic seeded layout) for parkour cover, four 60 m corner spires, a neon central plaza, four perimeter forcefield walls (cyan glow, alpha 0.55, 80 m tall), and 16 evenly-spaced spawn points around the plaza ring. Exposes the same `WallCollider` / `FloorPlatform` surface as `CityGenerator` so `PlayerController` plumbing is unchanged. Roof tops of buildings + spires are registered as floor platforms so the existing parkour mechanics work unmodified.
+- The Game.tsx VERSUS MODE OVERRIDE block runs at the end of init and:
+    1. Hides the open-world city + foliage + mountains (`setVisible(false)`).
+    2. Disables enemy spawning + clears anything already spawned (`enemySystem.setSpawningEnabled(false)` + `clearAllEnemies()`, `aerialEnemySystem.disengageAndClear()`).
+    3. Mounts `VersusArena` and swaps its colliders/floors into the player.
+    4. Teleports the player to a deterministic spawn slot (`hash(playerId) % 16`).
+    5. Auto-creates (host) or auto-joins (joiner) the lobby-selected room via `MultiplayerSystem.createRoom("versus")` / `joinRoom(code)`. Falls back to a Guest connect for offline play (the server doesn't validate `userId`).
+- All other systems (city, foliage, mountains, enemies, bases) still construct so cross-references stay intact — they're hidden / silenced rather than skipped, which keeps every render-loop invariant valid without per-system `if (versus)` gates.
+- Server: `server/multiplayer.ts` accepts an optional `mode: "coop" | "versus"` on `create_room`, stores it on the `Room`, echoes it on `room_created` / `room_joined`, and includes it in `room_list` for future filtering.
 
 **UI/UX:**
 - Redesigned HUD, AuthUI, GameUI, shop interfaces, upgrade interfaces, multiplayer lobby, contextual build hotbar, MainMenu with character customization, and an EnemyHealthBarSystem for HTML overlays.

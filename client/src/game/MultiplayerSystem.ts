@@ -45,6 +45,13 @@ export class MultiplayerSystem {
   }
 
   connect(username: string, userId: number): void {
+    // Guard against double-connect — Versus startup may race with the
+    // campaign-auth connect that runs at game-init time. A second WS would
+    // both leak and cause nondeterministic ordering of `connected` events
+    // and join/create attempts.
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
     this.username = username;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${window.location.host}/ws`;
@@ -333,8 +340,8 @@ export class MultiplayerSystem {
     this.send({ type: "enemy_damage", enemyId, damage, damageType });
   }
 
-  createRoom(): void {
-    this.send({ type: "create_room" });
+  createRoom(mode: "coop" | "versus" = "coop"): void {
+    this.send({ type: "create_room", mode });
   }
 
   joinRoom(roomCode: string): void {

@@ -13,6 +13,12 @@ interface PlayerState {
   isFlying: boolean;
 }
 
+/** "coop" = standard PvE campaign session. "versus" = PvP-only arena room
+ *  used by the home-screen Versus mode. The mode is informational on the
+ *  server (room list filtering, future enforcement) — gameplay rules are
+ *  still authoritative on the client. */
+export type RoomMode = "coop" | "versus";
+
 interface Room {
   code: string;
   hostId: string;
@@ -20,6 +26,7 @@ interface Room {
   maxPlayers: number;
   wave: number;
   createdAt: number;
+  mode: RoomMode;
 }
 
 interface ConnectedPlayer {
@@ -33,7 +40,7 @@ interface ConnectedPlayer {
 
 type ClientMessage =
   | { type: "auth"; username: string; userId: number }
-  | { type: "create_room" }
+  | { type: "create_room"; mode?: RoomMode }
   | { type: "join_room"; roomCode: string }
   | { type: "leave_room" }
   | { type: "list_rooms" }
@@ -72,7 +79,7 @@ function sendTo(ws: WebSocket, message: any): void {
   }
 }
 
-function getRoomList(): { code: string; players: number; maxPlayers: number; host: string; wave: number }[] {
+function getRoomList(): { code: string; players: number; maxPlayers: number; host: string; wave: number; mode: RoomMode }[] {
   const list: any[] = [];
   rooms.forEach((room) => {
     list.push({
@@ -81,6 +88,7 @@ function getRoomList(): { code: string; players: number; maxPlayers: number; hos
       maxPlayers: room.maxPlayers,
       host: room.hostId,
       wave: room.wave,
+      mode: room.mode,
     });
   });
   return list;
@@ -162,6 +170,7 @@ export function setupMultiplayer(httpServer: Server): void {
             let code = generateRoomCode();
             while (rooms.has(code)) code = generateRoomCode();
 
+            const mode: RoomMode = msg.mode === "versus" ? "versus" : "coop";
             const room: Room = {
               code,
               hostId: playerId,
@@ -173,11 +182,12 @@ export function setupMultiplayer(httpServer: Server): void {
               maxPlayers: 16,
               wave: 0,
               createdAt: Date.now(),
+              mode,
             };
             rooms.set(code, room);
             player.roomCode = code;
-            sendTo(ws, { type: "room_created", roomCode: code, isHost: true });
-            log(`Room ${code} created by ${player.username}`);
+            sendTo(ws, { type: "room_created", roomCode: code, isHost: true, mode });
+            log(`Room ${code} created by ${player.username} [${mode}]`);
             break;
           }
 
@@ -199,7 +209,7 @@ export function setupMultiplayer(httpServer: Server): void {
               if (id !== playerId) existingPlayers.push(p.state);
             });
 
-            sendTo(ws, { type: "room_joined", roomCode: msg.roomCode, isHost: false, players: existingPlayers });
+            sendTo(ws, { type: "room_joined", roomCode: msg.roomCode, isHost: false, players: existingPlayers, mode: room.mode });
 
             broadcastToRoom(msg.roomCode, {
               type: "player_joined",

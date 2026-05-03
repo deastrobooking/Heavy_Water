@@ -44,6 +44,8 @@ import { CompanionUpgradeInfo } from "./CompanionSystem";
 import { LabBlueprint } from "./LabUI";
 import { LevelSerializer } from "./LevelSerializer";
 import { MultiplayerSystem } from "./MultiplayerSystem";
+import { VersusArena } from "./VersusArena";
+import type { StartPayload } from "./MainMenu";
 import { EffectsSystem } from "./EffectsSystem";
 import { ExplosionSystem } from "./ExplosionSystem";
 import { PropAudioSystem } from "./PropAudioSystem";
@@ -158,6 +160,16 @@ export const Game: React.FC = () => {
   const levelSerializerRef = useRef<LevelSerializer | null>(null);
   const loadInputRef = useRef<HTMLInputElement | null>(null);
   const multiplayerRef = useRef<MultiplayerSystem | null>(null);
+  // Versus PvP-mode state. `versusModeRef` is read inside the long-lived
+  // init closure so it must be set BEFORE initializeGame() runs (handleStart
+  // does this). `versusArenaRef` holds the compact arena geometry mounted
+  // in place of the open-world city when versus mode is active.
+  const versusModeRef = useRef<{
+    active: boolean;
+    roomCode: string | null;
+    isHost: boolean;
+  }>({ active: false, roomCode: null, isHost: false });
+  const versusArenaRef = useRef<VersusArena | null>(null);
   const effectsRef = useRef<EffectsSystem | null>(null);
   const explosionsRef = useRef<ExplosionSystem | null>(null);
   const propAudioRef = useRef<PropAudioSystem | null>(null);
@@ -1943,6 +1955,93 @@ export const Game: React.FC = () => {
           canvasRef.current?.requestPointerLock();
         };
 
+        // ====================================================================
+        // VERSUS MODE OVERRIDE
+        // --------------------------------------------------------------------
+        // PvP-only home-screen game mode. Triggered when handleStart was
+        // called with `{ mode: "versus" }`. Hides the open-world city and
+        // enemy systems and mounts the compact `VersusArena` in their place,
+        // then auto-creates / -joins the multiplayer room the lobby picked.
+        //
+        // We intentionally let everything spawn first (city, enemies, bases,
+        // foliage, mountains) and *then* hide / disable them rather than
+        // gating each constructor on `versus` — the open-world systems have
+        // dozens of cross-references and skipping any one tends to cause a
+        // null-deref deep in the render loop. Hiding meshes + flipping
+        // spawn flags is cheap and keeps every invariant intact.
+        // ====================================================================
+        if (versusModeRef.current.active) {
+          // 1. Hide the entire open-world city, foliage, mountains, bases,
+          //    mining nodes, NPCs, chests, and ambient flying fortresses.
+          try { cityGenerator.setVisible(false); } catch {}
+          try { mountainRing.setVisible(false); } catch {}
+          try { alienFoliage.setVisible(false); } catch {}
+          try { earthFoliage.setVisible(false); } catch {}
+          // Stop all enemy spawning + clear anything already spawned.
+          try {
+            enemySystem.setSpawningEnabled(false);
+            enemySystem.clearAllEnemies();
+          } catch {}
+          try { aerialEnemySystem.disengageAndClear(); } catch {}
+          // Hostile EnemyBaseSystem turrets keep updating + dealing damage
+          // even with no enemies spawned — dispose it entirely so a versus
+          // arena fight isn't randomly chipped by stray laser fire.
+          try {
+            if (enemyBaseRef.current) {
+              enemyBaseRef.current.dispose();
+              enemyBaseRef.current = null;
+            }
+          } catch {}
+
+          // 2. Build the compact PvP arena and swap in its colliders /
+          //    floor platforms so the player physically interacts with it.
+          const arena = new VersusArena(scene);
+          versusArenaRef.current = arena;
+          player.setBuildingColliders(arena.getWallColliders());
+          player.setFloorPlatforms(arena.getFloorPlatforms());
+
+          // 3. Teleport the player to a spawn point inside the arena.
+          //    Slot picked from the multiplayer player id so simultaneous
+          //    joins are unlikely to collide. Falls back to random.
+          const myId = multiplayer.getPlayerId() ?? "";
+          const hashStr = (s: string): number => {
+            let h = 0;
+            for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+            return h;
+          };
+          const slot = myId ? Math.abs(hashStr(myId)) % 16 : Math.floor(Math.random() * 16);
+          const spawn = arena.getSpawnPoint(slot);
+          player.setPosition(new BABYLON.Vector3(spawn.x, spawn.y, spawn.z));
+
+          // 4. Auto-create (host) or auto-join (joiner) the multiplayer
+          //    room. This is the SINGLE site that performs the room op for
+          //    versus mode — the lobby intentionally never touched the
+          //    server, which avoids a race where a lobby socket closing
+          //    on `room_created` would cause the server to delete the
+          //    empty room before this gameplay socket re-joined it.
+          const vm = versusModeRef.current;
+          const enterRoom = () => {
+            if (vm.isHost) multiplayer.createRoom("versus");
+            else if (vm.roomCode) multiplayer.joinRoom(vm.roomCode);
+          };
+          // For authenticated players the campaign-auth connect ran at
+          // init time. It may still be mid-handshake — wait for `connected`
+          // either way. For Guests no connect ran, so do it now.
+          //   - MultiplayerSystem.connect() is idempotent (guards against
+          //     double WS), so calling it here is safe even if someone
+          //     already started the handshake.
+          if (multiplayer.isConnected()) {
+            enterRoom();
+          } else {
+            multiplayer.on("connected", () => enterRoom());
+            const guestName = currentUser?.username ?? `Guest${Math.floor(Math.random() * 9000) + 1000}`;
+            const guestId = currentUser?.id ?? Math.floor(Math.random() * 1_000_000);
+            try { multiplayer.connect(guestName, guestId); } catch {}
+          }
+
+          showMessage("VERSUS — PVP ARENA", 2400);
+        }
+
         initializingRef.current = false;
       } catch (error) {
         console.error("Failed to initialize game:", error);
@@ -2010,6 +2109,8 @@ export const Game: React.FC = () => {
         if (vehicleRef.current) { try { vehicleRef.current.dispose(); } catch {} vehicleRef.current = null; }
         if (skyRef.current) { try { skyRef.current.dispose(); } catch {} skyRef.current = null; }
         if (baseRef.current) { try { baseRef.current.dispose(); } catch {} baseRef.current = null; }
+        if (versusArenaRef.current) { try { versusArenaRef.current.dispose(); } catch {} versusArenaRef.current = null; }
+        versusModeRef.current = { active: false, roomCode: null, isHost: false };
         multiplayerRef.current = null;
         initializingRef.current = false;
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -2019,7 +2120,12 @@ export const Game: React.FC = () => {
     }, 150);
   }, [handleLootCollected, showMessage, currentUser]);
 
-  const handleStart = useCallback(() => {
+  const handleStart = useCallback((payload: StartPayload = { mode: "campaign" }) => {
+    versusModeRef.current = {
+      active: payload.mode === "versus",
+      roomCode: payload.versus?.roomCode ?? null,
+      isHost: payload.versus?.isHost ?? false,
+    };
     void MusicSystem.init().then(() => MusicSystem.startGameMusic());
     initializeGame();
   }, [initializeGame]);
@@ -2083,6 +2189,8 @@ export const Game: React.FC = () => {
     if (vehicleRef.current) { try { vehicleRef.current.dispose(); } catch {} vehicleRef.current = null; }
     if (skyRef.current) { try { skyRef.current.dispose(); } catch {} skyRef.current = null; }
     if (baseRef.current) { try { baseRef.current.dispose(); } catch {} baseRef.current = null; }
+    if (versusArenaRef.current) { try { versusArenaRef.current.dispose(); } catch {} versusArenaRef.current = null; }
+    versusModeRef.current = { active: false, roomCode: null, isHost: false };
     enemySystemRef.current = null;
     chestSystemRef.current = null;
     armorSystemRef.current = null;
