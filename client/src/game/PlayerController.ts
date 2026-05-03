@@ -163,6 +163,7 @@ export class PlayerController implements IDamageable {
 
   setCameraMode(mode: "first" | "third"): void {
     this.cameraMode = mode;
+    this.applyVisualForCameraMode();
   }
 
   getCameraMode(): "first" | "third" {
@@ -171,7 +172,23 @@ export class PlayerController implements IDamageable {
 
   toggleCameraMode(): "first" | "third" {
     this.cameraMode = this.cameraMode === "first" ? "third" : "first";
+    this.applyVisualForCameraMode();
     return this.cameraMode;
+  }
+
+  /** Show/hide the rendered humanoid based on camera mode. In first-person
+   *  the camera sits at head height inside the body, so animation poses
+   *  that raise the arms (jump = -0.8 rad, double jump = -1.2, triple
+   *  jump = -2.5) drag the arm meshes directly across the camera frustum
+   *  and obscure the view. The hidden capsule + procedural arms aren't
+   *  needed for any first-person gameplay (no inverse-kinematics weapon
+   *  hold), so disabling the whole humanoid root is the simplest
+   *  guaranteed fix. We tolerate a missing humanoid for the brief window
+   *  during construction before `this.humanoid` is assigned. */
+  private applyVisualForCameraMode(): void {
+    if (!this.humanoid) return;
+    const root = this.humanoid.getRoot();
+    if (root) root.setEnabled(this.cameraMode === "third");
   }
 
   private onMeleeAttack: (() => void) | null = null;
@@ -317,6 +334,10 @@ export class PlayerController implements IDamageable {
     const root = this.humanoid.getRoot();
     root.position = new BABYLON.Vector3(0, 1, -15);
     this.meshRoot = root;
+    // Default camera mode is first-person; hide the body now that the
+    // humanoid exists so the player isn't staring at the inside of their
+    // own torso / raised arms on jump.
+    this.applyVisualForCameraMode();
 
     if (armorSetSerialized) {
       const setCfg = deserializeArmorSet(armorSetSerialized);

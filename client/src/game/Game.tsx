@@ -394,15 +394,19 @@ export const Game: React.FC = () => {
         // small interior platforms drop out at ~250 m.
         const lodCull = new LODCullSystem();
         // Cull radii are deliberately set BEYOND the fog visibility band so
-        // disabling a mesh is invisible to the player. With Exp2 fog at the
-        // default density (0.0015) a mesh at 600 m is already ~44% absorbed
-        // by fog and at 700 m it's ~18%. Disabling around 600 m therefore
-        // looks like a continuation of the fog falloff instead of a pop.
-        // (The earlier 350 m radius cut INSIDE the fog falloff which made
-        // distant skyline lights visibly flicker on during storms when
-        // fog density rose and shrank the band the eye accepts.)
-        for (const m of cityGenerator.getCullableBuildings()) lodCull.register(m, 600);
-        for (const m of cityGenerator.getCullablePlatforms()) lodCull.register(m, 450);
+        // disabling a mesh reads as continued fog falloff rather than a
+        // pop. Earlier 600 m was inside the visible band — at Exp2 fog
+        // density 0.0015 a 600 m mesh is only ~44% absorbed (still very
+        // legible), so users were watching whole rows of buildings wink
+        // out as they walked. Solving exp(-(d*0.0015)^2) ≤ 0.05 puts the
+        // 5%-visible threshold at ~1150 m, so we register buildings at
+        // 1150 m and platforms (smaller, less iconic shapes) at 950 m.
+        // Babylon's default camera maxZ is 10 km so there's no near-clip
+        // worry. Per-mesh setEnabled at this scale is still cheap because
+        // the system batches at ~6 Hz and registered meshes are
+        // freezeWorldMatrix'd at generation time.
+        for (const m of cityGenerator.getCullableBuildings()) lodCull.register(m, 1150);
+        for (const m of cityGenerator.getCullablePlatforms()) lodCull.register(m, 950);
 
         const sky = new SkySystem(
           scene,
