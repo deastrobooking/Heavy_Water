@@ -1,0 +1,415 @@
+You can ship a Babylon.js game on Steam by packaging it as a desktop executable, then uploading that executable through Steamworks.
+
+The main path looks like this:
+
+```txt
+Babylon.js Game
+→ Vite/React production build
+→ Desktop wrapper: Electron, Tauri, Neutralino, or NW.js
+→ Windows/macOS/Linux executable
+→ Steamworks app setup
+→ SteamPipe upload
+→ Store page review
+→ Build review
+→ Release
+```
+
+## 1. Build your Babylon.js game for production
+
+If your Babylon game is using React + Vite, your production build is usually:
+
+```bash
+npm run build
+```
+
+That gives you a `dist/` folder.
+
+Your Steam version should not rely on a remote website. Package the built files locally inside the desktop app.
+
+Good project shape:
+
+```txt
+my-babylon-game/
+  src/
+  public/
+  dist/
+  package.json
+  vite.config.ts
+  electron/
+    main.ts
+    preload.ts
+```
+
+## 2. Choose a desktop wrapper
+
+For Steam, your web game needs to behave like a native desktop game.
+
+Best options:
+
+```txt
+Electron   = easiest, heavier, best ecosystem
+Tauri      = lighter, Rust-based, more setup
+NW.js      = older but game-friendly
+Neutralino = very lightweight, less common
+```
+
+For your current Babylon.js + React + TypeScript direction, I would start with **Electron** because it is the simplest way to get a working `.exe` quickly.
+
+Install Electron:
+
+```bash
+npm install --save-dev electron electron-builder concurrently wait-on
+```
+
+Example `electron/main.ts`:
+
+```ts
+import { app, BrowserWindow } from "electron";
+import path from "path";
+
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 720,
+    fullscreen: false,
+    autoHideMenuBar: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  const gamePath = path.join(__dirname, "../dist/index.html");
+  win.loadFile(gamePath);
+}
+
+app.whenReady().then(createWindow);
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
+```
+
+Then configure your package scripts:
+
+```json
+{
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "electron": "electron .",
+    "package": "npm run build && electron-builder"
+  },
+  "main": "electron/main.js"
+}
+```
+
+For TypeScript Electron, you may want to compile the Electron files separately, but for a first Steam prototype you can keep it simple with JavaScript.
+
+## 3. Make the game Steam-friendly
+
+Before uploading, your Babylon.js game should support:
+
+```txt
+Fullscreen mode
+Windowed mode
+Resolution options
+Controller support
+Keyboard remapping
+Local save files
+No browser address bar
+No dev console
+No broken external asset paths
+No CORS dependency
+Fast startup
+Clean quit button
+```
+
+For Babylon.js specifically, make sure your asset paths work from a packaged app:
+
+```ts
+SceneLoader.Append("/assets/models/", "player.glb", scene);
+```
+
+May need to become:
+
+```ts
+SceneLoader.Append("./assets/models/", "player.glb", scene);
+```
+
+Also make sure Vite uses relative paths:
+
+```ts
+// vite.config.ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  base: "./",
+});
+```
+
+That `base: "./"` is important for packaged desktop builds.
+
+## 4. Add Steamworks features later
+
+You do **not** need Steamworks API integration just to sell or launch your game on Steam. Valve says the Steamworks SDK is required to upload content to Steam, while the other SDK features are optional. ([Steamworks][1])
+
+Optional Steam features you may add later:
+
+```txt
+Steam Achievements
+Steam Cloud Saves
+Steam Input
+Steam Overlay
+Leaderboards
+Workshop
+Multiplayer lobbies
+Rich Presence
+DLC
+```
+
+For Electron games, Steam integration is possible, but it is more annoying than in Unity/Unreal/Godot. You would usually use a Node/native bridge package or call Steamworks through a native helper layer.
+
+For your first release, I would ship the core game first, then add Steam Achievements and Cloud Saves later.
+
+## 5. Sign up for Steamworks
+
+You need a Steamworks partner account. Steamworks is Valve’s toolset for configuring, managing, and operating games on Steam. ([Steamworks][2])
+
+Steam Direct currently requires a **$100 USD fee per app/game**. Valve’s documentation says you pay the fee for each new app you want to distribute. ([Steamworks][3])
+
+After that, you create a new Steam application. Steam’s docs say that once the Steam Direct Fee is purchased or an app credit is granted, an administrator can redeem it by clicking **Create new app** in Steamworks. ([Steamworks][4])
+
+## 6. Prepare your Steam store page
+
+You will need:
+
+```txt
+Game title
+Short description
+Long description
+Capsule images
+Screenshots
+Trailer
+System requirements
+Supported languages
+Tags
+Genre/category
+Release date
+Pricing
+Content survey
+Age-rating requirements where applicable
+```
+
+Steam’s store page editor is where you add the description, trailer, screenshots, icons, pricing, and other required store checklist items. ([Steamworks][5])
+
+## 7. Upload your build with SteamPipe
+
+Steam uses **SteamPipe** for game build uploads. Steam’s docs say you create scripts describing your build and depots, then upload them through the Steamworks SDK tools. ([Steamworks][6])
+
+A build can contain one or more depots. Steam defines a build as the result of uploading your content, representing your depots at that point in time. ([Steamworks][7])
+
+Typical depot setup:
+
+```txt
+Depot 1: Windows build
+Depot 2: macOS build
+Depot 3: Linux build
+```
+
+For a first release, start with Windows only:
+
+```txt
+my-game-windows/
+  MyGame.exe
+  resources/
+  assets/
+  package files
+```
+
+Then upload that folder as your Windows depot.
+
+## 8. Submit store page and build for review
+
+Steam has two main reviews:
+
+```txt
+Store page review
+Game/build review
+```
+
+Steam says store presence review typically takes **3–5 business days**, but they recommend submitting at least **7 business days** before you want it live. Product build review also typically takes **3–5 business days**, with the same recommendation to plan for at least **7 business days**. ([Steamworks][8])
+
+Steam’s release docs also say your store page must be submitted for review before your build can be submitted for review. Both checklists need to be completed, reviewed, and approved before release. ([Steamworks][9])
+
+## 9. Recommended workflow for your Babylon.js game
+
+For your project, I would do it in this order:
+
+```txt
+1. Finish the Babylon.js game loop.
+2. Make production build with Vite.
+3. Package with Electron.
+4. Test Windows .exe locally.
+5. Add fullscreen, settings, save/load, and controller support.
+6. Create Steamworks account.
+7. Pay Steam Direct fee.
+8. Create Steam app.
+9. Build store page.
+10. Upload Windows depot.
+11. Submit store page review.
+12. Submit build review.
+13. Release when approved.
+```
+
+## 10. Minimal Steam-ready Electron structure
+
+```txt
+game/
+  src/
+    main.tsx
+    Game.tsx
+  public/
+    assets/
+      models/
+      textures/
+      audio/
+  electron/
+    main.js
+  dist/
+  package.json
+  vite.config.ts
+```
+
+Example `electron/main.js`:
+
+```js
+const { app, BrowserWindow } = require("electron");
+const path = require("path");
+
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 720,
+    fullscreen: false,
+    autoHideMenuBar: true,
+    backgroundColor: "#000000",
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  win.loadFile(path.join(__dirname, "../dist/index.html"));
+}
+
+app.whenReady().then(createWindow);
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
+```
+
+Example `vite.config.ts`:
+
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  base: "./",
+});
+```
+
+Example `package.json`:
+
+```json
+{
+  "name": "babylon-steam-game",
+  "version": "0.1.0",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "electron": "npm run build && electron .",
+    "package:win": "npm run build && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.yourstudio.babylonsteamgame",
+    "productName": "Babylon Steam Game",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    }
+  },
+  "devDependencies": {
+    "electron": "^latest",
+    "electron-builder": "^latest",
+    "@vitejs/plugin-react": "^latest",
+    "vite": "^latest",
+    "typescript": "^latest"
+  }
+}
+```
+
+Then build:
+
+```bash
+npm run package:win
+```
+
+That gives you a Windows installer or executable in:
+
+```txt
+release/
+```
+
+## Important advice
+
+Do **not** upload a raw web folder and expect Steam to run it like a website. Steam is mainly expecting executable builds. Your Babylon.js game should launch like a normal desktop game.
+
+For your first Steam target, use:
+
+```txt
+Babylon.js + React + TypeScript
+Vite
+Electron
+electron-builder
+SteamPipe
+Windows depot first
+```
+
+Then later, once the game is stable, add:
+
+```txt
+Steam Achievements
+Steam Cloud
+Steam Input
+Mac/Linux depots
+Demo build
+Early Access page
+```
+
+[1]: https://partner.steamgames.com/doc/sdk?utm_source=chatgpt.com "Steamworks SDK"
+[2]: https://partner.steamgames.com/doc?utm_source=chatgpt.com "Documentation Home Page (Steamworks Documentation)"
+[3]: https://partner.steamgames.com/doc/gettingstarted/appfee?utm_source=chatgpt.com "Steam Direct Fee (Steamworks Documentation)"
+[4]: https://partner.steamgames.com/doc/store/application?utm_source=chatgpt.com "Applications (Steamworks Documentation)"
+[5]: https://partner.steamgames.com/doc/store/editing?utm_source=chatgpt.com "Store Page, Building and Editing (Steamworks Documentation)"
+[6]: https://partner.steamgames.com/doc/sdk/uploading?utm_source=chatgpt.com "Uploading to Steam (Steamworks Documentation)"
+[7]: https://partner.steamgames.com/doc/store/application/builds?utm_source=chatgpt.com "Builds (Steamworks Documentation)"
+[8]: https://partner.steamgames.com/doc/store/review_process?utm_source=chatgpt.com "Review Process (Steamworks Documentation)"
+[9]: https://partner.steamgames.com/doc/store/releasing?utm_source=chatgpt.com "Release Process (Steamworks Documentation)"

@@ -388,7 +388,15 @@ export class PlayerController implements IDamageable {
       }
 
       if (e.code === "KeyC") {
-        this.toggleCameraMode();
+        // Ignore camera-toggle while mounted in a vehicle. Gamepad R3
+        // (right-stick click) maps to KeyC, and players were accidentally
+        // flipping 1st/3rd person mid-drive while looking around with the
+        // right stick. The vehicle camera doesn't change behaviour with
+        // mode anyway since the player mesh is hidden, so this is a pure
+        // anti-misclick guard.
+        if (!this.isMounted()) {
+          this.toggleCameraMode();
+        }
       }
     };
 

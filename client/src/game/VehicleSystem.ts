@@ -325,8 +325,12 @@ export class VehicleSystem {
     // Bump against building walls when flying low
     this.resolveVehicleWallCollisions(v, 3.0);
 
-    // Soft floor & ceiling
-    const groundY = this.getGroundHeight ? this.getGroundHeight(v.position.x, v.position.z) : 0;
+    // Soft floor & ceiling. Pass the fighter's current Y so the headroom
+    // filter inside getDriveableHeight() ignores platforms (notably the
+    // sky racetrack at Y=80) the jet is flying well below — without this
+    // the fighter would snap up onto the racetrack whenever its (x,z)
+    // crossed under the ring, making it feel "stuck to the track".
+    const groundY = this.getGroundHeight ? this.getGroundHeight(v.position.x, v.position.z, v.position.y) : 0;
     const minY = groundY + FIGHTER_MIN_ALTITUDE;
     if (v.position.y < minY) v.position.y = minY;
     if (v.position.y > FIGHTER_MAX_ALTITUDE) v.position.y = FIGHTER_MAX_ALTITUDE;
