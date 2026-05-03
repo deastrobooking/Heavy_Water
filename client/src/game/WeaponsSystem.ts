@@ -580,14 +580,13 @@ export class WeaponsSystem {
   }
 
   cycleWeapon(direction: number): void {
-    // Damage weapons only — tool weapons (Capture Net) are intentionally
-    // excluded from the wheel so the player doesn't accidentally cycle
-    // onto a non-combat tool mid-fight. Use Digit8 to select the net.
-    const types: WeaponType[] = ["pistol", "rifle", "shotgun", "rocket", "laser", "grenade", "tracking_missile"];
+    // Tool weapons (Capture Net) live at the END of the cycle so the
+    // gamepad's D-pad L/R can reach them — there's no Digit8 equivalent
+    // on a controller. Damage weapons come first, the net comes last,
+    // so a player walking the wheel forward from the pistol passes
+    // through every gun before landing on the net.
+    const types: WeaponType[] = ["pistol", "rifle", "shotgun", "rocket", "laser", "grenade", "tracking_missile", "capture_net"];
     const currentIndex = types.indexOf(this.currentWeapon);
-    // If we're on a tool weapon (e.g. capture_net), the wheel always
-    // jumps back to the first damage weapon rather than wrapping into
-    // the tool slot.
     if (currentIndex < 0) {
       this.selectWeapon(types[0]);
       return;

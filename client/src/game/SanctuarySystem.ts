@@ -28,6 +28,10 @@ export interface SanctuaryHandles {
    *  the Capture Net on mount and restores the previously-equipped weapon
    *  on dispose so warping out doesn't leave the player holding a net. */
   weapons?: WeaponsSystem | null;
+  /** Optional LOD culler. The sanctuary suppresses it on mount so the
+   *  hidden city/platforms can't pop back into view when the player walks
+   *  near a previously-culled sector; restored on dispose. */
+  lodCull?: { setSuppressed(b: boolean): void } | null;
 }
 
 /**
@@ -124,6 +128,10 @@ export class SanctuarySystem {
     // floor — but the grass plane gives a clean visual surface.
     this.buildGrassPlains();
     this.hideOuterWorld();
+    // Freeze the LOD culler so it can't re-show the city/platforms we
+    // just hid as the player walks within their cull radii. Restored in
+    // dispose() so the open world resumes normal LOD behaviour.
+    try { this.handles.lodCull?.setSuppressed(true); } catch {}
     this.buildSign();
     this.buildPerimeter();
     this.buildVillage();
@@ -197,6 +205,15 @@ export class SanctuarySystem {
   /** Nothing per-frame — FriendlyNPCSystem and FarmingSystem run their own
    *  observers. SanctuarySystem is a coordinator. */
   dispose(): void {
+    // Outer try/finally guarantees the LOD culler is un-suppressed even if
+    // any intermediate teardown step throws — otherwise a mid-dispose
+    // exception could leave the open world's distance culling permanently
+    // frozen the next time the player warps out.
+    try { this._disposeInner(); }
+    finally { try { this.handles.lodCull?.setSuppressed(false); } catch {} }
+  }
+
+  private _disposeInner(): void {
     if (this.npcs) {
       try { this.npcs.dispose(); } catch {}
       this.npcs = null;
@@ -1142,10 +1159,27 @@ export class SanctuarySystem {
     // home, bobs vertically, and faces its motion direction. Pure cosmetic —
     // no AI, no targeting, no damage.
     let lastT = performance.now();
+    // Slow trickle of Bio Essence so a hunting player can't run dry
+    // mid-session. The first throw worked but subsequent throws were
+    // silently failing because Essence ran out and the user had no UI
+    // hint why. +1 every 6 s, capped at 10. Only fires inside the
+    // sanctuary because this observer is owned by the sanctuary and
+    // disposed on warp-out.
+    let essenceTrickle = 0;
+    const ESSENCE_TRICKLE_S = 6;
+    const ESSENCE_TRICKLE_CAP = 10;
     this.wildlifeObserver = scene.onBeforeRenderObservable.add(() => {
       const now = performance.now();
       const dt = Math.min(0.1, (now - lastT) / 1000);
       lastT = now;
+      essenceTrickle += dt;
+      if (essenceTrickle >= ESSENCE_TRICKLE_S) {
+        essenceTrickle = 0;
+        const have = this.inventory.getItemCount("bio_essence");
+        if (have < ESSENCE_TRICKLE_CAP) {
+          this.inventory.addItem(ITEM_DEFINITIONS.bio_essence, 1);
+        }
+      }
       for (const w of this.wildlife) {
         w.phase += dt * w.speed;
         w.bobPhase += dt * 2.4;

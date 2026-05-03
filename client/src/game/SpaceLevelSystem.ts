@@ -25,6 +25,10 @@ export interface SpaceLevelHandles {
    *  player camera/physics stays in on-foot mode while the vehicle drives
    *  around). */
   player?: PlayerController | null;
+  /** Optional LOD culler. Suppressed for the duration of the orbital warp
+   *  so the hidden city can't flip back on as the player flies around
+   *  near previously-culled sectors. */
+  lodCull?: { setSuppressed(b: boolean): void } | null;
 }
 
 /**
@@ -102,6 +106,9 @@ export class SpaceLevelSystem {
 
     sky.setSpaceMode(true);
     this.hideWorldGeometry();
+    // Freeze the LOD culler so the orbital scene can't accidentally
+    // re-show city/platform meshes when the player flies near them.
+    try { this.handles.lodCull?.setSuppressed(true); } catch {}
     // NOTE: weapons stay ENABLED in vacuum — orbital combat is the whole
     // point of L5, so the player needs to be able to shoot. The
     // setFiringEnabled gates on WeaponsSystem / SpecialWeaponsSystem /
@@ -117,6 +124,14 @@ export class SpaceLevelSystem {
   }
 
   dispose(): void {
+    // Outer try/finally guarantees LOD un-suppression even if teardown
+    // throws — otherwise the open world's distance culling could stay
+    // permanently frozen after a single mid-dispose exception.
+    try { this._disposeInner(); }
+    finally { try { this.handles.lodCull?.setSuppressed(false); } catch {} }
+  }
+
+  private _disposeInner(): void {
     if (this.observer) {
       this.scene.onBeforeRenderObservable.remove(this.observer);
       this.observer = null;

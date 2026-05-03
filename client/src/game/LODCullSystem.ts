@@ -27,8 +27,14 @@ import * as BABYLON from "@babylonjs/core";
 
 interface CullEntry {
   node: BABYLON.TransformNode;
-  /** Squared cull radius. Outside this distance the node is disabled. */
-  r2: number;
+  /** Squared distance at which a currently-disabled node is RE-enabled.
+   *  Equal to the registered radius, squared. */
+  rEnable2: number;
+  /** Squared distance at which a currently-enabled node is disabled.
+   *  Slightly larger than `rEnable2` (HYSTERESIS_M past the radius) so a
+   *  player jittering across the boundary doesn't strobe the mesh
+   *  on/off every tick. */
+  rDisable2: number;
   /** Cached last enabled-state so we only call setEnabled on change.
    *  Babylon's setEnabled walks the children list — cheap, but still
    *  worth skipping when nothing changed. */
@@ -39,17 +45,36 @@ export class LODCullSystem {
   private entries: CullEntry[] = [];
   private playerPos: BABYLON.Vector3 = BABYLON.Vector3.Zero();
   private accum: number = 0;
+  /** When true, `update()` short-circuits and never touches setEnabled.
+   *  Used by side-zones (sanctuary, space, lab) that hide the city via
+   *  CityGenerator.setVisible(false): without suppression, our cached
+   *  `e.enabled === false` entries would flip back to true the first
+   *  tick the player walks within range, re-showing city walls inside
+   *  the sanctuary. */
+  private suppressed: boolean = false;
   /** Tick interval in ms. 160 ms ≈ 6 Hz. Player walking speed ~6 m/s, so
    *  worst-case position drift between ticks is ~1 m — far inside the
    *  hysteresis band of any sensible cull radius. */
   private static readonly TICK_MS = 160;
+  /** Hysteresis band in metres. A node enabled at distance R remains
+   *  enabled until the player is R+HYSTERESIS_M away. Prevents
+   *  on-the-edge meshes from popping on/off as the player jitters
+   *  across the boundary, and gives a small "grace zone" so meshes
+   *  the player is approaching show up slightly early. */
+  private static readonly HYSTERESIS_M = 15;
 
   /** Register a mesh / transform-node for distance culling.
    *  @param node       The mesh or container to toggle.
    *  @param radius     Distance in metres. Beyond this the node is hidden. */
   register(node: BABYLON.TransformNode | null | undefined, radius: number): void {
     if (!node) return;
-    this.entries.push({ node, r2: radius * radius, enabled: true });
+    const rDisable = radius + LODCullSystem.HYSTERESIS_M;
+    this.entries.push({
+      node,
+      rEnable2: radius * radius,
+      rDisable2: rDisable * rDisable,
+      enabled: true,
+    });
   }
 
   /** Remove an entry — call this when a mesh is destroyed (e.g. a player
@@ -72,7 +97,17 @@ export class LODCullSystem {
   /** Tick the system. Pass the frame deltaTime in milliseconds — the
    *  system batches work at ~6 Hz internally so calling every frame is
    *  cheap. */
+  /** External gate: while suppressed, `update()` is a no-op so this
+   *  system never re-enables a node that an outer owner (level swap
+   *  system) has hidden. Cached `e.enabled` state is preserved so when
+   *  suppression lifts the system continues seamlessly from where it
+   *  left off rather than scanning the whole world at once. */
+  setSuppressed(suppressed: boolean): void {
+    this.suppressed = suppressed;
+  }
+
   update(deltaMs: number): void {
+    if (this.suppressed) return;
     this.accum += deltaMs;
     if (this.accum < LODCullSystem.TICK_MS) return;
     this.accum = 0;
@@ -83,12 +118,20 @@ export class LODCullSystem {
     const list = this.entries;
     for (let i = 0; i < list.length; i++) {
       const e = list[i];
-      const np = e.node.position;
+      // Use absolute position so parented containers (TransformNodes
+      // hanging under a root) report their world-space centre rather
+      // than a local (0,0,0). Buildings in CityGenerator set absolute
+      // positions today, but defensive against future refactors and
+      // free for any node whose world matrix is already current.
+      const np = e.node.getAbsolutePosition();
       const dx = np.x - px;
       const dy = np.y - py;
       const dz = np.z - pz;
       const d2 = dx * dx + dy * dy + dz * dz;
-      const want = d2 <= e.r2;
+      // Hysteresis: enabled nodes stay on until past the larger
+      // disable threshold, disabled nodes only flip back when inside
+      // the smaller enable threshold.
+      const want = e.enabled ? (d2 <= e.rDisable2) : (d2 <= e.rEnable2);
       if (want !== e.enabled) {
         e.node.setEnabled(want);
         e.enabled = want;

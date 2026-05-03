@@ -670,6 +670,27 @@ export const Game: React.FC = () => {
         bus.on("prefab:modeChanged", (on: boolean) => {
           if (on && buildingRef.current?.isBuildMode()) buildingRef.current.toggleBuildMode();
         });
+        // Surface UI_MESSAGE bus events to the on-screen banner. Many
+        // systems emit user-facing feedback ("No bio-creature in range",
+        // "Need 1 Bio Essence", "Crafted X", shop errors, etc.) via this
+        // event but nothing was subscribed before — so the player saw
+        // silent failures (notably: failed capture-net throws). Accepts
+        // either a plain string payload or a `{text|message, duration}`
+        // object so we don't have to touch every caller.
+        bus.on(GameEvents.UI_MESSAGE, (payload: any) => {
+          let text: string | null = null;
+          let duration = 2000;
+          if (typeof payload === "string") {
+            text = payload;
+          } else if (payload && typeof payload === "object") {
+            text = payload.text ?? payload.message ?? null;
+            if (typeof payload.duration === "number") {
+              // BeamSabreSystem uses seconds (1.2), most others use ms.
+              duration = payload.duration < 20 ? payload.duration * 1000 : payload.duration;
+            }
+          }
+          if (text) showMessage(text, duration);
+        });
 
         const effects = new EffectsSystem(scene, engine.getCamera());
         effectsRef.current = effects;
@@ -920,6 +941,7 @@ export const Game: React.FC = () => {
                 // the right trigger captures right out of the gate.
                 bio: bioRef.current,
                 weapons: weaponsRef.current,
+                lodCull,
               },
             );
           } else if (!isSanctuary && sanctuarySystemRef.current) {
@@ -950,6 +972,7 @@ export const Game: React.FC = () => {
                   alienFoliageRef.current,
                   propSystemRef.current,
                 ],
+                lodCull,
               },
             );
           } else if (!isLab && pontiacLabSystemRef.current) {
@@ -985,6 +1008,7 @@ export const Game: React.FC = () => {
                   alienFoliageRef.current,
                   propSystemRef.current,
                 ],
+                lodCull,
               },
             );
           } else if (!isSpacelike && spaceLevelSystemRef.current) {

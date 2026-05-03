@@ -11,6 +11,11 @@ import type { CityGenerator } from "./CityGenerator";
 export interface PontiacLabHandles {
   city?: CityGenerator | null;
   worldVisibles?: Array<{ setVisible(visible: boolean): void } | null | undefined>;
+  /** Optional LOD culler. Suppressed while the lab is mounted so hidden
+   *  city meshes can't pop back in if the player walks (they can't, the
+   *  lab is interior, but the gate keeps the contract identical across
+   *  every side-zone). */
+  lodCull?: { setSuppressed(b: boolean): void } | null;
 }
 
 /**
@@ -81,6 +86,8 @@ export class PontiacLabSystem {
     // floor while the city ground is hidden, so physics keeps working.
     this.buildFloorAndCeiling();
     this.hideOuterWorld();
+    // Freeze the LOD culler so it can't re-enable hidden city meshes.
+    try { this.handles.lodCull?.setSuppressed(true); } catch {}
     this.buildWalls();
     this.buildSign();
     this.buildPerimeterRing();
@@ -100,6 +107,14 @@ export class PontiacLabSystem {
   }
 
   dispose(): void {
+    // Outer try/finally guarantees LOD un-suppression even if teardown
+    // throws — otherwise the open world's distance culling could stay
+    // permanently frozen after a single mid-dispose exception.
+    try { this._disposeInner(); }
+    finally { try { this.handles.lodCull?.setSuppressed(false); } catch {} }
+  }
+
+  private _disposeInner(): void {
     if (this.observer) {
       this.scene.onBeforeRenderObservable.remove(this.observer);
       this.observer = null;
