@@ -108,7 +108,11 @@ export class MountainRingSystem {
   /** Ring geometry. */
   private static readonly RING_RADIUS = 560;
   private static readonly TEMPLE_RADIUS = 480;
-  private static readonly MOUNTAIN_COUNT = 28;
+  /** Number of mountain "ranges" placed around the ring. Each range is a
+   *  tight cluster of 3–5 peaks of varying height — this reads as a real
+   *  mountain range (a few tall peaks flanked by smaller hills) rather
+   *  than the previous wallpaper of evenly-spaced single cones. */
+  private static readonly RANGE_COUNT = 9;
   /** Four off-diagonal angles. We deliberately avoid the exact 45/135/225/315
    *  diagonals because Level 2's fortress sits near (-360,-360) — putting a
    *  temple at radius 480 on the SW diagonal would overlap that lane. The
@@ -191,71 +195,194 @@ export class MountainRingSystem {
   // ------------------------------------------------------------------ build
 
   /** Generate the static mountain ring once. We keep the meshes alive
-   *  across levels and just tint the shared material on level change —
-   *  cheaper than rebuilding 28 cones every time. Each "mountain" is a
-   *  cluster of three stacked cones for a chunky, hand-painted look that
-   *  matches the cell-shaded aesthetic. */
+   *  across levels and just tint the shared material on level change.
+   *
+   *  Layout: instead of evenly-distributed single peaks, the ring is
+   *  composed of `RANGE_COUNT` clumped "ranges". Each range has one
+   *  central tall peak and 2–4 shorter flanking peaks bunched around it
+   *  (tight angular + radial spread) so the silhouette reads as a real
+   *  mountain range — a hero peak with foothills — rather than a row of
+   *  identical cones.
+   *
+   *  Steepness: every peak uses height/width ≈ 0.45–0.6 (was ~1.0), so
+   *  the cone slopes are gentle enough that the player can run up them
+   *  without sliding off. Snow caps are only added to the tallest peak
+   *  in each range so they read as the "summit" rather than uniform
+   *  decoration. Mesh names stay prefixed `mountain_main_/_ridge_/_cap_`
+   *  so PlayerController's ground ray-pick keeps treating them as
+   *  walkable terrain. */
   private buildMountainRing(): void {
     const r = MountainRingSystem.RING_RADIUS;
-    for (let i = 0; i < MountainRingSystem.MOUNTAIN_COUNT; i++) {
-      const baseAngle = (i / MountainRingSystem.MOUNTAIN_COUNT) * Math.PI * 2;
-      // Deterministic jitter so layout is stable across reloads.
-      const seed = i * 7919;
-      const jr = ((Math.sin(seed) + 1) * 0.5 - 0.5) * 60;
-      const ja = ((Math.cos(seed * 1.3) + 1) * 0.5 - 0.5) * 0.07;
-      const angle = baseAngle + ja;
-      const radius = r + jr;
-      const cx = Math.cos(angle) * radius;
-      const cz = Math.sin(angle) * radius;
+    let peakIndex = 0;
 
-      // Heights vary so the silhouette reads as a real mountain range.
-      const baseH = 60 + ((Math.sin(seed * 2.7) + 1) * 0.5) * 40;
-      const baseW = 70 + ((Math.cos(seed * 4.1) + 1) * 0.5) * 30;
+    // Mulberry32-flavoured deterministic number stream — same seed each
+    // boot so the ring layout is stable across reloads. Wrapped in a
+    // helper so each cluster's "RNG" is reproducible and isolated.
+    const det = (s: number) => () => {
+      s = (s + 0x6D2B79F5) >>> 0;
+      let t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
 
-      const main = BABYLON.MeshBuilder.CreateCylinder(
-        `mountain_main_${i}`,
-        { diameterTop: 4, diameterBottom: baseW, height: baseH, tessellation: 7 },
-        this.scene,
-      );
-      main.position = new BABYLON.Vector3(cx, baseH / 2, cz);
-      main.material = this.mountainMat;
-      main.parent = this.mountainRoot;
-      main.checkCollisions = false;
+    // Precompute temple centers for clearance checks. Cluster 3 (≈120°)
+    // would otherwise sit directly on top of the 120° temple, and a
+    // jittered flank in the 0°/320° clusters can creep inside the 30°
+    // and 300° temple footprints. Each peak is pushed away from any
+    // temple it overlaps so the temple ring stays unobstructed.
+    const templeAngles = MountainRingSystem.TEMPLE_ANGLES_DEG.map(
+      (deg) => (deg * Math.PI) / 180,
+    );
+    const templeRadius = MountainRingSystem.TEMPLE_RADIUS;
+    const templeCenters = templeAngles.map((a) => ({
+      x: Math.cos(a) * templeRadius,
+      z: Math.sin(a) * templeRadius,
+    }));
+    /** Temple footprint half-width (30m square base) + 8m breathing room. */
+    const TEMPLE_KEEPOUT = 23;
+    const ensureClearOfTemples = (
+      px: number,
+      pz: number,
+      peakRadius: number,
+    ): { x: number; z: number } => {
+      // Iterative radial push — at most 6 passes, but in practice 1–2
+      // resolves any overlap because we move further than required each
+      // step and clusters never sit on top of >1 temple at once.
+      for (let pass = 0; pass < 6; pass++) {
+        let worstOverlap = 0;
+        let dirX = 0;
+        let dirZ = 0;
+        for (const c of templeCenters) {
+          const dx = px - c.x;
+          const dz = pz - c.z;
+          const d = Math.hypot(dx, dz);
+          const required = peakRadius + TEMPLE_KEEPOUT;
+          if (d < required) {
+            const overlap = required - d;
+            if (overlap > worstOverlap) {
+              worstOverlap = overlap;
+              const inv = d > 0.001 ? 1 / d : 0;
+              dirX = dx * inv;
+              dirZ = dz * inv;
+              // If the peak is dead-center on a temple (d ≈ 0), push it
+              // outward radially from the world origin so it lands on the
+              // far side of the ring instead of jittering in place.
+              if (d <= 0.001) {
+                const outR = Math.hypot(px, pz) || 1;
+                dirX = px / outR;
+                dirZ = pz / outR;
+              }
+            }
+          }
+        }
+        if (worstOverlap === 0) return { x: px, z: pz };
+        const step = worstOverlap + 0.5;
+        px += dirX * step;
+        pz += dirZ * step;
+      }
+      return { x: px, z: pz };
+    };
 
-      // Side ridges to break up the silhouette.
-      for (let k = 0; k < 2; k++) {
-        const off = (k === 0 ? -1 : 1) * (baseW * 0.35 + ((Math.sin(seed + k) + 1) * 0.5) * 8);
-        const oa = angle + Math.PI / 2;
-        const sx = cx + Math.cos(oa) * off;
-        const sz = cz + Math.sin(oa) * off;
-        const sh = baseH * (0.55 + ((Math.cos(seed + k * 13) + 1) * 0.5) * 0.25);
-        const sw = baseW * (0.55 + ((Math.sin(seed + k * 17) + 1) * 0.5) * 0.2);
-        const ridge = BABYLON.MeshBuilder.CreateCylinder(
-          `mountain_ridge_${i}_${k}`,
-          { diameterTop: 3, diameterBottom: sw, height: sh, tessellation: 6 },
+    for (let i = 0; i < MountainRingSystem.RANGE_COUNT; i++) {
+      const rand = det(i * 7919 + 1);
+      // Center of this range on the ring (with mild angular jitter so the
+      // ranges aren't perfectly equidistant).
+      const baseAngle = (i / MountainRingSystem.RANGE_COUNT) * Math.PI * 2;
+      const angleJitter = (rand() - 0.5) * 0.10;
+      const cAngle = baseAngle + angleJitter;
+      const cRadius = r + (rand() - 0.5) * 30;
+      const ccx = Math.cos(cAngle) * cRadius;
+      const ccz = Math.sin(cAngle) * cRadius;
+
+      // Range-wide hero size — drives the central peak; flanks scale down
+      // from this. Hero peaks are tall (40–70 units) but wide-based so the
+      // slope is gentle.
+      const heroH = 40 + rand() * 30;
+      const heroW = heroH * 2.0 + rand() * 30;     // h/w ≈ 0.45–0.55 (was ~1.0)
+
+      const peakCount = 3 + Math.floor(rand() * 3);  // 3..5 peaks per range
+      // Tangent direction along the ring — flank peaks shift sideways
+      // along this axis so the cluster reads as a chain, not a circle.
+      const tangentX = -Math.sin(cAngle);
+      const tangentZ = Math.cos(cAngle);
+      // Inward/outward direction so flanks can step closer/farther from
+      // the city, breaking the perfect ring shape.
+      const radialX = Math.cos(cAngle);
+      const radialZ = Math.sin(cAngle);
+
+      for (let k = 0; k < peakCount; k++) {
+        const isHero = k === 0;
+        // Hero peak sits at the cluster center; flanks fan out tangentially
+        // (up to ±55m along the chain) and slightly in/out (±20m radially).
+        const tShift = isHero ? 0 : (rand() - 0.5) * 110;
+        const rShift = isHero ? 0 : (rand() - 0.5) * 40;
+        let px = ccx + tangentX * tShift + radialX * rShift;
+        let pz = ccz + tangentZ * tShift + radialZ * rShift;
+
+        // Flank scale: 50–80% of hero size, with extra variance so no two
+        // peaks in a cluster feel identical.
+        const scale = isHero ? 1.0 : 0.5 + rand() * 0.3;
+        const baseH = heroH * scale;
+        const baseW = heroW * scale * (0.95 + rand() * 0.15);
+
+        // Push the peak away from any temple it would otherwise overlap.
+        // Done after sizing so the keepout uses the actual base radius.
+        const cleared = ensureClearOfTemples(px, pz, baseW / 2);
+        px = cleared.x;
+        pz = cleared.z;
+
+        const main = BABYLON.MeshBuilder.CreateCylinder(
+          `mountain_main_${peakIndex}`,
+          { diameterTop: 4, diameterBottom: baseW, height: baseH, tessellation: 7 },
           this.scene,
         );
-        ridge.position = new BABYLON.Vector3(sx, sh / 2, sz);
-        ridge.material = this.mountainMat;
-        ridge.parent = this.mountainRoot;
-        ridge.checkCollisions = false;
-      }
+        main.position = new BABYLON.Vector3(px, baseH / 2, pz);
+        main.material = this.mountainMat;
+        main.parent = this.mountainRoot;
+        main.checkCollisions = false;
 
-      // Snow cap — a small bright cone on top of the main peak so the
-      // ring reads as a "mountain ring" from the city below.
-      const cap = BABYLON.MeshBuilder.CreateCylinder(
-        `mountain_cap_${i}`,
-        { diameterTop: 0, diameterBottom: 14, height: 12, tessellation: 7 },
-        this.scene,
-      );
-      const capMat = new BABYLON.StandardMaterial(`mountain_cap_mat_${i}`, this.scene);
-      capMat.diffuseColor = new BABYLON.Color3(0.92, 0.95, 1.0);
-      capMat.emissiveColor = new BABYLON.Color3(0.3, 0.34, 0.4);
-      capMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-      cap.material = capMat;
-      cap.position = new BABYLON.Vector3(cx, baseH + 6, cz);
-      cap.parent = this.mountainRoot;
-      cap.checkCollisions = false;
+        // One small side ridge so each peak has a tiny foothill — gentler
+        // slope than the previous two-ridge setup, and only on flanks
+        // (heroes look cleaner without an extra bump).
+        if (!isHero && rand() < 0.7) {
+          const off = (rand() < 0.5 ? -1 : 1) * (baseW * 0.35 + rand() * 8);
+          const oa = cAngle + Math.PI / 2;
+          const sx = px + Math.cos(oa) * off;
+          const sz = pz + Math.sin(oa) * off;
+          const sh = baseH * (0.45 + rand() * 0.25);
+          const sw = baseW * (0.55 + rand() * 0.2);
+          const ridge = BABYLON.MeshBuilder.CreateCylinder(
+            `mountain_ridge_${peakIndex}_0`,
+            { diameterTop: 3, diameterBottom: sw, height: sh, tessellation: 6 },
+            this.scene,
+          );
+          ridge.position = new BABYLON.Vector3(sx, sh / 2, sz);
+          ridge.material = this.mountainMat;
+          ridge.parent = this.mountainRoot;
+          ridge.checkCollisions = false;
+        }
+
+        // Snow cap only on the hero peak of each range — reads as the
+        // "summit" with foothills around it.
+        if (isHero) {
+          const cap = BABYLON.MeshBuilder.CreateCylinder(
+            `mountain_cap_${peakIndex}`,
+            { diameterTop: 0, diameterBottom: 14, height: 10, tessellation: 7 },
+            this.scene,
+          );
+          const capMat = new BABYLON.StandardMaterial(`mountain_cap_mat_${peakIndex}`, this.scene);
+          capMat.diffuseColor = new BABYLON.Color3(0.92, 0.95, 1.0);
+          capMat.emissiveColor = new BABYLON.Color3(0.3, 0.34, 0.4);
+          capMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+          cap.material = capMat;
+          cap.position = new BABYLON.Vector3(px, baseH + 5, pz);
+          cap.parent = this.mountainRoot;
+          cap.checkCollisions = false;
+        }
+
+        peakIndex++;
+      }
     }
   }
 
