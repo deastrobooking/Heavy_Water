@@ -59,6 +59,9 @@ Three world levels are defined, each with specific banners, objectives, difficul
 ### Resource Nodes
 The MiningSystem scatters destructible glowing resource nodes that respawn after a delay.
 
+### Mountain Ring & Hidden Temples
+`MountainRingSystem` builds a ring of 28 jittered mountains (cone+ridge+snow-cap) at radius 560 around the world center, sharing one tintable `mountainMat` so a `LEVEL_STARTED` listener can blend the rock color toward the active sky tint. Inside the ring, four stepped-pyramid hidden temples sit at the diagonals (45/135/225/315°) at radius 480, each with a glowing inward-facing portal disc and a floating beacon. Temple ids are namespaced per level (`L{1-3}_temple_{ne|nw|sw|se}`) so each level keeps an independent looted history. Approaching a temple shows a `PRESS E — RAID HIDDEN TEMPLE` HTML prompt; pressing E grants a level-scaled rare-item bundle (energy_core, circuit_board, nano_fiber, weapon_part_rocket/laser, shield_booster, damage_amp, xp_chip — quantities ×1/×1.5/×2 by level) and spawns a guaranteed rare/legendary guardian creature (legendary-only at L3) via `BioCreatureSystem.spawnCreature`. The portal+beacon dim, a `UI_MESSAGE` toast fires, and the temple id is added to a persistent `lootedTempleIds` set saved in `ProgressSnapshot`.
+
 ### Player Progress and Persistence
 ProgressSync.ts handles saving and loading player progress to a database, covering stats, weapon levels, inventory, companion roster, beam sabre level, SPECIALS unlocks, and elemental specials levels. Auto-save runs every 5 seconds and on key progression events.
 

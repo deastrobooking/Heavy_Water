@@ -29,6 +29,7 @@ import { PrefabSystem, PrefabSummary } from "./PrefabSystem";
 import { PickupSystem } from "./PickupSystem";
 import { BaseSystem, BaseStructure } from "./BaseSystem";
 import { BioCreatureSystem, CapturedCreature } from "./BioCreatureSystem";
+import { MountainRingSystem } from "./MountainRingSystem";
 import { VehicleSystem } from "./VehicleSystem";
 import { EnvironmentPropSystem, PropHitboxMetadata } from "./EnvironmentPropSystem";
 import { MusicSystem } from "./MusicSystem";
@@ -116,6 +117,7 @@ export const Game: React.FC = () => {
   const pickupRef = useRef<PickupSystem | null>(null);
   const baseRef = useRef<BaseSystem | null>(null);
   const bioRef = useRef<BioCreatureSystem | null>(null);
+  const mountainRingRef = useRef<MountainRingSystem | null>(null);
   const vehicleRef = useRef<VehicleSystem | null>(null);
   const propSystemRef = useRef<EnvironmentPropSystem | null>(null);
   const atvHitCooldownRef = useRef<Map<number, number>>(new Map());
@@ -515,6 +517,20 @@ export const Game: React.FC = () => {
         );
         bioSystem.spawnInitialCreatures();
 
+        // Nature ring: 28 mountains around the world rim plus 4 hidden
+        // temples that grant a one-time bundle of rare items + a guaranteed
+        // legendary creature. Looted state is per-level + persistent.
+        const mountainRing = new MountainRingSystem(scene, inventory, bioSystem);
+        mountainRingRef.current = mountainRing;
+        mountainRing.setInputBlockedProvider(() => {
+          if (labOpenRef.current) return true;
+          if (gardenOpenRef.current) return true;
+          if (upgradeMenuOpenRef.current) return true;
+          if (shopRef.current?.isOpen()) return true;
+          if (gardenRef.current?.isGardenOpenCheck()) return true;
+          return false;
+        });
+
         weapons.setInventory(inventory);
 
         const prefabToBaseId = new Map<string, string>();
@@ -905,6 +921,7 @@ export const Game: React.FC = () => {
             // Level 2 (red sky, harder spawns, second fortress) if they
             // already cleared the first boss fortress.
             worldLevel: levelSystemRef.current?.getSnapshot().worldLevel ?? 1,
+            lootedTempleIds: mountainRingRef.current?.getLootedTempleIds() ?? [],
           };
         };
 
@@ -1017,6 +1034,11 @@ export const Game: React.FC = () => {
                 bioRef.current.loadDexCaughtIds(snap.bioDexCaughtIds);
                 setCapturedCreatures(bioRef.current.getCaptured());
                 setDexCaughtIds(bioRef.current.getDexCaughtIds());
+              }
+              // Hidden-temple looted state — keep raided temples dimmed
+              // across reloads and (per-level) across deaths.
+              if (mountainRingRef.current) {
+                mountainRingRef.current.loadLootedTempleIds(snap.lootedTempleIds);
               }
 
               showMessage(`PROGRESS LOADED — LVL ${snap.stats.level} | ${snap.stats.credits}cr`, 2500);
@@ -1268,6 +1290,7 @@ export const Game: React.FC = () => {
           chestSystem.update(playerPos);
           pickupSystem.setPlayerPosition(playerPos);
           bioSystem.setPlayerPosition(playerPos);
+          mountainRing.setPlayerPosition(playerPos);
           propSystem.setPlayerPosition(playerPos);
 
           // === ATV contact damage ===
@@ -1536,6 +1559,8 @@ export const Game: React.FC = () => {
         atvHitCooldownRef.current.clear();
         if (bioRef.current) { try { bioRef.current.dispose(); } catch {} }
         bioRef.current = null;
+        if (mountainRingRef.current) { try { mountainRingRef.current.dispose(); } catch {} }
+        mountainRingRef.current = null;
         if (miningRef.current) { try { miningRef.current.dispose(); } catch {} }
         miningRef.current = null;
         if (enemyBaseRef.current) { try { enemyBaseRef.current.dispose(); } catch {} }
@@ -1599,6 +1624,7 @@ export const Game: React.FC = () => {
     if (pickupRef.current) { try { pickupRef.current.dispose(); } catch {} pickupRef.current = null; }
     if (propSystemRef.current) { try { propSystemRef.current.dispose(); } catch {} propSystemRef.current = null; }
     if (bioRef.current) { try { bioRef.current.dispose(); } catch {} bioRef.current = null; }
+    if (mountainRingRef.current) { try { mountainRingRef.current.dispose(); } catch {} mountainRingRef.current = null; }
     if (miningRef.current) { try { miningRef.current.dispose(); } catch {} miningRef.current = null; }
     if (enemyBaseRef.current) { try { enemyBaseRef.current.dispose(); } catch {} enemyBaseRef.current = null; }
     if (levelSystemRef.current) { try { levelSystemRef.current.dispose(); } catch {} levelSystemRef.current = null; }
@@ -2149,6 +2175,7 @@ export const Game: React.FC = () => {
       if (prefabRef.current) prefabRef.current.dispose();
       if (pickupRef.current) pickupRef.current.dispose();
       if (bioRef.current) bioRef.current.dispose();
+      if (mountainRingRef.current) { try { mountainRingRef.current.dispose(); } catch {} mountainRingRef.current = null; }
       if (vehicleRef.current) vehicleRef.current.dispose();
       if (propSystemRef.current) propSystemRef.current.dispose();
       atvHitCooldownRef.current.clear();

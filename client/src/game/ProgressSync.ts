@@ -58,6 +58,11 @@ export interface ProgressSnapshot {
    *  and fortress placement. Older saves wrote only `1 | 2` — those still
    *  load (LevelSystem clamps unknown values to 1). */
   worldLevel?: 1 | 2 | 3;
+  /** Hidden-temple ids the player has already raided across all levels.
+   *  Each id is namespaced by level (e.g. "L1_temple_ne") so re-entering
+   *  an earlier level keeps that level's loot history intact. Optional
+   *  for backward compat with pre-temple saves. */
+  lootedTempleIds?: string[];
 }
 
 export async function loadProgress(): Promise<ProgressSnapshot | null> {
