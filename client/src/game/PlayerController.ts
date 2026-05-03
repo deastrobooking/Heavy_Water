@@ -909,7 +909,13 @@ export class PlayerController implements IDamageable {
       return n === "ground" || n.startsWith("skyPlat_") || n.startsWith("bridge_seg") ||
         n.startsWith("step_") || n.startsWith("rooftop_") || n === "mainHighway" ||
         n === "crossHighway" || n === "spaceport" ||
-        n.startsWith("extRamp") || n.startsWith("rt_seg") || n.startsWith("rt_ramp");
+        n.startsWith("extRamp") || n.startsWith("rt_seg") || n.startsWith("rt_ramp") ||
+        // Nature ring: mountain cones (main peak, side ridges, snow cap) and
+        // hidden-temple stepped pyramids are all stand-on / climbable.
+        // Cones produce slanted surfaces, so the existing per-frame ray-down
+        // check naturally lets the player walk up them at any angle.
+        n.startsWith("mountain_") || n.startsWith("temple_tier_") ||
+        n.startsWith("temple_cap_");
     });
 
     if (hit && hit.hit && hit.pickedPoint) {
