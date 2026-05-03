@@ -1982,7 +1982,14 @@ export const Game: React.FC = () => {
             enemySystem.setSpawningEnabled(false);
             enemySystem.clearAllEnemies();
           } catch {}
-          try { aerialEnemySystem.disengageAndClear(); } catch {}
+          try {
+            // setSpawningEnabled(false) is the HARD gate — without it the
+            // drip-spawn loop in AerialEnemySystem.update() re-creates the
+            // patrolling fortresses every few seconds, so the arena would
+            // slowly fill with flying fortresses again after disengage.
+            aerialEnemySystem.setSpawningEnabled(false);
+            aerialEnemySystem.disengageAndClear();
+          } catch {}
           // Hostile EnemyBaseSystem turrets keep updating + dealing damage
           // even with no enemies spawned — dispose it entirely so a versus
           // arena fight isn't randomly chipped by stray laser fire.

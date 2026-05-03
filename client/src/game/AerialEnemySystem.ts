@@ -729,6 +729,14 @@ export class AerialEnemySystem {
     this.bus.emit(GameEvents.UI_MESSAGE, "AERIAL THREAT ENGAGED");
   }
 
+  /** Hard kill-switch for the entire drip-spawn loop. Used by Versus mode
+   *  so a PvP arena isn't littered with patrolling fortresses. When false,
+   *  update() still ticks existing units (so disposes/cleanup run) but
+   *  spawnFighter/spawnBattleship/spawnFortress AND the periodic auto-spawn
+   *  block in update() are all silenced. */
+  private spawningEnabled: boolean = true;
+  setSpawningEnabled(enabled: boolean): void { this.spawningEnabled = enabled; }
+
   /** Drop aggro and despawn every active aerial unit. Used by Game.tsx's
    *  LEVEL_STARTED handler when warping into the peaceful sanctuary so the
    *  player doesn't trail combat units from a prior front. */
@@ -776,6 +784,10 @@ export class AerialEnemySystem {
   }
 
   spawnFighter(playerPos: BABYLON.Vector3): AerialUnit {
+    // The kill-switch must guard the public spawners too — Game.tsx calls
+    // spawnFortress() three times at init for the open-world ambience, and
+    // we don't want those to fire when the player picked Versus.
+    if (!this.spawningEnabled) return null as any;
     const angle = Math.random() * Math.PI * 2;
     const dist = 50 + Math.random() * 30;
     const altY = this.spawnAltitudeFor("fighter");
@@ -793,6 +805,7 @@ export class AerialEnemySystem {
   }
 
   spawnBattleship(playerPos: BABYLON.Vector3): AerialUnit {
+    if (!this.spawningEnabled) return null as any;
     const angle = Math.random() * Math.PI * 2;
     const dist = 90 + Math.random() * 30;
     const pos = new BABYLON.Vector3(
@@ -809,6 +822,7 @@ export class AerialEnemySystem {
   }
 
   spawnFortress(playerPos: BABYLON.Vector3): AerialUnit {
+    if (!this.spawningEnabled) return null as any;
     // Fortresses get a fixed world-anchored patrol center so they don't
     // shadow the player while passive. Centers are spread around the world
     // so multiple fortresses don't stack on top of each other.
@@ -876,7 +890,7 @@ export class AerialEnemySystem {
     // The skies-cleared lockout suppresses ALL aerial spawns (fighters,
     // battleships, AND fortresses). When active, just skip the spawn block
     // entirely so existing units still tick + clean up below.
-    if (this.spawnCooldown <= 0 && this.skiesClearedTimer <= 0) {
+    if (this.spawnCooldown <= 0 && this.skiesClearedTimer <= 0 && this.spawningEnabled) {
       this.spawnCooldown = 6 + Math.random() * 4;
       const fighters = this.units.filter(u => u.kind === "fighter" && u.isAlive).length;
       const battleships = this.units.filter(u => u.kind === "battleship" && u.isAlive).length;

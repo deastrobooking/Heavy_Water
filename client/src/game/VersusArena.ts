@@ -109,15 +109,20 @@ export class VersusArena {
     // ---- Packed buildings (parkour cover) -----------------------------
     // Deterministic layout via index-seeded random so every join sees the
     // same arena.
+    // NOTE: the cell-shading post-FX uses depth + normal Sobel + a final
+    // `mix(baseColor, outlineColor, edge)`. If the building diffuse is too
+    // close to black the ink line lands on near-black pixels and disappears
+    // visually. We brighten diffuse + emissive so every box gets a clearly
+    // legible silhouette.
     const buildingMat = new BABYLON.StandardMaterial("versusBuildingMat", this.scene);
-    buildingMat.diffuseColor = new BABYLON.Color3(0.18, 0.20, 0.28);
-    buildingMat.emissiveColor = new BABYLON.Color3(0.04, 0.04, 0.10);
-    buildingMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.2);
+    buildingMat.diffuseColor = new BABYLON.Color3(0.45, 0.50, 0.62);
+    buildingMat.emissiveColor = new BABYLON.Color3(0.10, 0.12, 0.18);
+    buildingMat.specularColor = new BABYLON.Color3(0.15, 0.15, 0.25);
 
     const buildingMatGlow = new BABYLON.StandardMaterial("versusBuildingMatGlow", this.scene);
-    buildingMatGlow.diffuseColor = new BABYLON.Color3(0.20, 0.10, 0.30);
-    buildingMatGlow.emissiveColor = new BABYLON.Color3(0.55, 0.10, 0.50);
-    buildingMatGlow.specularColor = new BABYLON.Color3(0.05, 0.05, 0.10);
+    buildingMatGlow.diffuseColor = new BABYLON.Color3(0.55, 0.30, 0.70);
+    buildingMatGlow.emissiveColor = new BABYLON.Color3(0.70, 0.20, 0.65);
+    buildingMatGlow.specularColor = new BABYLON.Color3(0.10, 0.05, 0.15);
 
     const seeded = (i: number) => {
       const x = Math.sin(i * 73.219 + 11.31) * 43758.5453;
@@ -173,9 +178,9 @@ export class VersusArena {
 
     // ---- Corner spires ------------------------------------------------
     const spireMat = new BABYLON.StandardMaterial("versusSpireMat", this.scene);
-    spireMat.diffuseColor = new BABYLON.Color3(0.25, 0.05, 0.20);
-    spireMat.emissiveColor = new BABYLON.Color3(0.6, 0.05, 0.45);
-    spireMat.specularColor = new BABYLON.Color3(0.1, 0.05, 0.10);
+    spireMat.diffuseColor = new BABYLON.Color3(0.55, 0.20, 0.50);
+    spireMat.emissiveColor = new BABYLON.Color3(0.75, 0.15, 0.60);
+    spireMat.specularColor = new BABYLON.Color3(0.10, 0.05, 0.10);
     const corners: Array<[number, number]> = [
       [-HALF + 22, -HALF + 22],
       [ HALF - 22, -HALF + 22],
