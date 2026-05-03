@@ -22,7 +22,7 @@ export interface SavedCharacter {
   armLength: number;
   legLength: number;
   bodyType: "lean" | "athletic" | "heavy";
-  armorType: "light" | "heavy" | "captain";
+  armorType: "light" | "heavy" | "captain" | "megaman";
   colors: {
     primary: [number, number, number];
     secondary: [number, number, number];
@@ -74,12 +74,12 @@ const DEFAULT_CHAR: SavedCharacter = {
   armLength: 9,
   legLength: 10,
   bodyType: "athletic",
-  armorType: "light",
+  armorType: "megaman",
   colors: {
-    primary: [0.1, 0.3, 0.6],
-    secondary: [0.05, 0.15, 0.3],
-    skin: [0.9, 0.75, 0.65],
-    hair: [0.1, 0.1, 0.1],
+    primary: [0.18, 0.55, 0.95],
+    secondary: [0.06, 0.18, 0.42],
+    skin: [0.92, 0.78, 0.68],
+    hair: [0.08, 0.08, 0.08],
   },
   armorSet: DEFAULT_ARMOR_SET,
 };
@@ -282,7 +282,7 @@ export const CharacterEditor: React.FC<CharacterEditorProps> = ({ onClose }) => 
             <div className="absolute top-2 right-2 flex gap-2">
               <button onClick={() => applyPreset(DEFAULT_ARMOR_SET)}
                 className="px-3 py-1 text-xs rounded bg-cyan-900/60 border border-cyan-500/40 text-cyan-200 hover:bg-cyan-800/60">
-                BASIC PRESET
+                MEGA MAN PRESET
               </button>
               <button onClick={() => applyPreset(TITAN_ARMOR_SET)}
                 className="px-3 py-1 text-xs rounded bg-red-900/60 border border-orange-500/40 text-orange-200 hover:bg-red-800/60">
@@ -338,6 +338,18 @@ export const CharacterEditor: React.FC<CharacterEditorProps> = ({ onClose }) => 
                         <button key={t} onClick={() => update("bodyType", t)}
                           className={`flex-1 px-2 py-1 text-xs rounded border ${config.bodyType === t ? "bg-cyan-500/30 border-cyan-400 text-cyan-200" : "border-gray-600 text-gray-400 hover:border-cyan-500/50"}`}>
                           {t.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className={groupClass}>
+                    <label className={labelClass}>Armor Frame</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["megaman", "light", "heavy", "captain"] as const).map((t) => (
+                        <button key={t} onClick={() => update("armorType", t)}
+                          className={`px-2 py-1 text-xs rounded border ${config.armorType === t ? "bg-cyan-500/30 border-cyan-400 text-cyan-200" : "border-gray-600 text-gray-400 hover:border-cyan-500/50"}`}>
+                          {t === "megaman" ? "MEGA MAN" : t.toUpperCase()}
                         </button>
                       ))}
                     </div>
