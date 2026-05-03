@@ -6,6 +6,7 @@ import { RobotFactory } from "./RobotFactory";
 import { ROBOT_PRESETS } from "./RobotPresets";
 import { HumanoidCharacter } from "./HumanoidCharacter";
 import { HUMANOID_PRESETS } from "./HumanoidPresets";
+import { BossVariant, BossVariantId, BOSS_VARIANTS, getBossVariant } from "./BossVariants";
 
 export type EnemyType = "drone" | "soldier" | "heavy" | "insectoid" | "hybrid" | "commander" | "captain";
 export type EnemyAIState = "idle" | "patrol" | "chase" | "attack" | "stunned" | "dead" | "flying" | "hovering" | "dodging";
@@ -135,13 +136,20 @@ export class EnemyUnit implements IDamageable {
   /** True for captains spawned by the boss fortress: emit a special ENEMY_KILLED
    *  payload so Game.tsx can broadcast a victory toast. */
   public isBossCaptain: boolean = false;
+  /** Boss-variant theme (color + stat scalars) used when this enemy is a
+   *  captain. Null for every other type — the variant has no effect on
+   *  drones / soldiers / heavies / etc. */
+  private captainVariant: BossVariant | null = null;
 
-  constructor(mesh: BABYLON.Mesh, type: EnemyType, waveMultiplier: number = 1) {
+  constructor(mesh: BABYLON.Mesh, type: EnemyType, waveMultiplier: number = 1, variant?: BossVariant | null) {
     this.mesh = mesh;
     this.type = type;
     this.config = { ...ENEMY_CONFIGS[type] };
-    this.config.maxHealth *= waveMultiplier;
-    this.config.attackDamage *= waveMultiplier;
+    if (type === "captain" && variant) this.captainVariant = variant;
+    const hpMul = this.captainVariant?.healthMultiplier ?? 1;
+    const dmgMul = this.captainVariant?.damageMultiplier ?? 1;
+    this.config.maxHealth *= waveMultiplier * hpMul;
+    this.config.attackDamage *= waveMultiplier * dmgMul;
     this.health = this.config.maxHealth;
     this.maxHealth = this.config.maxHealth;
     this.patrolOrigin = mesh.position.clone();
@@ -831,23 +839,33 @@ export class EnemyUnit implements IDamageable {
   //                    Boss Captain — abilities mirror player
   // ============================================================================
 
-  /** Deep-red pulsing aura around the captain (more menacing than the
-   *  commander's orange aura). */
+  /** Resolve a per-channel BABYLON color from the captain's active variant
+   *  (defaults to inferno red when no variant was supplied). */
+  private variantColor(channel: "aura" | "sabre" | "projectile"): BABYLON.Color3 {
+    const v = this.captainVariant ?? BOSS_VARIANTS.inferno;
+    const c = channel === "aura" ? v.auraColor
+            : channel === "sabre" ? v.sabreColor
+            : v.projectileColor;
+    return new BABYLON.Color3(c.r, c.g, c.b);
+  }
+
+  /** Pulsing variant-tinted aura around the captain (more menacing than the
+   *  commander's orange aura). Color is driven by the variant. */
   private createCaptainAura(): void {
     const scene = this.mesh.getScene();
     this.auraMesh = BABYLON.MeshBuilder.CreateSphere("captainAura", { diameter: 5.5, segments: 12 }, scene);
     this.auraMesh.parent = this.mesh;
     this.auraMesh.position = BABYLON.Vector3.Zero();
     const auraMat = new BABYLON.StandardMaterial("captainAuraMat", scene);
-    auraMat.emissiveColor = new BABYLON.Color3(1.0, 0.08, 0.12);
+    auraMat.emissiveColor = this.variantColor("aura");
     auraMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
     auraMat.alpha = 0.16;
     auraMat.backFaceCulling = false;
     this.auraMesh.material = auraMat;
   }
 
-  /** Big red beam-sabre prop parented to the captain so it's visible at
-   *  rest and during the attack swing. */
+  /** Variant-colored beam-sabre prop parented to the captain so it's visible
+   *  at rest and during the attack swing. */
   private createCaptainSabre(): void {
     const scene = this.mesh.getScene();
     const blade = BABYLON.MeshBuilder.CreateCylinder("captainSabre", {
@@ -856,7 +874,7 @@ export class EnemyUnit implements IDamageable {
       tessellation: 8,
     }, scene);
     const mat = new BABYLON.StandardMaterial("captainSabreMat", scene);
-    mat.emissiveColor = new BABYLON.Color3(1.0, 0.12, 0.18);
+    mat.emissiveColor = this.variantColor("sabre");
     mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
     mat.disableLighting = true;
     blade.material = mat;
@@ -888,7 +906,7 @@ export class EnemyUnit implements IDamageable {
     arc.position = origin.clone();
     arc.position.addInPlace(dir.scale(1.5));
     const mat = new BABYLON.StandardMaterial("captainSlashMat", scene);
-    mat.emissiveColor = new BABYLON.Color3(1.0, 0.18, 0.18);
+    mat.emissiveColor = this.variantColor("sabre");
     mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
     mat.alpha = 0.65;
     mat.backFaceCulling = false;
@@ -932,7 +950,7 @@ export class EnemyUnit implements IDamageable {
     const orb = BABYLON.MeshBuilder.CreateSphere("captainTracker", { diameter: 0.85, segments: 12 }, scene);
     orb.position = start.clone();
     const mat = new BABYLON.StandardMaterial("captainTrackerMat", scene);
-    mat.emissiveColor = new BABYLON.Color3(1.0, 0.18, 0.22);
+    mat.emissiveColor = this.variantColor("projectile");
     mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
     mat.disableLighting = true;
     orb.material = mat;
@@ -940,7 +958,7 @@ export class EnemyUnit implements IDamageable {
     const trail = BABYLON.MeshBuilder.CreateSphere("captainTrackerTrail", { diameter: 1.4, segments: 10 }, scene);
     trail.position = start.clone();
     const tmat = new BABYLON.StandardMaterial("captainTrackerTrailMat", scene);
-    tmat.emissiveColor = new BABYLON.Color3(0.85, 0.05, 0.1);
+    tmat.emissiveColor = this.variantColor("projectile").scale(0.85);
     tmat.diffuseColor = new BABYLON.Color3(0, 0, 0);
     tmat.alpha = 0.32;
     tmat.backFaceCulling = false;
@@ -979,7 +997,7 @@ export class EnemyUnit implements IDamageable {
         this.pendingDamage += t.damage;
         this.bus.emit("effect:hitImpact", {
           position: t.mesh.position.clone(),
-          color: new BABYLON.Color3(1.0, 0.2, 0.25),
+          color: this.variantColor("projectile"),
           scale: 1.4,
         });
         t.done = true;
@@ -1001,7 +1019,7 @@ export class EnemyUnit implements IDamageable {
     const dome = BABYLON.MeshBuilder.CreateSphere("captainDome", { diameter: 1.5, segments: 16 }, scene);
     dome.position = origin.clone();
     const mat = new BABYLON.StandardMaterial("captainDomeMat", scene);
-    mat.emissiveColor = new BABYLON.Color3(1.0, 0.1, 0.15);
+    mat.emissiveColor = this.variantColor("projectile");
     mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
     mat.alpha = 0.45;
     mat.backFaceCulling = false;
@@ -1022,7 +1040,7 @@ export class EnemyUnit implements IDamageable {
     ring.position = origin.clone();
     ring.position.y = 0.1;
     const rmat = new BABYLON.StandardMaterial("captainDomeRingMat", scene);
-    rmat.emissiveColor = new BABYLON.Color3(1.0, 0.15, 0.18);
+    rmat.emissiveColor = this.variantColor("projectile");
     rmat.diffuseColor = new BABYLON.Color3(0, 0, 0);
     rmat.disableLighting = true;
     ring.material = rmat;
@@ -1049,7 +1067,7 @@ export class EnemyUnit implements IDamageable {
         this.pendingDamage += d.damage;
         this.bus.emit("effect:hitImpact", {
           position: this.lastPlayerPos.clone(),
-          color: new BABYLON.Color3(1.0, 0.2, 0.25),
+          color: this.variantColor("projectile"),
           scale: 1.6,
         });
       }
@@ -1078,7 +1096,7 @@ export class EnemySystem {
     this.robotFactory = new RobotFactory(scene);
   }
 
-  private createEnemyMesh(type: EnemyType, position: BABYLON.Vector3): BABYLON.Mesh {
+  private createEnemyMesh(type: EnemyType, position: BABYLON.Vector3, variant?: BossVariant | null): BABYLON.Mesh {
     // Commanders + Captains use humanoid models instead of robots.
     if (type === "commander" || type === "captain") {
       const captainPresets = [
@@ -1107,18 +1125,27 @@ export class EnemySystem {
         root.parent = hitbox;
         root.position = BABYLON.Vector3.Zero();
 
-        // Captains: tint every visible material toward dark-red so they read
-        // instantly as the boss-class enemy. Other commanders keep their preset.
+        // Captains: re-tint every visible material to match the variant
+        // theme (inferno red, plague green, frost cyan, storm violet, void
+        // purple). Each level assigns its own variant so the player reads
+        // the threat at a glance. Commanders keep their preset palette.
         if (type === "captain") {
+          const v = variant ?? BOSS_VARIANTS.inferno;
           for (const m of root.getChildMeshes()) {
             const mat = m.material as BABYLON.StandardMaterial | null;
             if (mat) {
-              if (mat.diffuseColor) mat.diffuseColor = mat.diffuseColor.scale(0.55);
+              if (mat.diffuseColor) {
+                mat.diffuseColor = new BABYLON.Color3(
+                  Math.min(1, mat.diffuseColor.r * v.tint.r),
+                  Math.min(1, mat.diffuseColor.g * v.tint.g),
+                  Math.min(1, mat.diffuseColor.b * v.tint.b),
+                );
+              }
               if (mat.emissiveColor) {
                 mat.emissiveColor = new BABYLON.Color3(
-                  Math.min(1, mat.emissiveColor.r * 0.6 + 0.45),
-                  mat.emissiveColor.g * 0.4,
-                  mat.emissiveColor.b * 0.4,
+                  Math.min(1, mat.emissiveColor.r * v.tint.r + v.emissiveBoost.r),
+                  Math.min(1, mat.emissiveColor.g * v.tint.g + v.emissiveBoost.g),
+                  Math.min(1, mat.emissiveColor.b * v.tint.b + v.emissiveBoost.b),
                 );
               }
             }
@@ -1216,13 +1243,26 @@ export class EnemySystem {
    *  When `isBossCaptain` is true the death payload includes a flag so
    *  Game.tsx can announce the kill + advance the level. Captains DO NOT
    *  count against `maxEnemies` so they can always spawn. */
-  spawnCaptain(position: BABYLON.Vector3, opts?: { isBossCaptain?: boolean; healthMultiplier?: number }): EnemyUnit {
-    const mesh = this.createEnemyMesh("captain", position);
+  spawnCaptain(position: BABYLON.Vector3, opts?: {
+    isBossCaptain?: boolean;
+    healthMultiplier?: number;
+    /** Boss-variant theme (defaults to inferno red — the original look). */
+    variantId?: BossVariantId;
+  }): EnemyUnit {
+    const variant = getBossVariant(opts?.variantId);
+    const mesh = this.createEnemyMesh("captain", position, variant);
     const waveMultiplier = (1 + (this.waveNumber - 1) * 0.25) * (opts?.healthMultiplier ?? 1);
-    const enemy = new EnemyUnit(mesh, "captain", waveMultiplier);
+    const enemy = new EnemyUnit(mesh, "captain", waveMultiplier, variant);
     enemy.isBossCaptain = !!opts?.isBossCaptain;
     this.enemies.push(enemy);
-    this.bus.emit(GameEvents.ENEMY_SPAWNED, { type: "captain", position, isBossCaptain: enemy.isBossCaptain });
+    this.bus.emit(GameEvents.ENEMY_SPAWNED, {
+      type: "captain",
+      position,
+      isBossCaptain: enemy.isBossCaptain,
+      variantId: variant.id,
+      variantName: variant.displayName,
+      taunt: variant.taunt,
+    });
     return enemy;
   }
 

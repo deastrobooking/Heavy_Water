@@ -641,55 +641,74 @@ export const Game: React.FC = () => {
           new BABYLON.Vector3(0, 0, -280),
         ]);
         // The Level-1 boss objective: one giant fortress holding the captured
-        // ally. Seeded at a fixed coordinate so the minimap arrow always
-        // points the player toward it.
-        const BOSS_FORTRESS_LEVEL1 = new BABYLON.Vector3(380, 0, -120);
-        const BOSS_FORTRESS_LEVEL2 = new BABYLON.Vector3(-360, 0, -360);
-        enemyBaseSystem.spawnBossFortress(BOSS_FORTRESS_LEVEL1);
+        // ally. Coordinate is owned by LevelSystem so per-level fortress
+        // placement stays in one place.
+        const l1Center = LevelSystem.getFortressCenterFor(1);
+        enemyBaseSystem.spawnBossFortress(new BABYLON.Vector3(l1Center.x, 0, l1Center.z));
 
-        // Level system — drives Level 1 → Level 2 progression, sky tint,
-        // and the level-2 captain spawner.
+        // Level system — drives Level 1 → 2 → 3 progression, sky tint,
+        // boss-variant assignment, and per-level fortress placement.
         const levelSystem = new LevelSystem();
         levelSystemRef.current = levelSystem;
 
-        // BOSS FORTRESS turret-clear → spawn the BossCaptain at the spire.
+        // BOSS FORTRESS turret-clear → spawn the BossCaptain at the spire,
+        // themed to the *current* level's variant (inferno / plague / void).
         bus.on(GameEvents.BOSS_FORTRESS_TURRETS_CLEARED, (payload: any) => {
           const pos = (payload?.captainSpawnPosition as BABYLON.Vector3 | undefined)
             ?? (payload?.spirePosition as BABYLON.Vector3 | undefined);
           if (!pos) return;
-          enemySystem.spawnCaptain(pos.clone(), { isBossCaptain: true });
+          const variantId = levelSystemRef.current?.getBossVariantId();
+          enemySystem.spawnCaptain(pos.clone(), { isBossCaptain: true, variantId });
         });
 
-        // LEVEL_COMPLETED → show the full-screen overlay for ~3 s.
+        // ENEMY_SPAWNED for boss captains → flash the variant taunt so the
+        // player reads the threat (e.g. "PLAGUE WARDEN — BREATHE DEEP…").
+        bus.on(GameEvents.ENEMY_SPAWNED, (payload: any) => {
+          if (!payload?.isBossCaptain) return;
+          const name = payload.variantName as string | undefined;
+          const taunt = payload.taunt as string | undefined;
+          if (name && taunt) showMessage(`${name} — ${taunt}`, 4500);
+        });
+
+        // LEVEL_COMPLETED → show the full-screen overlay. The final clear
+        // gets a slightly longer hold so the win screen lingers.
         bus.on(GameEvents.LEVEL_COMPLETED, (payload: any) => {
+          const isFinal = !!payload?.final;
           setLevelCompleteOverlay({
-            title: "LEVEL COMPLETE",
-            subtitle: payload?.banner || "Stand by — the war isn't over.",
+            title: isFinal ? "VICTORY" : "LEVEL COMPLETE",
+            subtitle: payload?.subtitle || payload?.banner || "Stand by — the war isn't over.",
           });
-          window.setTimeout(() => setLevelCompleteOverlay(null), 3200);
+          window.setTimeout(() => setLevelCompleteOverlay(null), isFinal ? 6000 : 3200);
         });
 
-        // LEVEL_STARTED → swap banner + objective; re-apply sky/spawn rules.
+        // LEVEL_STARTED → swap banner + objective; re-apply sky/spawn rules
+        // and seed the next level's fortress at its assigned coordinate.
         bus.on(GameEvents.LEVEL_STARTED, (payload: any) => {
           if (payload?.banner) setLevelBanner(payload.banner);
           if (payload?.objective) setLevelObjective(payload.objective);
-          // Sky tint per level (red shift on Level 2).
+          // Sky tint per level (red shift on L2, cold violet shift on L3).
           if (payload?.skyTint && skyRef.current) {
             skyRef.current.setLevelTint(payload.skyTint);
           }
-          // Level 2: bump difficulty and seed the second boss fortress
-          // (only once — re-fires via applyLoadedState are idempotent because
-          // spawnBossFortress is the only reason a new fortress appears).
-          if (payload?.level === 2) {
-            enemySystem.jumpToWave(Math.max(enemySystem.getWaveNumber() + 2, 5));
-            // Spawn the second fortress only if we don't already have one
-            // at the L2 coord (handles save-load re-firing LEVEL_STARTED).
-            const existing = enemyBaseSystem.getBossFortresses();
-            const hasL2 = existing.some(b =>
-              b.position.subtract(BOSS_FORTRESS_LEVEL2).length() <= 5
-            );
-            if (!hasL2) enemyBaseSystem.spawnBossFortress(BOSS_FORTRESS_LEVEL2);
-            showMessage("LEVEL 2 — CAPTAINS INVADING", 4000);
+          // Level >= 2: bump difficulty + seed the next fortress at this
+          // level's coordinate. Idempotent — if a fortress already lives
+          // within 5 m of the target (save reload re-firing LEVEL_STARTED),
+          // we skip the second spawn.
+          if (payload?.level >= 2) {
+            const baseWave = enemySystem.getWaveNumber() + 2;
+            const targetWave = payload.level === 3 ? Math.max(baseWave, 9) : Math.max(baseWave, 5);
+            enemySystem.jumpToWave(targetWave);
+            const center = payload.fortressCenter as { x: number; z: number } | undefined;
+            if (center) {
+              const target = new BABYLON.Vector3(center.x, 0, center.z);
+              const existing = enemyBaseSystem.getBossFortresses();
+              const has = existing.some(b => b.position.subtract(target).length() <= 5);
+              if (!has) enemyBaseSystem.spawnBossFortress(target);
+            }
+            const banner = payload.level === 3
+              ? "LEVEL 3 — VOID STALKER INCOMING"
+              : "LEVEL 2 — CAPTAINS INVADING";
+            showMessage(banner, 4000);
           }
         });
 

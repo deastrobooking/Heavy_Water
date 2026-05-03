@@ -47,10 +47,12 @@ export interface ProgressSnapshot {
   beamSabreLevel?: number;
   /** Per-element elemental specials levels. */
   elementalLevels?: Record<string, number>;
-  /** Active world level (1 = "RESCUE THE ALLY", 2 = "HOLD THE LINE").
-   *  Persisted so logging out at Level 2 returns the player to Level 2
-   *  with the matching sky tint, captain spawns, and second fortress. */
-  worldLevel?: 1 | 2;
+  /** Active world level (1 = "RESCUE THE ALLY", 2 = "HOLD THE LINE",
+   *  3 = "PURGE THE VOID"). Persisted so logging out mid-campaign returns
+   *  the player to the same level with matching sky tint, captain variant,
+   *  and fortress placement. Older saves wrote only `1 | 2` — those still
+   *  load (LevelSystem clamps unknown values to 1). */
+  worldLevel?: 1 | 2 | 3;
 }
 
 export async function loadProgress(): Promise<ProgressSnapshot | null> {
