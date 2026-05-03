@@ -1064,12 +1064,17 @@ export class PlayerController implements IDamageable {
     }
 
     if (this.cameraMode === "third") {
-      const cameraDistance = 6.5;
-      const cameraHeight = 2.2;
+      // Player visual is scaled down (visualScale 0.12), so the third-person
+      // camera aims lower than the 1.7m first-person eye height and sits
+      // closer to the ground — otherwise the player reads as a tiny dot at
+      // the bottom of the screen.
+      const thirdPersonTargetHeight = 0.9;
+      const cameraDistance = 5.5;
+      const cameraHeight = 1.1;
 
       const target = new BABYLON.Vector3(
         this.meshRoot.position.x,
-        this.meshRoot.position.y + headHeight,
+        this.meshRoot.position.y + thirdPersonTargetHeight,
         this.meshRoot.position.z,
       );
 
@@ -1077,7 +1082,7 @@ export class PlayerController implements IDamageable {
         .add(flatForward.scale(-cameraDistance))
         .add(new BABYLON.Vector3(0, cameraHeight, 0));
 
-      desired.y = Math.max(desired.y, 0.6);
+      desired.y = Math.max(desired.y, 0.4);
       this.camera.position.copyFrom(desired);
     } else {
       const eyeForwardOffset = 0.25;
