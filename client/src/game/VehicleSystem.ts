@@ -48,18 +48,27 @@ export class VehicleSystem {
    *  speed regardless of player input. Used by SpaceLevelSystem so the
    *  player can never stop in vacuum (orbital combat = always moving). */
   private forceForward: boolean = false;
-  /** Cruise speed used when forceForward is on. */
-  private static readonly FORCED_CRUISE_SPEED = 55;
+  /** Cruise speed used when forceForward is on. Defaults to 55 (the
+   *  original ground-level fighter cruise) but SpaceLevelSystem overrides
+   *  it to ~28 on warp-in so the orbital fighter doesn't blow past every
+   *  asteroid and dogfight target before the player can react. */
+  private static readonly DEFAULT_FORCED_CRUISE_SPEED = 55;
+  private forcedCruiseSpeed: number = VehicleSystem.DEFAULT_FORCED_CRUISE_SPEED;
 
   setBuildingColliders(colliders: WallCollider[]): void {
     this.wallColliders = colliders;
   }
 
-  /** Lock the active fighter to perpetual forward cruise — see field doc. */
-  setForceForward(active: boolean): void {
+  /** Lock the active fighter to perpetual forward cruise — see field doc.
+   *  Optional `speed` overrides the cruise constant; passing nothing
+   *  resets to the default ground-level cruise speed. */
+  setForceForward(active: boolean, speed?: number): void {
     this.forceForward = active;
+    this.forcedCruiseSpeed = (typeof speed === "number" && speed > 0)
+      ? speed
+      : VehicleSystem.DEFAULT_FORCED_CRUISE_SPEED;
     if (active && this.active && this.active.kind !== "atv") {
-      this.active.speed = VehicleSystem.FORCED_CRUISE_SPEED;
+      this.active.speed = this.forcedCruiseSpeed;
     }
   }
 
@@ -321,14 +330,19 @@ export class VehicleSystem {
 
     // Throttle
     const accel = 30;
-    const maxSpeed = this.input.boost ? 95 : 55;
     const drag = 3;
     if (this.forceForward) {
       // Orbital cruise — boost still works (overdrive past cruise) but
       // the brake/back input is suppressed so the ship can never stop.
+      // The cruise floor AND ceiling both come from forcedCruiseSpeed
+      // (with boost adding ~75% headroom) so the orbital cruise speed
+      // can be tuned without leaking the ground-level 95 m/s top end.
+      const cruise = this.forcedCruiseSpeed;
+      const maxSpeed = this.input.boost ? cruise * 1.75 : cruise;
       if (this.input.boost) v.speed += accel * dt;
-      v.speed = Math.max(VehicleSystem.FORCED_CRUISE_SPEED, Math.min(maxSpeed, v.speed));
+      v.speed = Math.max(cruise, Math.min(maxSpeed, v.speed));
     } else {
+      const maxSpeed = this.input.boost ? 95 : 55;
       if (this.input.forward) v.speed += accel * dt;
       if (this.input.back) v.speed -= accel * 0.6 * dt;
       if (!this.input.forward && !this.input.back) {

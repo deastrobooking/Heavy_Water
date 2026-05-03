@@ -87,13 +87,20 @@ export class SpaceLevelSystem {
   private spawnedFighter: VehicleInstance | null = null;
 
   /** Number of decorative asteroids — enough to read as a field without
-   *  flooding the GPU with separate draw calls. */
-  private static readonly ASTEROID_COUNT = 32;
-  /** Outer radius of the asteroid band around the player spawn. */
-  private static readonly ASTEROID_RADIUS = 220;
+   *  flooding the GPU with separate draw calls. Bumped from 32 → 64 when
+   *  the field switched from a flat horizontal band to a full spherical
+   *  shell around the player so coverage stayed dense at every angle. */
+  private static readonly ASTEROID_COUNT = 64;
+  /** Outer radius of the asteroid shell around the player spawn. */
+  private static readonly ASTEROID_RADIUS = 260;
   /** Distance from the player at which Earth is parked. Far enough to feel
    *  planetary, close enough that the 600 m sphere still subtends ~30°. */
   private static readonly EARTH_DIST = 1200;
+  /** Altitude the orbital fighter spawns at — high enough above the
+   *  hidden ground plane that even the few obstructions that aren't
+   *  toggled off (chests/props/enemy bases) read as tiny dots far below
+   *  rather than visible obstacles in the player's flight path. */
+  private static readonly SPAWN_ALTITUDE = 300;
 
   constructor(
     scene: BABYLON.Scene,
@@ -203,7 +210,9 @@ export class SpaceLevelSystem {
       this.scene,
     );
     const c = this.playerPos();
-    earth.position.set(c.x, 80, c.z + SpaceLevelSystem.EARTH_DIST);
+    // Anchor Earth at the orbital altitude so it sits on the player's
+    // horizon instead of below it.
+    earth.position.set(c.x, SpaceLevelSystem.SPAWN_ALTITUDE, c.z + SpaceLevelSystem.EARTH_DIST);
     earth.parent = this.root;
     earth.isPickable = false;
     earth.applyFog = false;
@@ -237,14 +246,28 @@ export class SpaceLevelSystem {
     halo.material = haloMat;
   }
 
-  /** Random asteroids in a band around the player spawn. Each gets its own
-   *  spin axis + slight horizontal drift so the field never feels static. */
+  /** Random asteroids distributed in a SPHERICAL shell around the player
+   *  spawn so the field reads as proper zero-g space — earlier the field
+   *  was a flat horizontal band at y=25–105, which left the upper / lower
+   *  hemispheres empty and broke the illusion of orbit once the player
+   *  pitched up or down. Each rock gets its own spin axis + slight drift
+   *  so the field never feels static. */
   private spawnAsteroids(): void {
     const center = this.playerPos();
+    const baseY = SpaceLevelSystem.SPAWN_ALTITUDE;
     for (let i = 0; i < SpaceLevelSystem.ASTEROID_COUNT; i++) {
-      const ang = Math.random() * Math.PI * 2;
-      const r = 80 + Math.random() * SpaceLevelSystem.ASTEROID_RADIUS;
-      const y = 25 + Math.random() * 80;
+      // Uniform direction on the unit sphere (Marsaglia method) so the
+      // field has even angular density instead of clustering at the poles.
+      let dx: number, dy: number, dz: number, ml: number;
+      do {
+        dx = Math.random() * 2 - 1;
+        dy = Math.random() * 2 - 1;
+        dz = Math.random() * 2 - 1;
+        ml = dx * dx + dy * dy + dz * dz;
+      } while (ml > 1 || ml < 0.0001);
+      const norm = 1 / Math.sqrt(ml);
+      dx *= norm; dy *= norm; dz *= norm;
+      const r = 90 + Math.random() * SpaceLevelSystem.ASTEROID_RADIUS;
       const size = 4 + Math.random() * 14;
 
       const mesh = BABYLON.MeshBuilder.CreateBox(
@@ -257,9 +280,9 @@ export class SpaceLevelSystem {
         this.scene,
       );
       mesh.position.set(
-        center.x + Math.cos(ang) * r,
-        y,
-        center.z + Math.sin(ang) * r,
+        center.x + dx * r,
+        baseY + dy * r,
+        center.z + dz * r,
       );
       mesh.rotation.set(
         Math.random() * Math.PI,
@@ -342,9 +365,11 @@ export class SpaceLevelSystem {
   private spawnAndEnterFighter(): void {
     if (!this.vehicles) return;
     const p = this.playerPos();
-    // Spawn a few metres ahead of the player at the same altitude so the
-    // fighter is visible in the cockpit camera the moment the level loads.
-    const spawnPos = new BABYLON.Vector3(p.x, Math.max(p.y, 60), p.z + 4);
+    // Spawn a few metres ahead of the player, parked WAY up at the
+    // orbital altitude so the player drops into vacuum well above any
+    // residual ground-level props rather than skimming along the
+    // (now-hidden) ground plane.
+    const spawnPos = new BABYLON.Vector3(p.x, SpaceLevelSystem.SPAWN_ALTITUDE, p.z + 4);
     const fighter = this.vehicles.spawnPreset("CometFighter", spawnPos);
     if (!fighter) {
       console.warn("[SpaceLevelSystem] Failed to spawn CometFighter — preset missing?");
@@ -361,7 +386,9 @@ export class SpaceLevelSystem {
     // Lock the throttle so the ship can never come to a stop in space —
     // exiting / warping out is the only way to disengage. Set after enter()
     // so the cruise speed kick takes effect on the now-active vehicle.
-    try { this.vehicles.setForceForward(true); } catch {}
+    // Use a slower cruise speed (28 m/s) than the ground default (55) so
+    // dogfighting in vacuum is readable instead of a blur.
+    try { this.vehicles.setForceForward(true, 28); } catch {}
   }
 
   /** Engage AerialEnemySystem and seed a couple of close-range targets so
