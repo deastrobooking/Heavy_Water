@@ -33,6 +33,7 @@ import { BaseSystem, BaseStructure } from "./BaseSystem";
 import { BioCreatureSystem, CapturedCreature } from "./BioCreatureSystem";
 import { MountainRingSystem } from "./MountainRingSystem";
 import { AlienFoliageSystem } from "./AlienFoliageSystem";
+import { EarthFoliageSystem } from "./EarthFoliageSystem";
 import { VehicleSystem } from "./VehicleSystem";
 import { EnvironmentPropSystem, PropHitboxMetadata } from "./EnvironmentPropSystem";
 import { MusicSystem } from "./MusicSystem";
@@ -137,6 +138,7 @@ export const Game: React.FC = () => {
   const bioRef = useRef<BioCreatureSystem | null>(null);
   const mountainRingRef = useRef<MountainRingSystem | null>(null);
   const alienFoliageRef = useRef<AlienFoliageSystem | null>(null);
+  const earthFoliageRef = useRef<EarthFoliageSystem | null>(null);
   const vehicleRef = useRef<VehicleSystem | null>(null);
   const propSystemRef = useRef<EnvironmentPropSystem | null>(null);
   const atvHitCooldownRef = useRef<Map<number, number>>(new Map());
@@ -930,6 +932,7 @@ export const Game: React.FC = () => {
                 worldVisibles: [
                   mountainRingRef.current,
                   alienFoliageRef.current,
+                  earthFoliageRef.current,
                   propSystemRef.current,
                 ],
                 // Pass the foliage system directly so the sanctuary can
@@ -970,6 +973,7 @@ export const Game: React.FC = () => {
                 worldVisibles: [
                   mountainRingRef.current,
                   alienFoliageRef.current,
+                  earthFoliageRef.current,
                   propSystemRef.current,
                 ],
                 lodCull,
@@ -1006,6 +1010,7 @@ export const Game: React.FC = () => {
                 worldVisibles: [
                   mountainRingRef.current,
                   alienFoliageRef.current,
+                  earthFoliageRef.current,
                   propSystemRef.current,
                 ],
                 lodCull,
@@ -1185,6 +1190,14 @@ export const Game: React.FC = () => {
         //     wilderness ring between the city and the mountain ring. ===
         const alienFoliage = new AlienFoliageSystem(scene);
         alienFoliageRef.current = alienFoliage;
+
+        // === EarthFoliageSystem: realistic terrestrial trees + shrubs.
+        //     Same wilderness band as the alien plants, but a different
+        //     PRNG seed so the two systems' anti-overlap loops settle into
+        //     non-conflicting placements. Hidden alongside the alien
+        //     foliage in side-zones via worldVisibles. ===
+        const earthFoliage = new EarthFoliageSystem(scene);
+        earthFoliageRef.current = earthFoliage;
 
         let totalKillsLocal = 0;
         let highestWaveLocal = 1;
@@ -1631,6 +1644,7 @@ export const Game: React.FC = () => {
           mountainRing.setPlayerPosition(playerPos);
           propSystem.setPlayerPosition(playerPos);
           alienFoliage.setPlayerPosition(playerPos);
+          earthFoliage.setPlayerPosition(playerPos);
 
           // === ATV contact damage ===
           // While the player is driving the ATV, treat fast vehicle contact
@@ -1904,6 +1918,8 @@ export const Game: React.FC = () => {
         mountainRingRef.current = null;
         if (alienFoliageRef.current) { try { alienFoliageRef.current.dispose(); } catch {} }
         alienFoliageRef.current = null;
+        if (earthFoliageRef.current) { try { earthFoliageRef.current.dispose(); } catch {} }
+        earthFoliageRef.current = null;
         if (miningRef.current) { try { miningRef.current.dispose(); } catch {} }
         miningRef.current = null;
         if (enemyBaseRef.current) { try { enemyBaseRef.current.dispose(); } catch {} }
@@ -1971,6 +1987,7 @@ export const Game: React.FC = () => {
     if (bioRef.current) { try { bioRef.current.dispose(); } catch {} bioRef.current = null; }
     if (mountainRingRef.current) { try { mountainRingRef.current.dispose(); } catch {} mountainRingRef.current = null; }
     if (alienFoliageRef.current) { try { alienFoliageRef.current.dispose(); } catch {} alienFoliageRef.current = null; }
+    if (earthFoliageRef.current) { try { earthFoliageRef.current.dispose(); } catch {} earthFoliageRef.current = null; }
     if (miningRef.current) { try { miningRef.current.dispose(); } catch {} miningRef.current = null; }
     if (enemyBaseRef.current) { try { enemyBaseRef.current.dispose(); } catch {} enemyBaseRef.current = null; }
     if (levelSystemRef.current) { try { levelSystemRef.current.dispose(); } catch {} levelSystemRef.current = null; }
@@ -2572,6 +2589,7 @@ export const Game: React.FC = () => {
       if (bioRef.current) bioRef.current.dispose();
       if (mountainRingRef.current) { try { mountainRingRef.current.dispose(); } catch {} mountainRingRef.current = null; }
       if (alienFoliageRef.current) { try { alienFoliageRef.current.dispose(); } catch {} alienFoliageRef.current = null; }
+    if (earthFoliageRef.current) { try { earthFoliageRef.current.dispose(); } catch {} earthFoliageRef.current = null; }
       if (vehicleRef.current) vehicleRef.current.dispose();
       if (propSystemRef.current) propSystemRef.current.dispose();
       atvHitCooldownRef.current.clear();

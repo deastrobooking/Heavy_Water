@@ -2,6 +2,11 @@ import * as BABYLON from "@babylonjs/core";
 import { LSystem } from "./lsystem/LSystem";
 import { LSystemRenderer } from "./lsystem/LSystemRenderer";
 import { LSystemPresets, LSystemPresetKey } from "./lsystem/LSystemPresets";
+import {
+  KEEPOUT_ANCHORS,
+  KEEPOUT_RADIUS,
+  FoliageOccupancy,
+} from "./lsystem/FoliagePlacement";
 
 /**
  * AlienFoliageSystem
@@ -40,9 +45,8 @@ export class AlienFoliageSystem {
   /** Wilderness band — well outside the spawn zone, well inside the ring. */
   private static readonly INNER_RADIUS = 90;
   private static readonly OUTER_RADIUS = 540;
-  /** Don't place near level capstones / temples / spawn road. */
-  private static readonly KEEPOUT_RADIUS = 32;
-  /** Min XZ spacing between two plants. */
+  /** Min XZ spacing between two plants. Cross-system overlap is also
+   *  guarded by the shared FoliageOccupancy registry. */
   private static readonly MIN_PLANT_SPACING = 12;
   /** Plants past this distance are setEnabled(false) (squared). */
   private static readonly CULL_DISTANCE_SQ = 220 * 220;
@@ -53,29 +57,6 @@ export class AlienFoliageSystem {
   private static readonly TARGET_COUNT = 90;
   /** Hard upper bound on placement attempts so we never spin the loop. */
   private static readonly MAX_ATTEMPTS = 600;
-
-  /** Anchors that other systems own — skip placement near these. Kept
-   *  in sync by inspection with LevelSystem fortresses + MountainRingSystem
-   *  temple positions; if those move, update here too. */
-  private static readonly KEEPOUT_ANCHORS: ReadonlyArray<BABYLON.Vector3> = [
-    // Spawn / start area
-    new BABYLON.Vector3(0, 0, 0),
-    // Level fortresses (L1/L2/L3) — approximate centers
-    new BABYLON.Vector3(380, 0, -120),
-    new BABYLON.Vector3(-360, 0, -360),
-    new BABYLON.Vector3(-120, 0, 420),
-    // Hidden temples (4 cardinal off-diagonals at radius 480)
-    ...AlienFoliageSystem.computeTempleAnchors(),
-  ];
-
-  private static computeTempleAnchors(): BABYLON.Vector3[] {
-    // Mirror MountainRingSystem.TEMPLE_ANGLES_DEG = [30, 120, 210, 300] @ r=480
-    const r = 480;
-    return [30, 120, 210, 300].map(deg => {
-      const a = (deg * Math.PI) / 180;
-      return new BABYLON.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r);
-    });
-  }
 
   constructor(scene: BABYLON.Scene, seed: number = 0xC0FFEE) {
     this.scene = scene;
@@ -162,21 +143,15 @@ export class AlienFoliageSystem {
   }
 
   private isCandidateValid(x: number, z: number): boolean {
-    // 1) Reject near big anchors
-    for (const anchor of AlienFoliageSystem.KEEPOUT_ANCHORS) {
+    // 1) Reject near big anchors (centralised list shared with EarthFoliageSystem).
+    for (const anchor of KEEPOUT_ANCHORS) {
       const dx = x - anchor.x;
       const dz = z - anchor.z;
-      if (dx * dx + dz * dz < AlienFoliageSystem.KEEPOUT_RADIUS * AlienFoliageSystem.KEEPOUT_RADIUS) {
-        return false;
-      }
+      if (dx * dx + dz * dz < KEEPOUT_RADIUS * KEEPOUT_RADIUS) return false;
     }
-    // 2) Reject too close to existing plants
-    for (const p of this.plants) {
-      const dx = x - p.pos.x;
-      const dz = z - p.pos.z;
-      if (dx * dx + dz * dz < AlienFoliageSystem.MIN_PLANT_SPACING * AlienFoliageSystem.MIN_PLANT_SPACING) {
-        return false;
-      }
+    // 2) Reject too close to ANY foliage already placed (own + earth).
+    if (FoliageOccupancy.tooCloseTo(x, z, AlienFoliageSystem.MIN_PLANT_SPACING)) {
+      return false;
     }
     return true;
   }
@@ -210,6 +185,9 @@ export class AlienFoliageSystem {
     result.root.scaling.setAll(s);
 
     this.plants.push({ root: result.root, pos: origin.clone() });
+    // Register with the shared occupancy so EarthFoliageSystem's scatter
+    // pass sees this point and avoids spawning on top of it.
+    FoliageOccupancy.register(origin.x, origin.z);
   }
 
   // --- per-frame culling ---
@@ -304,6 +282,7 @@ export class AlienFoliageSystem {
       for (const p of localPlants) {
         const idx = this.plants.indexOf(p);
         if (idx !== -1) this.plants.splice(idx, 1);
+        FoliageOccupancy.unregister(p.pos.x, p.pos.z);
         try { p.root.dispose(false, false); } catch {}
       }
       localPlants.length = 0;
@@ -322,6 +301,11 @@ export class AlienFoliageSystem {
       // dispose each shared material N times).
       plant.root.dispose(false, false);
     }
+    // Drop our points from the shared registry so a hot-restart doesn't
+    // carry stale occupancy into the next scene. Earth foliage shares
+    // the same module-level registry — both call clear() on dispose so
+    // whichever runs second is the no-op.
+    FoliageOccupancy.clear();
     this.plants = [];
     this.materials.forEach(m => { if (!(m as any).isDisposed) m.dispose(); });
     this.materials.clear();
