@@ -2,7 +2,7 @@ import * as BABYLON from "@babylonjs/core";
 import { ArmorBuildContext, ArmorPartDefinition } from "./RobotArmorParts";
 
 /**
- * Mega Man-inspired humanoid robot armor pack.
+ * Humanoid robot armor pack — the default frame for the player.
  *
  * Authored at the registry's "mech scale" (units assume the unscaled
  * humanoid frame, ~18 units tall). Once parented to limbs that live under
@@ -21,10 +21,10 @@ function attach(meshes: BABYLON.Mesh[], parent: BABYLON.TransformNode): BABYLON.
   return meshes;
 }
 
-export const MEGAMAN_HELMET_PARTS: ArmorPartDefinition[] = [
+export const HUMANOID_HELMET_PARTS: ArmorPartDefinition[] = [
   {
-    id: "helmet_megaman",
-    name: "Mega Crest Helm",
+    id: "helmet_humanoid",
+    name: "Humanoid Crest Helm",
     slot: "helmet",
     build: (ctx: ArmorBuildContext) => {
       const meshes: BABYLON.Mesh[] = [];
@@ -120,10 +120,10 @@ export const MEGAMAN_HELMET_PARTS: ArmorPartDefinition[] = [
   },
 ];
 
-export const MEGAMAN_CHEST_PARTS: ArmorPartDefinition[] = [
+export const HUMANOID_CHEST_PARTS: ArmorPartDefinition[] = [
   {
-    id: "chest_megaman",
-    name: "Mega Core Plate",
+    id: "chest_humanoid",
+    name: "Humanoid Core Plate",
     slot: "chest",
     build: (ctx) => {
       const meshes: BABYLON.Mesh[] = [];
@@ -194,10 +194,10 @@ export const MEGAMAN_CHEST_PARTS: ArmorPartDefinition[] = [
   },
 ];
 
-export const MEGAMAN_SHOULDER_PARTS: ArmorPartDefinition[] = [
+export const HUMANOID_SHOULDER_PARTS: ArmorPartDefinition[] = [
   {
-    id: "shoulder_megaman",
-    name: "Mega Round Pad",
+    id: "shoulder_humanoid",
+    name: "Humanoid Round Pad",
     slot: "leftShoulder",
     build: (ctx) => {
       const meshes: BABYLON.Mesh[] = [];
@@ -249,10 +249,10 @@ export const MEGAMAN_SHOULDER_PARTS: ArmorPartDefinition[] = [
   },
 ];
 
-export const MEGAMAN_ARM_PARTS: ArmorPartDefinition[] = [
+export const HUMANOID_ARM_PARTS: ArmorPartDefinition[] = [
   {
-    id: "arm_megaman_glove",
-    name: "Mega Glove",
+    id: "arm_humanoid_glove",
+    name: "Humanoid Glove",
     slot: "leftArm",
     build: (ctx) => {
       const meshes: BABYLON.Mesh[] = [];
@@ -288,10 +288,10 @@ export const MEGAMAN_ARM_PARTS: ArmorPartDefinition[] = [
   },
 ];
 
-export const MEGAMAN_WEAPON_PARTS: ArmorPartDefinition[] = [
+export const HUMANOID_WEAPON_PARTS: ArmorPartDefinition[] = [
   {
-    id: "weapon_megaman_buster",
-    name: "Mega Buster",
+    id: "weapon_humanoid_buster",
+    name: "Humanoid Buster",
     slot: "rightWeapon",
     build: (ctx) => {
       const meshes: BABYLON.Mesh[] = [];
@@ -347,10 +347,10 @@ export const MEGAMAN_WEAPON_PARTS: ArmorPartDefinition[] = [
   },
 ];
 
-export const MEGAMAN_LEG_PARTS: ArmorPartDefinition[] = [
+export const HUMANOID_LEG_PARTS: ArmorPartDefinition[] = [
   {
-    id: "legs_megaman",
-    name: "Mega Boots",
+    id: "legs_humanoid",
+    name: "Humanoid Boots",
     slot: "legs",
     build: (ctx) => {
       const meshes: BABYLON.Mesh[] = [];

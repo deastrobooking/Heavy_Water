@@ -15,13 +15,13 @@ export interface HumanoidDefinition {
     hair: BABYLON.Color3;
   };
   hasArmor: boolean;
-  armorType?: "light" | "heavy" | "captain" | "megaman";
+  armorType?: "light" | "heavy" | "captain" | "humanoid";
   /**
    * Final visual size multiplier applied to the rendered body mesh + armor.
    * The original presets were authored at ~18 unit "mech" scale, but the
    * player's collision capsule and camera assume a 2 m humanoid. Setting
    * `visualScale: 0.12` shrinks an 18-unit body to ~2.16 m so it actually
-   * fits inside the capsule and reads as a Mega-Man-style humanoid robot.
+   * fits inside the capsule and reads as a proper humanoid robot.
    * Defaults to 1.0 for backward compatibility.
    */
   visualScale?: number;

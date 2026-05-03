@@ -22,7 +22,7 @@ export interface SavedCharacter {
   armLength: number;
   legLength: number;
   bodyType: "lean" | "athletic" | "heavy";
-  armorType: "light" | "heavy" | "captain" | "megaman";
+  armorType: "light" | "heavy" | "captain" | "humanoid";
   colors: {
     primary: [number, number, number];
     secondary: [number, number, number];
@@ -74,7 +74,7 @@ const DEFAULT_CHAR: SavedCharacter = {
   armLength: 9,
   legLength: 10,
   bodyType: "athletic",
-  armorType: "megaman",
+  armorType: "humanoid",
   colors: {
     primary: [0.18, 0.55, 0.95],
     secondary: [0.06, 0.18, 0.42],
@@ -282,7 +282,7 @@ export const CharacterEditor: React.FC<CharacterEditorProps> = ({ onClose }) => 
             <div className="absolute top-2 right-2 flex gap-2">
               <button onClick={() => applyPreset(DEFAULT_ARMOR_SET)}
                 className="px-3 py-1 text-xs rounded bg-cyan-900/60 border border-cyan-500/40 text-cyan-200 hover:bg-cyan-800/60">
-                MEGA MAN PRESET
+                HUMANOID PRESET
               </button>
               <button onClick={() => applyPreset(TITAN_ARMOR_SET)}
                 className="px-3 py-1 text-xs rounded bg-red-900/60 border border-orange-500/40 text-orange-200 hover:bg-red-800/60">
@@ -346,10 +346,10 @@ export const CharacterEditor: React.FC<CharacterEditorProps> = ({ onClose }) => 
                   <div className={groupClass}>
                     <label className={labelClass}>Armor Frame</label>
                     <div className="grid grid-cols-2 gap-2">
-                      {(["megaman", "light", "heavy", "captain"] as const).map((t) => (
+                      {(["humanoid", "light", "heavy", "captain"] as const).map((t) => (
                         <button key={t} onClick={() => update("armorType", t)}
                           className={`px-2 py-1 text-xs rounded border ${config.armorType === t ? "bg-cyan-500/30 border-cyan-400 text-cyan-200" : "border-gray-600 text-gray-400 hover:border-cyan-500/50"}`}>
-                          {t === "megaman" ? "MEGA MAN" : t.toUpperCase()}
+                          {t.toUpperCase()}
                         </button>
                       ))}
                     </div>

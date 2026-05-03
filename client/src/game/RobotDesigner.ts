@@ -181,7 +181,7 @@ export const ROBOT_THEMES: Record<RobotThemeId, RobotTheme> = {
   },
   megaMan: {
     id: "megaMan",
-    label: "Mega Man",
+    label: "Humanoid",
     colors: {
       primary: new BABYLON.Color3(0.1, 0.55, 0.95),
       secondary: new BABYLON.Color3(0.95, 0.95, 0.98),

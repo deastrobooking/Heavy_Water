@@ -37,16 +37,16 @@ export interface ArmorSetSerialized {
 }
 
 export const DEFAULT_ARMOR_SET: ArmorSetSerialized = {
-  helmet: "helmet_megaman",
-  chest: "chest_megaman",
+  helmet: "helmet_humanoid",
+  chest: "chest_humanoid",
   back: "back_none",
-  leftShoulder: "shoulder_megaman",
-  rightShoulder: "shoulder_megaman",
-  leftArm: "arm_megaman_glove",
-  rightArm: "arm_megaman_glove",
+  leftShoulder: "shoulder_humanoid",
+  rightShoulder: "shoulder_humanoid",
+  leftArm: "arm_humanoid_glove",
+  rightArm: "arm_humanoid_glove",
   leftWeapon: "weapon_none",
-  rightWeapon: "weapon_megaman_buster",
-  legs: "legs_megaman",
+  rightWeapon: "weapon_humanoid_buster",
+  legs: "legs_humanoid",
   colors: {
     primary: [0.18, 0.55, 0.95],
     secondary: [0.06, 0.18, 0.42],
@@ -86,21 +86,38 @@ function safeString(v: any, fallback: string): string {
   return typeof v === "string" && v.length > 0 ? v : fallback;
 }
 
+/**
+ * Backwards-compat: older saves used `*_megaman` armor part ids before
+ * the rename to the canonical "humanoid" frame. Map them on load so
+ * existing localStorage / DB entries keep rendering the same parts.
+ */
+const LEGACY_PART_ID_ALIASES: Record<string, string> = {
+  helmet_megaman: "helmet_humanoid",
+  chest_megaman: "chest_humanoid",
+  shoulder_megaman: "shoulder_humanoid",
+  arm_megaman_glove: "arm_humanoid_glove",
+  weapon_megaman_buster: "weapon_humanoid_buster",
+  legs_megaman: "legs_humanoid",
+};
+function migratePartId(id: string): string {
+  return LEGACY_PART_ID_ALIASES[id] ?? id;
+}
+
 export function sanitizeArmorSet(input: any): ArmorSetSerialized {
   const d = DEFAULT_ARMOR_SET;
   const src = input && typeof input === "object" ? input : {};
   const colors = src.colors && typeof src.colors === "object" ? src.colors : {};
   return {
-    helmet: safeString(src.helmet, d.helmet),
-    chest: safeString(src.chest, d.chest),
-    back: safeString(src.back, d.back),
-    leftShoulder: safeString(src.leftShoulder, d.leftShoulder),
-    rightShoulder: safeString(src.rightShoulder, d.rightShoulder),
-    leftArm: safeString(src.leftArm, d.leftArm),
-    rightArm: safeString(src.rightArm, d.rightArm),
-    leftWeapon: safeString(src.leftWeapon, d.leftWeapon),
-    rightWeapon: safeString(src.rightWeapon, d.rightWeapon),
-    legs: safeString(src.legs, d.legs),
+    helmet: migratePartId(safeString(src.helmet, d.helmet)),
+    chest: migratePartId(safeString(src.chest, d.chest)),
+    back: migratePartId(safeString(src.back, d.back)),
+    leftShoulder: migratePartId(safeString(src.leftShoulder, d.leftShoulder)),
+    rightShoulder: migratePartId(safeString(src.rightShoulder, d.rightShoulder)),
+    leftArm: migratePartId(safeString(src.leftArm, d.leftArm)),
+    rightArm: migratePartId(safeString(src.rightArm, d.rightArm)),
+    leftWeapon: migratePartId(safeString(src.leftWeapon, d.leftWeapon)),
+    rightWeapon: migratePartId(safeString(src.rightWeapon, d.rightWeapon)),
+    legs: migratePartId(safeString(src.legs, d.legs)),
     colors: {
       primary: safeColorArray(colors.primary, d.colors.primary),
       secondary: safeColorArray(colors.secondary, d.colors.secondary),

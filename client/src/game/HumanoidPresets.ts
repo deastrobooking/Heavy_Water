@@ -26,7 +26,7 @@ export const HUMANOID_PRESETS: Record<string, HumanoidDefinition> = {
       hair: new BABYLON.Color3(0.08, 0.08, 0.08),
     },
     hasArmor: false,
-    armorType: "megaman",
+    armorType: "humanoid",
     visualScale: HUMANOID_VISUAL_SCALE,
   },
 

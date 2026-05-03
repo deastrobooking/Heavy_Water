@@ -307,7 +307,7 @@ export class PlayerController implements IDamageable {
 
     if (!armorSetSerialized) {
       armorSetSerialized = DEFAULT_ARMOR_SET;
-      console.log("[PlayerController] No saved armor — equipping Mega Man default kit");
+      console.log("[PlayerController] No saved armor — equipping default humanoid kit");
     }
     if (armorSetSerialized) {
       humanoidDef = { ...humanoidDef, hasArmor: false };
