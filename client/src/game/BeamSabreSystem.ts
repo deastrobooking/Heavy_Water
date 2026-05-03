@@ -15,6 +15,9 @@ export interface BeamSabre {
   hasSpinAttack: boolean;  // Hold attack ≥0.5s, release for 360° spin slash.
   hasTwinWave: boolean;    // Each launch also fires a much larger red wave behind.
   hasGiantBlade: boolean;  // 1.6× blade, +50% damage / hit-radius, deeper red glow.
+  hasGoldSabre: boolean;   // Final tier — inner blue / middle red / outer gold blade,
+                           // every energy-wave launch fires 3 stacked waves
+                           // (blue → red → largest gold).
 }
 
 interface EnergyWave {
@@ -33,7 +36,7 @@ interface EnergyWave {
 // massive so foot combat feels every bit as exciting as flying or driving.
 // `hasSpinAttack`/`hasTwinWave`/`hasGiantBlade` are orthogonal one-time SPECIALS
 // unlocks, not per-level stats, so they're omitted from the per-level table.
-const LEVEL_CONFIGS: Omit<BeamSabre, "isActive" | "hasSpinAttack" | "hasTwinWave" | "hasGiantBlade">[] = [
+const LEVEL_CONFIGS: Omit<BeamSabre, "isActive" | "hasSpinAttack" | "hasTwinWave" | "hasGiantBlade" | "hasGoldSabre">[] = [
   { level: 1, damage: 120, energyWaveDamage: 220, slashCount: 2, energyWaveWidth: 3, energyWaveSpeed: 35, cooldown: 0.7 },
   { level: 2, damage: 170, energyWaveDamage: 320, slashCount: 2, energyWaveWidth: 4, energyWaveSpeed: 40, cooldown: 0.6 },
   { level: 3, damage: 240, energyWaveDamage: 460, slashCount: 3, energyWaveWidth: 5, energyWaveSpeed: 45, cooldown: 0.55 },
@@ -85,6 +88,12 @@ export class BeamSabreSystem {
   // Owned-as-an-upgrade specials. Defaults match BeamSabre.has* flags.
   // Mirrored so the live mesh can be re-styled when toggled at runtime.
   private giantBladeApplied: boolean = false;
+  private goldSabreApplied: boolean = false;
+  // Concentric blade halo meshes added by the gold-sabre unlock. Parented
+  // to the main sabreMesh so they inherit every transform automatically —
+  // no extra updateBladePosition wiring required.
+  private bladeHaloRed: BABYLON.Mesh | null = null;
+  private bladeHaloGold: BABYLON.Mesh | null = null;
 
   // Optional external router. When set, the sabre delegates damage to the
   // game's central routeHit (so it correctly hurts aerial fortresses, enemy
@@ -148,6 +157,7 @@ export class BeamSabreSystem {
       hasSpinAttack: false,
       hasTwinWave: false,
       hasGiantBlade: false,
+      hasGoldSabre: false,
     };
 
     this.createBladeMesh();
@@ -416,8 +426,10 @@ export class BeamSabreSystem {
 
     // Twin-wave special: chase every blue wave with one big red trailing
     // wave that does ~60% more damage and is much wider, so it crashes
-    // through anything the lead wave didn't kill.
-    if (this.sabre.hasTwinWave) {
+    // through anything the lead wave didn't kill. Skipped when the gold
+    // sabre is owned — gold-mode owns the wave layout (strict three-wave
+    // blue→red→gold cascade) and the Twin red would land between them.
+    if (this.sabre.hasTwinWave && !this.sabre.hasGoldSabre) {
       const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
       this.spawnArcWave(forward, {
         sizeMul: 1.9,
@@ -431,8 +443,38 @@ export class BeamSabreSystem {
       });
     }
 
+    // Gold-sabre special: chase every launch with a red mid-wave then a
+    // huge gold wave behind it. Always piercing, always dramatic. The
+    // base cyan wave above already fired, so blue → red → gold reads
+    // exactly in that order as they leave the sabre.
+    if (this.sabre.hasGoldSabre) {
+      const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
+      this.spawnArcWave(forward, {
+        sizeMul: 1.55,
+        damageMul: 1.5,
+        speedMul: 0.88,
+        spawnForwardOffset: -1.2,
+        emissive: new BABYLON.Color3(1.0, 0.20, 0.12),
+        diffuse: new BABYLON.Color3(0.9, 0.12, 0.06),
+        piercing: true,
+        index: 200,
+      });
+      this.spawnArcWave(forward, {
+        sizeMul: 2.2,
+        damageMul: 2.0,
+        speedMul: 0.72,
+        spawnForwardOffset: -2.8,
+        emissive: new BABYLON.Color3(1.0, 0.78, 0.18),
+        diffuse: new BABYLON.Color3(1.0, 0.62, 0.10),
+        piercing: true,
+        index: 201,
+      });
+    }
+
     this.bus.emit(GameEvents.UI_MESSAGE, {
-      text: this.sabre.hasTwinWave ? "Twin Wave!" : "Energy Wave!",
+      text: this.sabre.hasGoldSabre
+        ? "GOLD WAVE!"
+        : (this.sabre.hasTwinWave ? "Twin Wave!" : "Energy Wave!"),
       duration: 1,
     });
   }
@@ -754,17 +796,68 @@ export class BeamSabreSystem {
     }
   }
 
+  /** Final-tier unlock. Restyles the blade as three concentric layers
+   *  (inner blue / middle red / outer gold) and arms the gold-wave triple
+   *  launch. Idempotent. */
+  unlockGoldSabre(): void {
+    this.sabre.hasGoldSabre = true;
+    if (this.goldSabreApplied) return;
+    this.goldSabreApplied = true;
+    if (!this.sabreMesh) return;
+
+    // Inner core → bright blue. Recolors the existing blade material.
+    if (this.bladeMaterial) {
+      this.bladeMaterial.emissiveColor = new BABYLON.Color3(0.15, 0.55, 1.0);
+      this.bladeMaterial.diffuseColor = new BABYLON.Color3(0.20, 0.70, 1.0);
+      this.bladeMaterial.alpha = 1.0;
+    }
+
+    const glowLayer = this.scene.effectLayers?.find(l => l instanceof BABYLON.GlowLayer) as BABYLON.GlowLayer | undefined;
+
+    // Middle layer — red sheath, slightly larger than the blue core.
+    this.bladeHaloRed = BABYLON.MeshBuilder.CreateBox("beamSabreBladeRed", {
+      height: 2.62, width: 0.22, depth: 0.22,
+    }, this.scene);
+    const matRed = new BABYLON.StandardMaterial("beamSabreMatRed", this.scene);
+    matRed.emissiveColor = new BABYLON.Color3(1.0, 0.18, 0.10);
+    matRed.diffuseColor = new BABYLON.Color3(0.9, 0.12, 0.05);
+    matRed.specularColor = new BABYLON.Color3(1, 0.5, 0.3);
+    matRed.alpha = 0.55;
+    this.bladeHaloRed.material = matRed;
+    this.bladeHaloRed.isPickable = false;
+    this.bladeHaloRed.parent = this.sabreMesh;
+    this.bladeHaloRed.position = BABYLON.Vector3.Zero();
+    if (glowLayer) glowLayer.addIncludedOnlyMesh(this.bladeHaloRed);
+
+    // Outer layer — gold halo, the widest of the three.
+    this.bladeHaloGold = BABYLON.MeshBuilder.CreateBox("beamSabreBladeGold", {
+      height: 2.66, width: 0.36, depth: 0.36,
+    }, this.scene);
+    const matGold = new BABYLON.StandardMaterial("beamSabreMatGold", this.scene);
+    matGold.emissiveColor = new BABYLON.Color3(1.0, 0.78, 0.18);
+    matGold.diffuseColor = new BABYLON.Color3(1.0, 0.62, 0.10);
+    matGold.specularColor = new BABYLON.Color3(1, 1, 0.6);
+    matGold.alpha = 0.32;
+    this.bladeHaloGold.material = matGold;
+    this.bladeHaloGold.isPickable = false;
+    this.bladeHaloGold.parent = this.sabreMesh;
+    this.bladeHaloGold.position = BABYLON.Vector3.Zero();
+    if (glowLayer) glowLayer.addIncludedOnlyMesh(this.bladeHaloGold);
+  }
+
   hasSpinAttack(): boolean { return this.sabre.hasSpinAttack; }
   hasTwinWave(): boolean { return this.sabre.hasTwinWave; }
   hasGiantBlade(): boolean { return this.sabre.hasGiantBlade; }
+  hasGoldSabre(): boolean { return this.sabre.hasGoldSabre; }
 
   /** Snapshot of all sabre state worth persisting across death/restart. */
-  getSpecialsState(): { level: number; hasSpinAttack: boolean; hasTwinWave: boolean; hasGiantBlade: boolean } {
+  getSpecialsState(): { level: number; hasSpinAttack: boolean; hasTwinWave: boolean; hasGiantBlade: boolean; hasGoldSabre: boolean } {
     return {
       level: this.sabre.level,
       hasSpinAttack: this.sabre.hasSpinAttack,
       hasTwinWave: this.sabre.hasTwinWave,
       hasGiantBlade: this.sabre.hasGiantBlade,
+      hasGoldSabre: this.sabre.hasGoldSabre,
     };
   }
 
@@ -777,7 +870,7 @@ export class BeamSabreSystem {
    * `unlockGiantBlade()` (idempotent) so the mesh-scaling 1.6× is preserved
    * — not just the material color.
    */
-  applyLoadedState(state: { level?: number; hasSpinAttack?: boolean; hasTwinWave?: boolean; hasGiantBlade?: boolean }): void {
+  applyLoadedState(state: { level?: number; hasSpinAttack?: boolean; hasTwinWave?: boolean; hasGiantBlade?: boolean; hasGoldSabre?: boolean }): void {
     if (typeof state.level === "number") {
       const target = Math.max(1, Math.min(LEVEL_CONFIGS.length, state.level));
       const config = LEVEL_CONFIGS[target - 1];
@@ -801,6 +894,12 @@ export class BeamSabreSystem {
       // Reuse the canonical unlock so the mesh scale (1.6×) and the deep-red
       // material recolor are both applied, idempotently.
       this.unlockGiantBlade();
+    }
+    if (state.hasGoldSabre) {
+      // Canonical unlock — rebuilds the layered blade halos so a restored
+      // gold sabre renders with its full inner-blue / middle-red / outer-gold
+      // silhouette and the triple-wave launch.
+      this.unlockGoldSabre();
     }
   }
 

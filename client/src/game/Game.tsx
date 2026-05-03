@@ -70,7 +70,7 @@ type GamePhase = "auth" | "menu" | "playing" | "paused" | "gameover";
 // One source of truth for the SPECIALS-tab unlocks. Used both for
 // affordability checks in `specialsList` and for charging in
 // `handleUnlockSpecial`, so prices can never drift between the two.
-type SpecialId = "sabreSpin" | "sabreTwin" | "sabreGiant" | "autoLoot" | "roboDragon" | "autoTarget" | "supermanFlight";
+type SpecialId = "sabreSpin" | "sabreTwin" | "sabreGiant" | "sabreGold" | "autoLoot" | "roboDragon" | "autoTarget" | "supermanFlight";
 interface SpecialDef {
   id: SpecialId;
   name: string;
@@ -99,6 +99,12 @@ const SPECIALS_DEFS: readonly SpecialDef[] = [
   // weapons fire normally. Press X (or the combo again) to land.
   { id: "supermanFlight", name: "Superman Flight", description: "While airborne, press dash + jump to free-fly. Hold Space to boost (~3× cruise). Press X to land.",
     cost: { gears: 350, cores: 90, nanofiber: 55, circuits: 40, credits: 4000 } },
+  // Final-tier Beam Sabre. Inner blue / middle red / outer gold layered
+  // blade; every energy-wave launch fires three stacked waves
+  // (blue → red → largest gold). Top-shelf SPECIALS pricing — even
+  // pricier than the Superman Flight upgrade above.
+  { id: "sabreGold",      name: "Gold Sabre (Final)", description: "Final-tier blade — inner blue, middle red, outer gold halo. Every energy wave fires three stacked waves: blue, red, then a giant gold finisher.",
+    cost: { gears: 800, cores: 200, nanofiber: 120, circuits: 80, credits: 12000 } },
 ];
 
 export const Game: React.FC = () => {
@@ -210,15 +216,20 @@ export const Game: React.FC = () => {
   const [companionWeaponInfo, setCompanionWeaponInfo] = useState<{ id: string; name: string; weaponLevel: number; maxLevel: number; cost: { gears: number; cores: number } | null; affordable: boolean }[]>([]);
   // Persisted owned-flags for one-time SPECIALS unlocks.
   const [specialsOwned, setSpecialsOwned] = useState<{
-    sabreSpin: boolean; sabreTwin: boolean; sabreGiant: boolean;
+    sabreSpin: boolean; sabreTwin: boolean; sabreGiant: boolean; sabreGold: boolean;
     autoLoot: boolean; roboDragon: boolean; autoTarget: boolean;
     supermanFlight: boolean;
-  }>({ sabreSpin: false, sabreTwin: false, sabreGiant: false, autoLoot: false, roboDragon: false, autoTarget: false, supermanFlight: false });
+  }>({ sabreSpin: false, sabreTwin: false, sabreGiant: false, sabreGold: false, autoLoot: false, roboDragon: false, autoTarget: false, supermanFlight: false });
   // Mirror of `specialsOwned` for use inside long-lived bus.on closures
   // (e.g. PLAYER_DIED) where the latest React state isn't directly visible.
   // Kept in sync via a useEffect below.
   const specialsOwnedRef = useRef(specialsOwned);
   useEffect(() => { specialsOwnedRef.current = specialsOwned; }, [specialsOwned]);
+  // Tracks SPECIALS that have already passed the unlock gate this tick.
+  // Synchronous companion to the async `specialsOwned` React state — flips
+  // before any side-effect/charge runs so a rapid double-click cannot
+  // double-charge before React commits the new owned-flag.
+  const specialsUnlockInFlightRef = useRef<Set<string>>(new Set());
   const [resourceCounts, setResourceCounts] = useState({ gears: 0, scrap: 0, cores: 0, circuits: 0, nanofiber: 0, bioEssence: 0 });
   const [partCounts, setPartCounts] = useState<Record<string, number>>({});
   const [labOpen, setLabOpen] = useState(false);
@@ -1286,6 +1297,7 @@ export const Game: React.FC = () => {
             sabreSpin: sabreState.hasSpinAttack,
             sabreTwin: sabreState.hasTwinWave,
             sabreGiant: sabreState.hasGiantBlade,
+            sabreGold: sabreState.hasGoldSabre,
             autoLoot: pickupSystem.isAutoLootEnabled(),
             // The roster carries the dragon by preset name; the flag mirrors
             // the SPECIALS-tab state for affordability/UI on reload.
@@ -1394,6 +1406,7 @@ export const Game: React.FC = () => {
                   hasSpinAttack: snap.specialsOwned?.sabreSpin,
                   hasTwinWave: snap.specialsOwned?.sabreTwin,
                   hasGiantBlade: snap.specialsOwned?.sabreGiant,
+                  hasGoldSabre: snap.specialsOwned?.sabreGold,
                 });
                 setBeamSabreLevel(beamSabre.getLevel);
               }
@@ -2415,6 +2428,13 @@ export const Game: React.FC = () => {
     const player = playerRef.current;
     if (!inv || !player) return;
     if (specialsOwned[id as SpecialId]) return;
+    // Synchronous in-flight guard. The React `specialsOwned` check above is
+    // async-stale between rapid clicks, so a fast double-tap could pass it
+    // twice and double-charge. The ref flips immediately and resets after
+    // setSpecialsOwned schedules its update, blocking re-entry within the
+    // same tick.
+    if (specialsUnlockInFlightRef.current.has(id)) return;
+    specialsUnlockInFlightRef.current.add(id);
     const def = SPECIALS_DEFS.find(d => d.id === id);
     if (!def) return;
     const c = def.cost;
@@ -2433,13 +2453,14 @@ export const Game: React.FC = () => {
     }
     // Pre-validate side-effect targets so we never charge for a no-op.
     let runEffect: (() => boolean) | null = null;
-    if (id === "sabreSpin" || id === "sabreTwin" || id === "sabreGiant") {
+    if (id === "sabreSpin" || id === "sabreTwin" || id === "sabreGiant" || id === "sabreGold") {
       const sabre = beamSabreRef.current;
       if (!sabre) { showMessage("SABRE OFFLINE", 1500); return; }
       runEffect = () => {
         if (id === "sabreSpin")  { sabre.unlockSpinAttack();  showMessage("SPINNING BLADE UNLOCKED", 2000); }
         if (id === "sabreTwin")  { sabre.unlockTwinWave();    showMessage("TWIN WAVE UNLOCKED",       2000); }
         if (id === "sabreGiant") { sabre.unlockGiantBlade();  showMessage("GIANT BLADE UNLOCKED",     2000); }
+        if (id === "sabreGold")  { sabre.unlockGoldSabre();   showMessage("GOLD SABRE UNLOCKED — TRIPLE WAVE", 2400); }
         return true;
       };
     } else if (id === "autoLoot") {
@@ -2474,7 +2495,10 @@ export const Game: React.FC = () => {
         return true;
       };
     }
-    if (!runEffect || !runEffect()) return;
+    if (!runEffect || !runEffect()) {
+      specialsUnlockInFlightRef.current.delete(id);
+      return;
+    }
     // Charge only after the side-effect succeeds.
     if (c.gears > 0)     inv.removeItem("gear", c.gears);
     if (c.cores > 0)     inv.removeItem("energy_core", c.cores);
@@ -2482,6 +2506,9 @@ export const Game: React.FC = () => {
     if (c.circuits)      inv.removeItem("circuit_board", c.circuits);
     if (c.credits)       player.spendCredits(c.credits);
     setSpecialsOwned(prev => ({ ...prev, [id]: true }));
+    // Keep the in-flight flag set — `specialsOwned[id]` will be true on the
+    // next render, so the guard above will hold. Don't clear or repeated
+    // re-buys would slip through during the React commit gap.
     syncResourcesNow();
     // Force a save immediately so the unlock can never be lost to a crash or
     // the death/restart cycle that prompted this whole fix.

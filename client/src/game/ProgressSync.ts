@@ -29,6 +29,11 @@ export interface SpecialsOwnedSnapshot {
    *  mode that re-uses the existing weapons stack with no energy drain
    *  and a held-Space speed boost. Premium SPECIALS unlock; persists. */
   supermanFlight?: boolean;
+  /** Final-tier Beam Sabre (gold). Restyles the blade with inner blue /
+   *  middle red / outer gold layers and replaces the energy-wave launch
+   *  with three stacked waves (blue → red → largest gold). Premium
+   *  SPECIALS unlock; persists across death/restart. */
+  sabreGold?: boolean;
 }
 
 export interface ProgressSnapshot {
