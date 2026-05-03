@@ -480,11 +480,16 @@ export const Game: React.FC = () => {
           if (!v || v.kind === "atv") return null;
           if (!playerRef.current?.isMounted()) return null;
           const root = v.meshes.root;
-          const fwd = root.getDirection(BABYLON.Vector3.Forward()).normalize();
-          // Spawn the projectile a few metres forward of the vehicle root so
-          // it doesn't intersect the fighter mesh on frame 1.
-          const origin = root.position.add(fwd.scale(5));
-          return { origin, forward: fwd };
+          // Aim along the CAMERA's forward, not the ship's, so projectiles
+          // track the crosshair exactly. The ship lerps toward camera yaw/
+          // pitch with smoothing so its own forward lags the crosshair —
+          // using camera forward removes the aim drift the user reported.
+          const camFwd = scene.activeCamera!.getDirection(BABYLON.Vector3.Forward()).normalize();
+          // Still spawn a few metres ahead of the ship's nose so the shot
+          // doesn't clip through the fighter mesh on frame 1.
+          const shipFwd = root.getDirection(BABYLON.Vector3.Forward()).normalize();
+          const origin = root.position.add(shipFwd.scale(5));
+          return { origin, forward: camFwd };
         });
 
         const inventory = new InventorySystem();

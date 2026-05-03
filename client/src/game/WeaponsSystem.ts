@@ -299,12 +299,16 @@ export class WeaponsSystem {
     const spreadY = (Math.random() - 0.5) * weapon.spread;
     const direction = forward.add(new BABYLON.Vector3(spreadX, spreadY, 0)).normalize();
 
-    // Vehicle amplification: 1.5x size, damage, explosion, and 1.25x speed.
+    // Vehicle amplification: 1.5x size, damage, explosion, 2.5x projectile
+    // speed and 2x lifetime (range) — the orbital fighter cruises at 55 m/s
+    // and engages targets 80–150 m out, so the on-foot speeds left bullets
+    // crawling and timing out before they reached anything.
     // Player Power-Core armor mod multiplies damage on top of the vehicle
     // bonus so a fully-modded player in a vehicle hits hardest.
     const sizeMul = this.vehicleMode ? 1.5 : 1;
     const dmgMul = (this.vehicleMode ? 1.5 : 1) * this.playerDamageMul;
-    const speedMul = this.vehicleMode ? 1.25 : 1;
+    const speedMul = this.vehicleMode ? 2.5 : 1;
+    const lifetimeMul = this.vehicleMode ? 2.0 : 1;
 
     let projectileMesh: BABYLON.Mesh;
     let color: BABYLON.Color3;
@@ -360,7 +364,7 @@ export class WeaponsSystem {
       direction,
       speed: weapon.projectileSpeed * speedMul,
       damage: weapon.damage * dmgMul,
-      lifetime: weapon.type === "tracking_missile" ? 6000 : 3000,
+      lifetime: (weapon.type === "tracking_missile" ? 6000 : 3000) * lifetimeMul,
       type: weapon.type,
       isExplosive: weapon.type === "rocket" || weapon.type === "grenade" || weapon.type === "tracking_missile",
       explosionRadius: (baseR + (weapon.explosionRadiusBonus || 0)) * sizeMul,
