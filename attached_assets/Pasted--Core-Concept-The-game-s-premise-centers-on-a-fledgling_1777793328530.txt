@@ -1,0 +1,31 @@
+### Core Concept
+The game's premise centers on a fledgling farming community on the brink of collapse, plagued by wilting crops and the constant theft of livestock by a mysterious faction known as the **Shadow Root Collective**. Players inherit a dilapidated farmstead, but hope arrives with the discovery of "Sproutlings"—magical creatures capable of purifying the tainted land and aiding in farm work, who can also be befriended and trained for battle.
+
+### Creature Collection & Farming Integration
+#### Creature
+* **Capture & Collection**: In the wild, Befriend and collect a variety of Sproutlings by using crops or items as bait in real-time, rather than random encounters. The goal is to fill an in-game encyclopedia known as the "Biolog". There could be over 100 unique species to find.
+* **Essentials Stats**: Each Sproutling has a Level, Type, Abilities, Moves, and Friendship Value.
+* **Farming Integration**: Sproutlings can be assigned to various tasks. For example, some species can automatically water crops, plow soil, gather harvests, collect eggs from coops, or dig up valuable minerals in mines.
+* **Companionship**: They can also follow the player around the farm, town, or the wider, vibrant 3D world.
+* **Combat & Farming Tools**: In addition to creature battles, use a full suite of upgradeable tools (axe, hammer, hoe, watering can) to efficiently manage your farm.
+
+### Exploration & World
+#### Exploration
+* **A Seamless World**: Explore a contiguous, open 3D landscape that includes a central valley, dense forests, arid deserts, snowy mountains, and volcanic caves.
+* **Interactive Environment**: Cut down trees or smash rocks to clear land for farming or crafting. Use Sproutlings' field moves to clear obstacles.
+* **Terrain Customization**: Utilize terraforming to dig, build, and reshape the land on your farm, including creating waterways to attract rare fish.
+* **Dynamic Cycle**: A full day/night and seasonal cycle impacts which Sproutlings appear, what you can fish, and which crops can be planted.
+
+### Social Simulation & Town Life
+#### Social Simulation
+* **Deep Relationships**: Befriend a diverse cast of villagers, including potential romance options. Each has a hidden Heart Level that increases by giving gifts, talking daily, and helping them.
+* **Marriage & Family**: Once you marry, your spouse can help with chores, and you can have a child who might grow up to help on the farm or in battles.
+* **Cosmetic Variety**: Extensive customization options for your character's appearance, your house interior, and the layout of your farm.
+
+### Progression & Mastery
+#### Progression
+* **A Badge & Contest Structure**: The main narrative progress is tracked through "Crop Badges" earned by winning village festivals and defeating rival farming syndicates. An alternative system like Sproutling Contests assesses skills like "Tilling," "Watering," or "Battle".
+* **Growth & Evolution**: Sproutlings evolve into more powerful forms, and your tools can also be upgraded.
+* **Endgame Activities**: Complete a series of challenging post-game dungeons, breed Sproutlings with specific traits, and engage in repeatable multiplayer tasks with friends.
+
+This hybrid design aims to create a layered, systems-driven experience where every action—from plowing a field to making a friend—feels seamlessly connected, offering depth for both strategic creature battlers and cozy farming enthusiasts.

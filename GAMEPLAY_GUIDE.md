@@ -79,6 +79,31 @@ on enemies) and triggers **Dome Explosions** on impact.
 
 ---
 
+## 5b. Fast Travel & Ashur Sanctuary
+
+Open the upgrade menu (`TAB`) and switch to the **TRAVEL** tab. Four
+destinations are listed:
+
+| Level | Zone |
+|---|---|
+| 1 | Star City Front |
+| 2 | Hold the Line |
+| 3 | Purge the Void |
+| 4 | **Ashur Sanctuary** — peaceful |
+
+Click **WARP** on any row to instantly relocate. Your inventory, weapons,
+upgrades and built structures are preserved.
+
+**Ashur Sanctuary** is a peaceful corner of the world. There are no enemies,
+no fortress, no wave timer. Three sanctuary NPCs (Theta, Sergio Wolfrim, Ion)
+greet you. Five **farm plots** are arranged in a row near the spawn —
+press `E` near a plot with a `bio_seed` in your inventory to plant; wait
+through 3 growth stages (~90 s) and press `E` again to harvest a `bio_crop`.
+
+You start with 5 `bio_seed`s the first time you enter the sanctuary.
+
+---
+
 ## 6. Bio-Creature Capture
 
 | Action | Keys |

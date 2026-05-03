@@ -48,7 +48,8 @@ import { SoundSystem } from "./SoundSystem";
 import { SkySystem } from "./SkySystem";
 import { MiningSystem } from "./MiningSystem";
 import { EnemyBaseSystem } from "./EnemyBaseSystem";
-import { LevelSystem } from "./LevelSystem";
+import { LevelSystem, WorldLevel } from "./LevelSystem";
+import { SanctuarySystem } from "./SanctuarySystem";
 import { loadProgress, saveProgress, ProgressSnapshot } from "./ProgressSync";
 import { EventBus, GameEvents } from "./EventBus";
 import { DamageType } from "./DamageSystem";
@@ -95,6 +96,7 @@ export const Game: React.FC = () => {
   const aerialEnemyRef = useRef<AerialEnemySystem | null>(null);
   const enemyHealthBarsRef = useRef<EnemyHealthBarSystem | null>(null);
   const friendlyNPCsRef = useRef<FriendlyNPCSystem | null>(null);
+  const sanctuarySystemRef = useRef<SanctuarySystem | null>(null);
   // Mirror modal-open React state into refs so systems wired during the
   // single mount-time `initializeGame` (which captures stale state) can poll
   // the live values from their per-frame closures.
@@ -213,6 +215,9 @@ export const Game: React.FC = () => {
     level: 1,
   });
   const [playerUpgradeInfo, setPlayerUpgradeInfo] = useState<PlayerUpgradeInfo[]>([]);
+  // Mirror the LevelSystem's current level into React state so the upgrade-menu
+  // TRAVEL tab can highlight "you are here" without re-querying every render.
+  const [currentWorldLevel, setCurrentWorldLevel] = useState<WorldLevel>(1);
   const [inVehicle, setInVehicle] = useState(false);
   const [currentWeapon, setCurrentWeapon] = useState<Weapon | null>(null);
   const [ammo, setAmmo] = useState(50);
@@ -730,15 +735,40 @@ export const Game: React.FC = () => {
         bus.on(GameEvents.LEVEL_STARTED, (payload: any) => {
           if (payload?.banner) setLevelBanner(payload.banner);
           if (payload?.objective) setLevelObjective(payload.objective);
-          // Sky tint per level (red shift on L2, cold violet shift on L3).
+          if (typeof payload?.level === "number") setCurrentWorldLevel(payload.level as WorldLevel);
+          // Sky tint per level (red shift on L2, cold violet shift on L3,
+          // warm dawn for the sanctuary).
           if (payload?.skyTint && skyRef.current) {
             skyRef.current.setLevelTint(payload.skyTint);
           }
-          // Level >= 2: bump difficulty + seed the next fortress at this
-          // level's coordinate. Idempotent — if a fortress already lives
-          // within 5 m of the target (save reload re-firing LEVEL_STARTED),
-          // we skip the second spawn.
-          if (payload?.level >= 2) {
+
+          // Mount/dispose the sanctuary side-zone based on the peaceful flag.
+          // Idempotent on re-entry: while peaceful=true, leaving the dispose
+          // alone re-uses the live system; we only build/tear down on edge.
+          // Fall back to the static `LevelSystem.isPeaceful` lookup if a
+          // legacy payload (e.g. from an older event source) omits the flag.
+          const isPeaceful = !!payload?.peaceful
+            || (typeof payload?.level === "number"
+                && LevelSystem.isPeaceful(payload.level as WorldLevel));
+          if (isPeaceful && !sanctuarySystemRef.current) {
+            sanctuarySystemRef.current = new SanctuarySystem(
+              scene,
+              engine.getCamera(),
+              inventory,
+              () => player.getPosition(),
+              () => labOpenRef.current
+                || gardenOpenRef.current
+                || upgradeMenuOpenRef.current
+                || (gardenRef.current?.isGardenOpenCheck() ?? false),
+            );
+          } else if (!isPeaceful && sanctuarySystemRef.current) {
+            try { sanctuarySystemRef.current.dispose(); } catch {}
+            sanctuarySystemRef.current = null;
+          }
+
+          // Combat-only progression: bump waves + seed the next fortress.
+          // Skipped entirely while peaceful (sanctuary stays calm).
+          if (!isPeaceful && payload?.level >= 2) {
             const baseWave = enemySystem.getWaveNumber() + 2;
             const targetWave = payload.level === 3 ? Math.max(baseWave, 9) : Math.max(baseWave, 5);
             enemySystem.jumpToWave(targetWave);
@@ -1684,6 +1714,7 @@ export const Game: React.FC = () => {
     if (levelSystemRef.current) { try { levelSystemRef.current.dispose(); } catch {} levelSystemRef.current = null; }
     if (enemyHealthBarsRef.current) { try { enemyHealthBarsRef.current.dispose(); } catch {} enemyHealthBarsRef.current = null; }
     if (friendlyNPCsRef.current) { try { friendlyNPCsRef.current.dispose(); } catch {} friendlyNPCsRef.current = null; }
+    if (sanctuarySystemRef.current) { try { sanctuarySystemRef.current.dispose(); } catch {} sanctuarySystemRef.current = null; }
     if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} gamepadRef.current = null; }
     if (aerialEnemyRef.current) { try { aerialEnemyRef.current.dispose(); } catch {} aerialEnemyRef.current = null; }
     // CRITICAL: these systems also subscribe to EventBus / hold scene state.
@@ -2293,6 +2324,7 @@ export const Game: React.FC = () => {
       if (skyRef.current) skyRef.current.dispose();
       if (enemyHealthBarsRef.current) enemyHealthBarsRef.current.dispose();
       if (friendlyNPCsRef.current) friendlyNPCsRef.current.dispose();
+      if (sanctuarySystemRef.current) { try { sanctuarySystemRef.current.dispose(); } catch {} sanctuarySystemRef.current = null; }
       if (aerialEnemyRef.current) aerialEnemyRef.current.dispose();
       if (gamepadRef.current) gamepadRef.current.dispose();
       if (multiplayerRef.current) multiplayerRef.current.dispose();
@@ -2300,6 +2332,43 @@ export const Game: React.FC = () => {
       MusicSystem.pause();
       EventBus.getInstance().clear();
     };
+  }, []);
+
+  // ---- Fast travel + travel destinations ----------------------------------
+  // Players warp between Detroit's three combat fronts and the Ashur Sanctuary
+  // from the new TRAVEL tab on the upgrade menu. Warping calls
+  // `LevelSystem.forceStart` which re-fires `LEVEL_STARTED` — that handler
+  // applies sky tint, mounts/dismantles the sanctuary, and clears boss-spawn
+  // gates. We then teleport the player to the level's `spawnPoint`.
+  const handleFastTravel = useCallback((level: number) => {
+    const ls = levelSystemRef.current;
+    const player = playerRef.current;
+    if (!ls || !player) return;
+    if (level < 1 || level > 4) return;
+    ls.forceStart(level as WorldLevel);
+    const sp = LevelSystem.getSpawnPointFor(level as WorldLevel);
+    // Lift the player a touch to avoid clipping into terrain on arrival.
+    player.setPosition(new BABYLON.Vector3(sp.x, 2, sp.z));
+    setUpgradeMenuOpen(false);
+    showMessage(`WARPED TO ${LevelSystem.getDisplayNameFor(level as WorldLevel)}`, 2200);
+  }, [showMessage]);
+
+  // Travel-tab rows — derived from LevelSystem so adding a level-5 later only
+  // requires extending LEVEL_DEFS. Currently every destination is unlocked;
+  // add a `locked` flag here later if we want to gate by campaign progress.
+  const travelDestinations = useMemo(() => {
+    return LevelSystem.getAllLevels().map((lvl) => ({
+      level: lvl,
+      name: LevelSystem.getDisplayNameFor(lvl),
+      description: lvl === 4
+        ? "Peaceful side-zone. Rehab rescued Animatons, farm bio-crops, help the Village of Earth."
+        : lvl === 1
+        ? "Star City Front — first-stage Detroit defense. Rescue the captured ally."
+        : lvl === 2
+        ? "Hold the Line — captains have invaded. Take the second fortress."
+        : "Purge the Void — the final command tower.",
+      locked: false,
+    }));
   }, []);
 
   // Build the SPECIALS rows from the single SPECIALS_DEFS source. Affordability
@@ -2423,8 +2492,11 @@ export const Game: React.FC = () => {
           onUpgradePlayer={handleUpgradePlayer}
           upgradeMenuSpecials={specialsList}
           upgradeMenuCompanionWeapons={companionWeaponInfo}
+          upgradeMenuTravel={travelDestinations}
+          upgradeMenuCurrentLevel={currentWorldLevel}
           onUnlockSpecial={handleUnlockSpecial}
           onUpgradeCompanionWeapon={handleUpgradeCompanionWeapon}
+          onFastTravel={handleFastTravel}
           onUpgradeMenuClose={() => setUpgradeMenuOpen(false)}
           labOpen={labOpen}
           labLevel={labLevel}

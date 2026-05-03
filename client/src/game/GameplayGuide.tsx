@@ -56,6 +56,16 @@ const SECTIONS: Section[] = [
     ],
   },
   {
+    id: "travel",
+    title: "FAST TRAVEL & SANCTUARY",
+    body: [
+      { label: "Open menu", keys: "TAB" },
+      { text: "Switch to the TRAVEL tab to warp between the three combat fronts (Star City, Hold the Line, Purge the Void) and the peaceful Ashur Sanctuary. Inventory, upgrades and built structures are preserved across warps." },
+      { label: "Plant / harvest", keys: "E (sanctuary plots)" },
+      { text: "The sanctuary has 5 farm plots, three NPCs and a signpost. Plant a bio_seed, wait through 3 growth stages, harvest a bio_crop. You receive 5 starter bio_seeds the first time you enter." },
+    ],
+  },
+  {
     id: "elements",
     title: "ELEMENTAL CASTING",
     body: [

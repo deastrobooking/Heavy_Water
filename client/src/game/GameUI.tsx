@@ -7,7 +7,7 @@ import { BlockType, BlockDefinition } from "./BuildingSystem";
 import { PrefabSummary } from "./PrefabSystem";
 import { CompanionUpgradeInfo } from "./CompanionSystem";
 import { CapturedCreature } from "./BioCreatureSystem";
-import { UpgradeMenu, type SpecialUpgradeInfo, type CompanionWeaponInfo } from "./UpgradeMenu";
+import { UpgradeMenu, type SpecialUpgradeInfo, type CompanionWeaponInfo, type TravelDestinationInfo } from "./UpgradeMenu";
 import type { PlayerUpgradeInfo } from "./PlayerController";
 import { LabUI, LabBlueprint } from "./LabUI";
 import { GardenCaptureUI } from "./GardenCaptureUI";
@@ -72,8 +72,11 @@ interface GameUIProps {
   upgradeMenuPartCounts?: Record<string, number>;
   upgradeMenuSpecials?: SpecialUpgradeInfo[];
   upgradeMenuCompanionWeapons?: CompanionWeaponInfo[];
+  upgradeMenuTravel?: TravelDestinationInfo[];
+  upgradeMenuCurrentLevel?: number;
   onUnlockSpecial?: (id: string) => void;
   onUpgradeCompanionWeapon?: (id: string) => void;
+  onFastTravel?: (level: number) => void;
   onUpgradeMenuClose?: () => void;
   onUpgradeWeapon?: (type: string) => void;
   onUpgradeCompanion?: (id: string) => void;
@@ -179,8 +182,11 @@ export const GameUI: React.FC<GameUIProps> = ({
   upgradeMenuPartCounts = {},
   upgradeMenuSpecials = [],
   upgradeMenuCompanionWeapons = [],
+  upgradeMenuTravel = [],
+  upgradeMenuCurrentLevel = 1,
   onUnlockSpecial,
   onUpgradeCompanionWeapon,
+  onFastTravel,
   onUpgradeMenuClose,
   onUpgradeWeapon,
   onUpgradeCompanion,
@@ -824,11 +830,14 @@ export const GameUI: React.FC<GameUIProps> = ({
         partCounts={upgradeMenuPartCounts}
         specials={upgradeMenuSpecials}
         companionWeapons={upgradeMenuCompanionWeapons}
+        travelDestinations={upgradeMenuTravel}
+        currentLevel={upgradeMenuCurrentLevel}
         onUpgradeWeapon={(t) => onUpgradeWeapon?.(t)}
         onUpgradeCompanion={(id) => onUpgradeCompanion?.(id)}
         onUpgradePlayer={(id) => onUpgradePlayer?.(id)}
         onUnlockSpecial={(id) => onUnlockSpecial?.(id)}
         onUpgradeCompanionWeapon={(id) => onUpgradeCompanionWeapon?.(id)}
+        onFastTravel={(lvl) => onFastTravel?.(lvl)}
         onClose={() => onUpgradeMenuClose?.()}
       />
 

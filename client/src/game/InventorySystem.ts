@@ -152,4 +152,11 @@ export const ITEM_DEFINITIONS: Record<string, ItemDefinition> = {
   weapon_part_rocket: { id: "weapon_part_rocket", name: "Rocket Part", type: ItemType.Material, rarity: ItemRarity.Rare, maxStack: 50, value: 35, description: "Salvaged nova launcher component" },
   weapon_part_laser: { id: "weapon_part_laser", name: "Laser Part", type: ItemType.Material, rarity: ItemRarity.Rare, maxStack: 50, value: 35, description: "Salvaged photon beam component" },
   weapon_part_grenade: { id: "weapon_part_grenade", name: "Grenade Part", type: ItemType.Material, rarity: ItemRarity.Rare, maxStack: 50, value: 32, description: "Salvaged fusion grenade component" },
+
+  // === Ashur Sanctuary farming chain ===
+  // Players earn bio_seeds from sanctuary NPCs and harvest plots, then refine
+  // bio_crops into animaton_feed to strengthen rescued Animatons.
+  bio_seed: { id: "bio_seed", name: "Bio Seed", type: ItemType.Material, rarity: ItemRarity.Common, maxStack: 99, value: 6, description: "Engineered Mechanoid seed. Plant on a sanctuary plot to grow a bio-crop." },
+  bio_crop: { id: "bio_crop", name: "Bio Crop", type: ItemType.Consumable, rarity: ItemRarity.Uncommon, maxStack: 99, value: 18, description: "Sanctuary harvest. Refines into Animaton Feed; raw, restores a sliver of HP." },
+  animaton_feed: { id: "animaton_feed", name: "Animaton Feed", type: ItemType.Consumable, rarity: ItemRarity.Rare, maxStack: 50, value: 60, description: "Refined bio-crop blend. Strengthens a rescued Animaton when fed at the sanctuary stable." },
 };

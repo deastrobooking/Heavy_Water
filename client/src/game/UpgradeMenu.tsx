@@ -21,6 +21,21 @@ export interface SpecialUpgradeInfo {
   affordable: boolean;
 }
 
+/** One destination listed in the TRAVEL tab. */
+export interface TravelDestinationInfo {
+  /** WorldLevel id (1–4). Kept as plain number so this module doesn't need to
+   *  import the LevelSystem type-circularly. */
+  level: number;
+  /** Display name shown in the row. */
+  name: string;
+  /** One-line flavour for the destination. */
+  description: string;
+  /** When true, the row is disabled (locked / not yet unlocked). */
+  locked?: boolean;
+  /** Lock reason — shown in place of the warp button when `locked`. */
+  lockReason?: string;
+}
+
 interface UpgradeMenuProps {
   open: boolean;
   weapons: WeaponUpgradeInfo[];
@@ -31,11 +46,15 @@ interface UpgradeMenuProps {
   partCounts: Record<string, number>;
   specials?: SpecialUpgradeInfo[];
   companionWeapons?: CompanionWeaponInfo[];
+  travelDestinations?: TravelDestinationInfo[];
+  /** WorldLevel the player is currently in — used to highlight the row. */
+  currentLevel?: number;
   onUpgradeWeapon: (type: string) => void;
   onUpgradeCompanion: (id: string) => void;
   onUpgradePlayer?: (id: string) => void;
   onUnlockSpecial?: (id: string) => void;
   onUpgradeCompanionWeapon?: (id: string) => void;
+  onFastTravel?: (level: number) => void;
   onClose: () => void;
 }
 
@@ -65,14 +84,17 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
   partCounts,
   specials = [],
   companionWeapons = [],
+  travelDestinations = [],
+  currentLevel = 1,
   onUpgradeWeapon,
   onUpgradeCompanion,
   onUpgradePlayer,
   onUnlockSpecial,
   onUpgradeCompanionWeapon,
+  onFastTravel,
   onClose,
 }) => {
-  const [tab, setTab] = useState<"player" | "weapons" | "robots" | "specials">("player");
+  const [tab, setTab] = useState<"player" | "weapons" | "robots" | "specials" | "travel">("player");
   if (!open) return null;
 
   return (
@@ -101,6 +123,7 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
           <TabBtn active={tab === "weapons"} onClick={() => setTab("weapons")} label="WEAPONS" />
           <TabBtn active={tab === "robots"} onClick={() => setTab("robots")} label="HELPER ROBOTS" />
           <TabBtn active={tab === "specials"} onClick={() => setTab("specials")} label="SPECIALS" />
+          <TabBtn active={tab === "travel"} onClick={() => setTab("travel")} label="TRAVEL" />
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
@@ -316,6 +339,52 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
               </div>
             );
           }))}
+
+          {tab === "travel" && (travelDestinations.length === 0 ? (
+            <div className="text-center text-zinc-400 py-8 text-sm">No destinations available.</div>
+          ) : (
+            <>
+              <div className="text-cyan-300 text-[11px] tracking-wider mb-2 px-1">
+                FAST TRAVEL — instantly relocate to any unlocked zone. Your build progress and inventory are preserved.
+              </div>
+              {travelDestinations.map(d => {
+                const isCurrent = d.level === currentLevel;
+                const disabled = d.locked || isCurrent;
+                return (
+                  <div
+                    key={d.level}
+                    className={`border rounded-lg p-3 transition ${isCurrent ? "bg-cyan-950/40 border-cyan-500" : d.locked ? "bg-zinc-900/60 border-zinc-800" : "bg-zinc-800/80 border-zinc-700 hover:border-cyan-500"}`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3">
+                          <div className="text-white font-bold uppercase tracking-wider">{d.name}</div>
+                          {isCurrent && <div className="text-cyan-300 text-[10px] font-bold">YOU ARE HERE</div>}
+                          {d.locked && <div className="text-red-400 text-[10px] font-bold">LOCKED</div>}
+                        </div>
+                        <div className="text-zinc-400 text-[11px] mt-1">{d.description}</div>
+                      </div>
+                      <div className="ml-3 text-right min-w-[140px]">
+                        {isCurrent ? (
+                          <div className="text-cyan-400 font-bold text-sm">CURRENT</div>
+                        ) : d.locked ? (
+                          <div className="text-zinc-500 text-[11px]">{d.lockReason ?? "Unlock by progressing the campaign."}</div>
+                        ) : (
+                          <button
+                            disabled={disabled}
+                            onClick={() => onFastTravel?.(d.level)}
+                            className="px-3 py-1.5 rounded text-xs font-bold tracking-wider bg-cyan-500 hover:bg-cyan-400 text-black"
+                          >
+                            WARP
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          ))}
         </div>
 
         <div className="px-5 py-2 border-t border-zinc-700 text-zinc-500 text-[11px] flex justify-between">
