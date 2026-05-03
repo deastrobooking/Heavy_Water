@@ -95,7 +95,7 @@ export class BioCreatureSystem {
     this.playerPos.copyFrom(pos);
   }
 
-  spawnCreature(species: BioCreatureSpecies, position: BABYLON.Vector3): void {
+  spawnCreature(species: BioCreatureSpecies, position: BABYLON.Vector3): string {
     const id = `bio_${this.idCounter++}`;
     const descriptor = this.makeDescriptor(species);
     const root = this.factory.createRobot(descriptor, position);
@@ -121,6 +121,7 @@ export class BioCreatureSystem {
     };
     this.creatures.push(c);
     this.bus.emit(GameEvents.CREATURE_SPAWNED, { id, speciesId: species.id, position });
+    return id;
   }
 
   /**
@@ -402,6 +403,33 @@ export class BioCreatureSystem {
 
   getSpecies(id: string): BioCreatureSpecies | null {
     return getSpeciesById(id);
+  }
+
+  /** Pick a rarity-weighted species and spawn it at `position`. Returns
+   *  the spawned id so callers (e.g. SanctuarySystem) can despawn it on
+   *  zone teardown. */
+  spawnRandomAt(position: BABYLON.Vector3): string {
+    return this.spawnCreature(pickWeightedSpecies(), position);
+  }
+
+  /** Forcibly remove a live (uncaptured) creature from the world by id —
+   *  used by SanctuarySystem on warp-out so sanctuary-spawned creatures
+   *  don't linger in the world after the player leaves Level 4. Captured
+   *  creatures are NOT touched (they live in `this.captured`, not
+   *  `this.creatures`, and are persisted to the player's roster). */
+  despawnCreature(id: string): boolean {
+    const idx = this.creatures.findIndex(c => c.id === id);
+    if (idx < 0) return false;
+    const c = this.creatures[idx];
+    // Never strip a creature whose capture is mid-flight or already
+    // resolved — the orb tick still references c.position / c.captureProgress
+    // and resolveCapture pushes onto `captured[]` after the orb lands.
+    if (c.captured || c.capturing) return false;
+    if (c.hitbox && !c.hitbox.isDisposed()) {
+      try { c.hitbox.dispose(); } catch {}
+    }
+    this.creatures.splice(idx, 1);
+    return true;
   }
 
   dispose(): void {

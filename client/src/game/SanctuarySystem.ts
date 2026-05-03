@@ -5,6 +5,8 @@ import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
 import type { BaseSystem } from "./BaseSystem";
 import type { CityGenerator } from "./CityGenerator";
 import type { AlienFoliageSystem } from "./AlienFoliageSystem";
+import type { BioCreatureSystem } from "./BioCreatureSystem";
+import type { WeaponsSystem, WeaponType } from "./WeaponsSystem";
 
 /** Optional handles SanctuarySystem hides on mount + restores on dispose so
  *  Level 4 reads as a *truly distinct* world (rolling green plains village)
@@ -17,6 +19,15 @@ export interface SanctuaryHandles {
   city?: CityGenerator | null;
   worldVisibles?: Array<{ setVisible(visible: boolean): void } | null | undefined>;
   foliage?: AlienFoliageSystem | null;
+  /** Live world bio-creature roster. Sanctuary spawns a small huntable
+   *  population through it on mount (so the Capture Net actually has
+   *  targets) and despawns those exact ids on warp-out. Captured creatures
+   *  are persisted by BioCreatureSystem itself and are NOT touched. */
+  bio?: BioCreatureSystem | null;
+  /** Optional weapons system. When provided, the sanctuary auto-selects
+   *  the Capture Net on mount and restores the previously-equipped weapon
+   *  on dispose so warping out doesn't leave the player holding a net. */
+  weapons?: WeaponsSystem | null;
 }
 
 /**
@@ -63,6 +74,14 @@ export class SanctuarySystem {
   private foliageDisposer: (() => void) | null = null;
   /** Per-frame creature wander observer — disposed with the sanctuary. */
   private wildlifeObserver: BABYLON.Observer<BABYLON.Scene> | null = null;
+  /** Live bio-creature ids spawned by this sanctuary; despawned on
+   *  dispose. Kept separate from `wildlife` (which is the cosmetic
+   *  parametric herd) so each is torn down through its proper owner. */
+  private spawnedBioIds: string[] = [];
+  /** Weapon the player held when entering the sanctuary, restored on
+   *  warp-out. Null when sanctuary didn't override the weapon (no
+   *  WeaponsSystem handle, or the player was already holding the net). */
+  private prevWeaponType: WeaponType | null = null;
   /** Wildlife critters; their root meshes are children of `this.root` and
    *  therefore disposed automatically when the sanctuary tears down. The
    *  state lives here so the observer can advance their wander phase. */
@@ -116,6 +135,12 @@ export class SanctuarySystem {
     this.buildCave();
     this.scatterAlienFoliage();
     this.buildWildlife();
+    // Spawn a small huntable population of REAL bio-creatures through the
+    // shared BioCreatureSystem so the Capture Net has live targets in
+    // range. The cosmetic `wildlife` herd above is decorative-only and
+    // never registered with the bio system, which is why pressing H
+    // here used to fail with "no creature in range".
+    this.spawnHuntableBioCreatures();
     this.spawnNPCs(inputBlockedProvider);
     if (this.base) this.buildGardenPlinth(this.base);
     this.farming = new FarmingSystem(
@@ -138,6 +163,34 @@ export class SanctuarySystem {
       );
     } else {
       this.bus.emit(GameEvents.UI_MESSAGE, "Welcome back to Ashur Sanctuary.");
+    }
+
+    // Top up Bio Essence so the Capture Net is immediately usable. Each
+    // capture costs 1 Essence; a starter pack of 10 gets the player
+    // through several attempts. Re-entries also top up to a floor of 5
+    // so a returning player who burned all their essence elsewhere can
+    // still use the net here.
+    const essenceFloor = 5;
+    const haveEssence = this.inventory.getItemCount("bio_essence");
+    if (haveEssence < essenceFloor) {
+      this.inventory.addItem(ITEM_DEFINITIONS.bio_essence, essenceFloor - haveEssence);
+    }
+
+    // Auto-equip the Capture Net so the right trigger / left mouse fires
+    // captures while in the sanctuary. Remember the previous weapon so we
+    // can restore it on warp-out.
+    if (this.handles.weapons) {
+      try {
+        const cur = this.handles.weapons.getCurrentWeaponType();
+        if (cur !== "capture_net") this.prevWeaponType = cur;
+        this.handles.weapons.selectWeapon("capture_net");
+        this.bus.emit(
+          GameEvents.UI_MESSAGE,
+          "CAPTURE NET equipped — fire (LMB / RT) to capture nearby creatures.",
+        );
+      } catch (err) {
+        console.warn("[SanctuarySystem] Failed to auto-equip capture net", err);
+      }
     }
   }
 
@@ -165,6 +218,25 @@ export class SanctuarySystem {
       this.wildlifeObserver = null;
     }
     this.wildlife = [];
+
+    // Despawn any uncaptured sanctuary bio-creatures so they don't linger
+    // in the world after the player warps out. Captured creatures are not
+    // in `creatures[]` anymore (they migrated to `captured[]`), so
+    // despawnCreature is a no-op for them — exactly the behavior we want.
+    if (this.handles.bio && this.spawnedBioIds.length) {
+      for (const id of this.spawnedBioIds) {
+        try { this.handles.bio.despawnCreature(id); } catch {}
+      }
+    }
+    this.spawnedBioIds = [];
+
+    // Restore the player's previously-equipped weapon (best-effort —
+    // ignore failures so a missing weapons handle on dispose can't strand
+    // the rest of teardown).
+    if (this.handles.weapons && this.prevWeaponType) {
+      try { this.handles.weapons.selectWeapon(this.prevWeaponType); } catch {}
+    }
+    this.prevWeaponType = null;
     // Strip the alien plants we appended to the world's AlienFoliageSystem
     // — they live in the shared array, not under our root, so root.dispose
     // wouldn't catch them.
@@ -904,6 +976,38 @@ export class SanctuarySystem {
       try { innerDispose(); } catch {}
       try { outerDispose(); } catch {}
     };
+  }
+
+  // ------------------------------------------- huntable bio-creature population
+
+  /** Spawn a small population of real bio-creatures inside the sanctuary
+   *  through the shared BioCreatureSystem. These are the actual targets
+   *  the Capture Net (and the H-key fallback) reach for — without them,
+   *  attemptCaptureNearest finds nothing in range because the cosmetic
+   *  herd from buildWildlife isn't registered with the bio system.
+   *
+   *  Positions live within the sanctuary perimeter (r≈26m), spaced
+   *  enough that no two creatures stack on the same plot. Ids are tracked
+   *  so dispose can despawn the uncaptured remainder cleanly. */
+  private spawnHuntableBioCreatures(): void {
+    const bio = this.handles.bio;
+    if (!bio) return;
+    const c = SanctuarySystem.CENTER;
+    // Eight spawn points laid out around the village footprint, avoiding
+    // the centre (NPC + plinth) and the cave mouth (east edge).
+    const offsets: Array<[number, number]> = [
+      [-18,  -4], [-14,  14], [ -4,  20], [ 12,  18],
+      [ 18,   2], [ 14, -16], [  2, -20], [-12, -18],
+    ];
+    for (const [dx, dz] of offsets) {
+      const pos = new BABYLON.Vector3(c.x + dx, 1, c.z + dz);
+      try {
+        const id = bio.spawnRandomAt(pos);
+        if (id) this.spawnedBioIds.push(id);
+      } catch (err) {
+        console.warn("[SanctuarySystem] failed to spawn sanctuary creature", err);
+      }
+    }
   }
 
   // ------------------------------------------------------------ wildlife

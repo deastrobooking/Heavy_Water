@@ -619,6 +619,14 @@ export const Game: React.FC = () => {
         );
         bioSystem.spawnInitialCreatures();
 
+        // Wire the Capture Net tool weapon: when the player has it
+        // equipped, primary fire (LMB / RT) is intercepted by WeaponsSystem
+        // and routed here, which throws a capture orb at the nearest
+        // bio-creature exactly like the H-key fallback does.
+        weapons.setSpecialFireHandler("capture_net", () => {
+          bioRef.current?.attemptCaptureNearest();
+        });
+
         // Nature ring: 28 mountains around the world rim plus 4 hidden
         // temples that grant a one-time bundle of rare items + a guaranteed
         // legendary creature. Looted state is per-level + persistent.
@@ -907,6 +915,11 @@ export const Game: React.FC = () => {
                 // densely scatter L-system plants of its own around the
                 // village (and dispose only those plants on warp-out).
                 foliage: alienFoliageRef.current,
+                // Bio + weapons handles let the sanctuary spawn huntable
+                // creatures on mount and auto-equip the Capture Net so
+                // the right trigger captures right out of the gate.
+                bio: bioRef.current,
+                weapons: weaponsRef.current,
               },
             );
           } else if (!isSanctuary && sanctuarySystemRef.current) {

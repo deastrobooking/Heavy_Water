@@ -2,7 +2,7 @@ import * as BABYLON from "@babylonjs/core";
 import { EventBus, GameEvents } from "./EventBus";
 import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
 
-export type WeaponType = "pistol" | "rifle" | "shotgun" | "rocket" | "laser" | "grenade" | "tracking_missile";
+export type WeaponType = "pistol" | "rifle" | "shotgun" | "rocket" | "laser" | "grenade" | "tracking_missile" | "capture_net";
 
 export interface Weapon {
   type: WeaponType;
@@ -59,7 +59,16 @@ const WEAPON_PART_ID: Record<WeaponType, string> = {
   laser: "weapon_part_laser",
   grenade: "weapon_part_grenade",
   tracking_missile: "weapon_part_rocket",
+  // Capture Net is a tool, not a damage weapon — it has no upgrade path.
+  // Mapped to a benign id so the Record type is satisfied; the upgrade UI
+  // filters it out so the player never sees an upgrade card for it.
+  capture_net: "weapon_part_pistol",
 };
+
+/** Weapons that aren't really projectile weapons — they're tool-style hooks
+ *  that route the primary fire to a special handler instead of spawning a
+ *  projectile. The upgrade UI / shop hide these. */
+export const TOOL_WEAPONS: ReadonlyArray<WeaponType> = ["capture_net"];
 
 function levelStats(base: { damage: number; fireRate: number; spread: number; explosionRadius: number }, level: number) {
   const lvl = Math.max(1, Math.min(MAX_WEAPON_LEVEL, level));
@@ -218,6 +227,12 @@ export class WeaponsSystem {
     // onto the nearest target in the camera frustum and aggressively homes
     // in on it. Powerful, slower fire rate, big AoE.
     define("tracking_missile", "Hunter Missile", 120, 1300, 6, 220, 0.9, 0, false, 6);
+    // Capture Net — a tool weapon. Its primary fire is intercepted by the
+    // special-fire handler (see setSpecialFireHandler) and routed to
+    // BioCreatureSystem.attemptCaptureNearest. The numeric stats below are
+    // cosmetic (HUD shows "Capture Net" + the cooldown), the weapon never
+    // actually creates a projectile and never deals damage.
+    define("capture_net", "Capture Net", 0, 600, 1, 22, 0, 0, false, 0);
   }
 
   private setupControls(): void {
@@ -249,6 +264,11 @@ export class WeaponsSystem {
         // Hunter Missile uses KeyP because Digit7-Digit0 are taken by the
         // Special Arsenal (elemental) bindings.
         case "KeyP": this.selectWeapon("tracking_missile"); break;
+        // Capture Net — selectable from Digit8 (or the wheel) when the
+        // player is in a zone that grants it. selectWeapon silently
+        // bails for any weapon the player hasn't been granted yet, so
+        // pressing 8 outside the sanctuary is a no-op.
+        case "Digit8": this.selectWeapon("capture_net"); break;
         case "KeyR": this.reload(); break;
       }
     });
@@ -277,6 +297,17 @@ export class WeaponsSystem {
     if (boosts.fireRateMul > 0) this.playerFireRateMul = boosts.fireRateMul;
   }
 
+  /** Tool-weapon hooks. When the active weapon's type has a registered
+   *  handler, fire() calls the handler instead of spawning a projectile —
+   *  this is how the Capture Net routes its primary fire to the
+   *  BioCreatureSystem without WeaponsSystem having to know what a
+   *  bio-creature is. Cooldown still applies normally. */
+  private specialFireHandlers: Map<WeaponType, () => void> = new Map();
+  setSpecialFireHandler(type: WeaponType, handler: (() => void) | null): void {
+    if (handler) this.specialFireHandlers.set(type, handler);
+    else this.specialFireHandlers.delete(type);
+  }
+
   private fire(): void {
     if (!this.firingEnabled) return;
     const weapon = this.weapons.get(this.currentWeapon);
@@ -291,6 +322,17 @@ export class WeaponsSystem {
 
     this.lastFireTime = now;
     weapon.ammo = weapon.maxAmmo;
+
+    // Tool-weapon path: route fire to the special handler and skip
+    // projectile creation entirely. The handler decides whether the action
+    // succeeded (capture in range, has bio_essence, etc.) and emits its
+    // own UI feedback.
+    const special = this.specialFireHandlers.get(this.currentWeapon);
+    if (special) {
+      try { special(); } catch (err) { console.warn("[WeaponsSystem] special fire handler threw", err); }
+      this.onAmmoChange?.(weapon.ammo, weapon.maxAmmo);
+      return;
+    }
 
     if (this.currentWeapon === "shotgun") {
       for (let i = 0; i < 8; i++) {
@@ -538,8 +580,18 @@ export class WeaponsSystem {
   }
 
   cycleWeapon(direction: number): void {
+    // Damage weapons only — tool weapons (Capture Net) are intentionally
+    // excluded from the wheel so the player doesn't accidentally cycle
+    // onto a non-combat tool mid-fight. Use Digit8 to select the net.
     const types: WeaponType[] = ["pistol", "rifle", "shotgun", "rocket", "laser", "grenade", "tracking_missile"];
     const currentIndex = types.indexOf(this.currentWeapon);
+    // If we're on a tool weapon (e.g. capture_net), the wheel always
+    // jumps back to the first damage weapon rather than wrapping into
+    // the tool slot.
+    if (currentIndex < 0) {
+      this.selectWeapon(types[0]);
+      return;
+    }
     const newIndex = (currentIndex + direction + types.length) % types.length;
     this.selectWeapon(types[newIndex]);
   }
@@ -621,7 +673,13 @@ export class WeaponsSystem {
   }
 
   getAllUpgradeInfo(): WeaponUpgradeInfo[] {
-    return Array.from(this.weapons.keys()).map(t => this.getUpgradeInfo(t)!).filter(x => !!x);
+    // Tool weapons (Capture Net) deliberately have no upgrade path — they
+    // deal no damage and don't fit the gears/parts economy. Filter them
+    // out at the source so the upgrade menu and shop never surface them.
+    return Array.from(this.weapons.keys())
+      .filter(t => !TOOL_WEAPONS.includes(t))
+      .map(t => this.getUpgradeInfo(t)!)
+      .filter(x => !!x);
   }
 
   /** Snapshot weapon levels for persistence */
@@ -653,6 +711,9 @@ export class WeaponsSystem {
   }
 
   upgradeWeapon(type: WeaponType): boolean {
+    // Defensive: tool weapons can't be upgraded even if a UI somewhere
+    // tries to spend gears on one. Mirrors the getAllUpgradeInfo filter.
+    if (TOOL_WEAPONS.includes(type)) return false;
     const w = this.weapons.get(type);
     if (!w) return false;
     if (w.level >= MAX_WEAPON_LEVEL) return false;
