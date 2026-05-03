@@ -50,11 +50,19 @@ export class GamepadInput {
   private prevButtons = new Map<number, boolean[]>();
   private prevAxisKeys = { w: false, a: false, s: false, d: false };
   private prevTriggers = { lt: false, rt: false };
+  // Track the last context the triggers were dispatched for so we can
+  // release the previous mapping cleanly when the player enters/exits
+  // a vehicle while a trigger is held.
+  private prevTriggerContext: "foot" | "vehicle" = "foot";
   private lastTime = performance.now();
   private listeners: ConnectionListener[] = [];
   private onConnect = (e: GamepadEvent) => this.notify(true, e.gamepad.id);
   private onDisconnect = (e: GamepadEvent) => this.notify(false, e.gamepad.id);
   private isActive = false;
+  // When the player is driving a vehicle, LT/RT should drive the throttle
+  // and reverse instead of firing the weapon / beam slash. The host wires
+  // this provider so the gamepad can ask which context to use each frame.
+  private contextProvider: (() => "foot" | "vehicle") | null = null;
 
   constructor(camera: BABYLON.FreeCamera) {
     this.camera = camera;
@@ -70,6 +78,14 @@ export class GamepadInput {
 
   isPadActive(): boolean {
     return this.isActive;
+  }
+
+  /** Tell the gamepad whether the player is on foot or driving a vehicle.
+   *  In "vehicle" context, LT becomes reverse/brake (KeyS) and RT becomes
+   *  throttle (KeyW). In "foot" context, LT slashes (KeyJ) and RT fires
+   *  the weapon (LMB). */
+  setContextProvider(fn: () => "foot" | "vehicle"): void {
+    this.contextProvider = fn;
   }
 
   private notify(connected: boolean, id: string): void {
@@ -145,14 +161,33 @@ export class GamepadInput {
     const rtVal = activePad.buttons[7]?.value ?? (activePad.buttons[7]?.pressed ? 1 : 0);
     const ltDown = ltVal >= TRIGGER_THRESHOLD;
     const rtDown = rtVal >= TRIGGER_THRESHOLD;
-    // RT (right trigger): primary fire — emulate left mouse button.
-    if (rtDown && !this.prevTriggers.rt) this.dispatchMouseButton(true, 0);
-    else if (!rtDown && this.prevTriggers.rt) this.dispatchMouseButton(false, 0);
-    // LT (left trigger): beam-sabre slash — synthesize KeyJ instead of right
-    // mouse, so the slash works on foot, in vehicles, and in flight without
-    // colliding with browser context-menu / aim-down-sights wiring.
-    if (ltDown && !this.prevTriggers.lt) this.dispatchKeyDown("KeyJ", "j");
-    else if (!ltDown && this.prevTriggers.lt) this.dispatchKeyUp("KeyJ", "j");
+
+    const context: "foot" | "vehicle" = this.contextProvider ? this.contextProvider() : "foot";
+
+    // If the context changed while a trigger is held, release the old
+    // binding before dispatching the new one so we don't leave a "stuck"
+    // KeyW/KeyS/LMB after entering or exiting a vehicle.
+    if (context !== this.prevTriggerContext) {
+      if (this.prevTriggers.lt) this.releaseLT(this.prevTriggerContext);
+      if (this.prevTriggers.rt) this.releaseRT(this.prevTriggerContext);
+      this.prevTriggers.lt = false;
+      this.prevTriggers.rt = false;
+      this.prevTriggerContext = context;
+    }
+
+    if (context === "vehicle") {
+      // Vehicle: RT → throttle (KeyW), LT → reverse / brake (KeyS).
+      if (rtDown && !this.prevTriggers.rt) this.dispatchKeyDown("KeyW", "w");
+      else if (!rtDown && this.prevTriggers.rt) this.dispatchKeyUp("KeyW", "w");
+      if (ltDown && !this.prevTriggers.lt) this.dispatchKeyDown("KeyS", "s");
+      else if (!ltDown && this.prevTriggers.lt) this.dispatchKeyUp("KeyS", "s");
+    } else {
+      // On foot: RT → primary fire (LMB), LT → beam slash (KeyJ).
+      if (rtDown && !this.prevTriggers.rt) this.dispatchMouseButton(true, 0);
+      else if (!rtDown && this.prevTriggers.rt) this.dispatchMouseButton(false, 0);
+      if (ltDown && !this.prevTriggers.lt) this.dispatchKeyDown("KeyJ", "j");
+      else if (!ltDown && this.prevTriggers.lt) this.dispatchKeyUp("KeyJ", "j");
+    }
     this.prevTriggers.lt = ltDown;
     this.prevTriggers.rt = rtDown;
 
@@ -178,6 +213,16 @@ export class GamepadInput {
     this.rafHandle = requestAnimationFrame(this.tick);
   }
 
+  private releaseLT(ctx: "foot" | "vehicle"): void {
+    if (ctx === "vehicle") this.dispatchKeyUp("KeyS", "s");
+    else this.dispatchKeyUp("KeyJ", "j");
+  }
+
+  private releaseRT(ctx: "foot" | "vehicle"): void {
+    if (ctx === "vehicle") this.dispatchKeyUp("KeyW", "w");
+    else this.dispatchMouseButton(false, 0);
+  }
+
   private applyDeadzone(v: number): number {
     if (Math.abs(v) < STICK_DEADZONE) return 0;
     const sign = Math.sign(v);
@@ -199,8 +244,8 @@ export class GamepadInput {
         this.prevAxisKeys[slot] = false;
       }
     }
-    if (this.prevTriggers.rt) { this.dispatchMouseButton(false, 0); this.prevTriggers.rt = false; }
-    if (this.prevTriggers.lt) { this.dispatchKeyUp("KeyJ", "j"); this.prevTriggers.lt = false; }
+    if (this.prevTriggers.rt) { this.releaseRT(this.prevTriggerContext); this.prevTriggers.rt = false; }
+    if (this.prevTriggers.lt) { this.releaseLT(this.prevTriggerContext); this.prevTriggers.lt = false; }
     this.prevButtons.forEach((prev, padIndex) => {
       for (let i = 0; i < prev.length; i++) {
         const map = BUTTON_TO_KEY[i];

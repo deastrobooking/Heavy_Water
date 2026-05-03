@@ -785,6 +785,9 @@ export const Game: React.FC = () => {
         gamepad.onConnectionChange((connected, padId) => {
           showMessage(connected ? `CONTROLLER CONNECTED: ${padId}` : "CONTROLLER DISCONNECTED", 2500);
         });
+        // Triggers re-route based on context: while driving, RT becomes
+        // throttle and LT becomes reverse/brake; on foot they fire and slash.
+        gamepad.setContextProvider(() => (vehicleRef.current?.getActive() ? "vehicle" : "foot"));
         gamepadRef.current = gamepad;
 
         const chestSystem = new ChestSystem(scene);

@@ -81,7 +81,7 @@ A MultiplayerSystem provides client-side WebSocket integration for real-time mul
 FriendlyNPCSystem scatters six brightly-coloured humanoid NPCs around the spawn area, each introducing one game system via interactive dialogue.
 
 ### Input and UI
-GamepadInput provides seamless controller integration. The EffectsSystem drives transient visual effects. The UI includes a redesigned HUD, AuthUI, GameUI, shop interfaces, upgrade interfaces, multiplayer lobby, contextual build hotbar, and MainMenu with character customization. An EnemyHealthBarSystem renders HTML overlays for active enemies and objects. Comprehensive Xbox-style controller mapping is implemented.
+GamepadInput provides seamless controller integration. Triggers are context-aware: on foot, **RT** fires the primary weapon (LMB) and **LT** triggers the beam-sabre slash (KeyJ); while driving a vehicle, **RT** becomes throttle (KeyW) and **LT** becomes reverse / brake (KeyS). The host wires the context via `gamepad.setContextProvider(() => vehicleRef.current?.getActive() ? "vehicle" : "foot")`. On context change, any held trigger releases its previous binding before the new one is dispatched, so transitions never leave a stuck key. The EffectsSystem drives transient visual effects. The UI includes a redesigned HUD, AuthUI, GameUI, shop interfaces, upgrade interfaces, multiplayer lobby, contextual build hotbar, and MainMenu with character customization. An EnemyHealthBarSystem renders HTML overlays for active enemies and objects. Comprehensive Xbox-style controller mapping is implemented.
 
 ## External Dependencies
 - **PostgreSQL**: Primary database with Drizzle ORM.
