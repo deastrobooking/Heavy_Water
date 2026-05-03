@@ -90,6 +90,7 @@ destinations are listed:
 | 2 | Hold the Line |
 | 3 | Purge the Void |
 | 4 | **Ashur Sanctuary** — peaceful |
+| 5 | **Orbital Front** — starfield combat (Earth, asteroids, motherships) |
 
 Click **WARP** on any row to instantly relocate. Your inventory, weapons,
 upgrades and built structures are preserved.

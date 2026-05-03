@@ -11,7 +11,7 @@ import { BossVariantId } from "./BossVariants";
  *  bio-crops, and runs errands for the nearby Village of Earth. It does not
  *  appear in the L1→L2→L3 progression chain; it's reached from the new TRAVEL
  *  tab on the upgrade menu and acts as the player's home base. */
-export type WorldLevel = 1 | 2 | 3 | 4;
+export type WorldLevel = 1 | 2 | 3 | 4 | 5;
 
 /** Persisted shape used by ProgressSync. */
 export interface LevelSnapshot {
@@ -105,6 +105,27 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     spawnPoint: { x: -480, z: -480 },
     completeSubtitle: "The sanctuary endures.",
     peaceful: true,
+  },
+  5: {
+    level: 5,
+    displayName: "ORBITAL FRONT",
+    banner: "LEVEL 5 — ORBITAL FRONT",
+    objective: "Engage the orbital fleet — clear asteroids and bring down the motherships.",
+    difficultyMultiplier: 2.4,
+    // Cool blue void tint — most of the visual swap is owned by SpaceLevelSystem
+    // (custom skybox + Earth + asteroids); this tint is only the residual
+    // multiplier applied to lighting.
+    skyTint: { r: 0.4, g: 0.5, b: 0.95 },
+    bossVariantId: "void",
+    // Off-map fortress center — combat in space is owned by AerialEnemySystem,
+    // not the ground BossFortress chain. The space-level handler in Game.tsx
+    // gates ground-fortress spawning behind a `spacelike` check the same way
+    // the sanctuary does for `peaceful`.
+    fortressCenter: { x: 9999, z: -9999 },
+    // Spawn near origin so the SpaceLevelSystem's asteroid band naturally
+    // surrounds the player on warp-in.
+    spawnPoint: { x: 0, z: 0 },
+    completeSubtitle: "Orbit secured.",
   },
 };
 
@@ -286,7 +307,15 @@ export class LevelSystem {
 
   /** All known levels — used by the TRAVEL tab. */
   static getAllLevels(): WorldLevel[] {
-    return [1, 2, 3, 4];
+    return [1, 2, 3, 4, 5];
+  }
+
+  /** `true` for off-canon side-zones that should suppress the campaign's
+   *  ground combat / fortress chain (peaceful sanctuary, orbital combat).
+   *  Anything `spacelike` swaps the skybox via SpaceLevelSystem and skips
+   *  ground-fortress seeding the same way `peaceful` skips ground combat. */
+  static isSpacelike(level: WorldLevel): boolean {
+    return level === 5;
   }
 
   /** Persisted snapshot for ProgressSync. */
@@ -299,7 +328,8 @@ export class LevelSystem {
   applyLoadedState(snap: Partial<LevelSnapshot> | null | undefined): void {
     let lvl: WorldLevel = 1;
     const raw = snap && typeof snap.worldLevel === "number" ? snap.worldLevel : 1;
-    if (raw >= 4) lvl = 4;
+    if (raw >= 5) lvl = 5;
+    else if (raw === 4) lvl = 4;
     else if (raw === 3) lvl = 3;
     else if (raw === 2) lvl = 2;
     else lvl = 1;
@@ -309,12 +339,12 @@ export class LevelSystem {
       this.clearedLevels.clear();
       return;
     }
-    // Level 4 (sanctuary) is side-content — don't auto-mark L1/L2/L3 as
-    // cleared just because the player saved while in the sanctuary; that
-    // would let them skip the campaign on re-entry. Only treat the chain
-    // (1→2→3) as cleared-on-load.
-    if (lvl === 4) {
-      this.advanceTo(4);
+    // Levels 4 (sanctuary) and 5 (orbital front) are side-content — don't
+    // auto-mark L1/L2/L3 as cleared just because the player saved there;
+    // that would let them skip the campaign on re-entry. Only treat the
+    // main chain (1→2→3) as cleared-on-load.
+    if (lvl === 4 || lvl === 5) {
+      this.advanceTo(lvl);
       return;
     }
     for (let l = 1; l < lvl; l++) this.clearedLevels.add(l as WorldLevel);

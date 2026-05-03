@@ -50,11 +50,12 @@ import { MiningSystem } from "./MiningSystem";
 import { EnemyBaseSystem } from "./EnemyBaseSystem";
 import { LevelSystem, WorldLevel } from "./LevelSystem";
 import { SanctuarySystem } from "./SanctuarySystem";
+import { SpaceLevelSystem } from "./SpaceLevelSystem";
 import { loadProgress, saveProgress, ProgressSnapshot } from "./ProgressSync";
 import { EventBus, GameEvents } from "./EventBus";
 import { DamageType } from "./DamageSystem";
 import { GameUI } from "./GameUI";
-import { MainMenu } from "./MainMenu";
+import { MainMenu, SaveSummary } from "./MainMenu";
 import { CharacterEditor } from "./CharacterEditor";
 import AuthUI from "./AuthUI";
 
@@ -97,6 +98,7 @@ export const Game: React.FC = () => {
   const enemyHealthBarsRef = useRef<EnemyHealthBarSystem | null>(null);
   const friendlyNPCsRef = useRef<FriendlyNPCSystem | null>(null);
   const sanctuarySystemRef = useRef<SanctuarySystem | null>(null);
+  const spaceLevelSystemRef = useRef<SpaceLevelSystem | null>(null);
   // Mirror modal-open React state into refs so systems wired during the
   // single mount-time `initializeGame` (which captures stale state) can poll
   // the live values from their per-frame closures.
@@ -265,14 +267,39 @@ export const Game: React.FC = () => {
     setTimeout(() => setMessage(null), duration);
   }, []);
 
+  // Save summary surfaced on the main menu so the player can see at a
+  // glance what their cloud save will resume into. Loaded on auth and
+  // refreshed any time we transition back to the menu phase.
+  const [saveSummary, setSaveSummary] = useState<SaveSummary | null>(null);
+  const refreshSaveSummary = useCallback(() => {
+    void loadProgress().then((snap) => {
+      if (!snap || !snap.stats) {
+        setSaveSummary(null);
+        return;
+      }
+      setSaveSummary({
+        level: snap.stats.level,
+        credits: snap.stats.credits,
+        totalKills: snap.totalKills,
+        highestWave: snap.highestWave,
+        worldLevel: snap.worldLevel ?? 1,
+        savedAt: snap.savedAt,
+        bioDexCount: snap.bioDexCaughtIds?.length,
+        companionCount: snap.companions?.length,
+      });
+    }).catch(() => setSaveSummary(null));
+  }, []);
+
   const handleAuthenticated = useCallback((user: any) => {
     setCurrentUser(user);
     setGamePhase("menu");
-  }, []);
+    refreshSaveSummary();
+  }, [refreshSaveSummary]);
 
   const handlePlayOffline = useCallback(() => {
     setCurrentUser(null);
     setGamePhase("menu");
+    setSaveSummary(null); // offline play has no cloud save to surface.
   }, []);
 
   useEffect(() => {
@@ -760,15 +787,39 @@ export const Game: React.FC = () => {
                 || gardenOpenRef.current
                 || upgradeMenuOpenRef.current
                 || (gardenRef.current?.isGardenOpenCheck() ?? false),
+              baseSystem,
             );
           } else if (!isPeaceful && sanctuarySystemRef.current) {
             try { sanctuarySystemRef.current.dispose(); } catch {}
             sanctuarySystemRef.current = null;
           }
 
+          // Mount/dispose the orbital side-zone (Level 5) on the same edge
+          // as the sanctuary. SpaceLevelSystem owns the skybox swap, the
+          // Earth backdrop, the asteroid field, and pre-engages
+          // AerialEnemySystem so the player drops into a live dogfight.
+          const isSpacelike = typeof payload?.level === "number"
+            && LevelSystem.isSpacelike(payload.level as WorldLevel);
+          if (isSpacelike && !spaceLevelSystemRef.current && skyRef.current) {
+            // Defensive guard: only mount once both the sky and the aerial
+            // systems are live. In practice both are constructed in
+            // initializeGame before LEVEL_STARTED can fire, but a hot-restart
+            // could in theory re-emit a buffered event before skyRef is set.
+            spaceLevelSystemRef.current = new SpaceLevelSystem(
+              scene,
+              skyRef.current,
+              aerialEnemySystem,
+              () => player.getPosition(),
+            );
+          } else if (!isSpacelike && spaceLevelSystemRef.current) {
+            try { spaceLevelSystemRef.current.dispose(); } catch {}
+            spaceLevelSystemRef.current = null;
+          }
+
           // Combat-only progression: bump waves + seed the next fortress.
-          // Skipped entirely while peaceful (sanctuary stays calm).
-          if (!isPeaceful && payload?.level >= 2) {
+          // Skipped while peaceful (sanctuary) or spacelike (orbital combat
+          // is owned by AerialEnemySystem, no ground fortresses).
+          if (!isPeaceful && !isSpacelike && payload?.level >= 2) {
             const baseWave = enemySystem.getWaveNumber() + 2;
             const targetWave = payload.level === 3 ? Math.max(baseWave, 9) : Math.max(baseWave, 5);
             enemySystem.jumpToWave(targetWave);
@@ -1715,6 +1766,7 @@ export const Game: React.FC = () => {
     if (enemyHealthBarsRef.current) { try { enemyHealthBarsRef.current.dispose(); } catch {} enemyHealthBarsRef.current = null; }
     if (friendlyNPCsRef.current) { try { friendlyNPCsRef.current.dispose(); } catch {} friendlyNPCsRef.current = null; }
     if (sanctuarySystemRef.current) { try { sanctuarySystemRef.current.dispose(); } catch {} sanctuarySystemRef.current = null; }
+    if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }
     if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} gamepadRef.current = null; }
     if (aerialEnemyRef.current) { try { aerialEnemyRef.current.dispose(); } catch {} aerialEnemyRef.current = null; }
     // CRITICAL: these systems also subscribe to EventBus / hold scene state.
@@ -2325,6 +2377,7 @@ export const Game: React.FC = () => {
       if (enemyHealthBarsRef.current) enemyHealthBarsRef.current.dispose();
       if (friendlyNPCsRef.current) friendlyNPCsRef.current.dispose();
       if (sanctuarySystemRef.current) { try { sanctuarySystemRef.current.dispose(); } catch {} sanctuarySystemRef.current = null; }
+      if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }
       if (aerialEnemyRef.current) aerialEnemyRef.current.dispose();
       if (gamepadRef.current) gamepadRef.current.dispose();
       if (multiplayerRef.current) multiplayerRef.current.dispose();
@@ -2344,10 +2397,15 @@ export const Game: React.FC = () => {
     const ls = levelSystemRef.current;
     const player = playerRef.current;
     if (!ls || !player) return;
-    if (level < 1 || level > 4) return;
+    if (level < 1 || level > 5) return;
     ls.forceStart(level as WorldLevel);
     const sp = LevelSystem.getSpawnPointFor(level as WorldLevel);
-    // Lift the player a touch to avoid clipping into terrain on arrival.
+    // Always nudge slightly above ground — the spawnPoint Y is owned by
+    // terrain, not the LevelSystem. The orbital level reuses world-origin
+    // so the existing terrain is still at y≈0 underneath the asteroids;
+    // landing on it keeps the player from falling forever if they don't
+    // have flight armor. The asteroid field above (25–105 m) and the
+    // distant Earth read as the "in space" framing.
     player.setPosition(new BABYLON.Vector3(sp.x, 2, sp.z));
     setUpgradeMenuOpen(false);
     showMessage(`WARPED TO ${LevelSystem.getDisplayNameFor(level as WorldLevel)}`, 2200);
@@ -2362,6 +2420,8 @@ export const Game: React.FC = () => {
       name: LevelSystem.getDisplayNameFor(lvl),
       description: lvl === 4
         ? "Peaceful side-zone. Rehab rescued Animatons, farm bio-crops, help the Village of Earth."
+        : lvl === 5
+        ? "Orbital Front — starfield combat. Asteroids, evil ships, drone-orbited motherships."
         : lvl === 1
         ? "Star City Front — first-stage Detroit defense. Rescue the captured ally."
         : lvl === 2
@@ -2401,7 +2461,11 @@ export const Game: React.FC = () => {
       )}
 
       {gamePhase === "menu" && (
-        <MainMenu onStart={handleStart} onCustomize={() => setShowCustomizer(true)} />
+        <MainMenu
+          onStart={handleStart}
+          onCustomize={() => setShowCustomizer(true)}
+          saveSummary={saveSummary}
+        />
       )}
 
       {showCustomizer && (

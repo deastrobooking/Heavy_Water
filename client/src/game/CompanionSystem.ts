@@ -96,7 +96,10 @@ export class CompanionSystem {
   private companions: ActiveCompanion[] = [];
   private bus: EventBus;
   private collected: Set<string> = new Set();
-  private maxCompanions: number = 5;
+  // Default helper-bot cap — three slots is the supported "carry into battle"
+  // amount surfaced in the upgrade menu and HUD. The Lab building can raise
+  // this via setMaxCompanions (clamped 1–20) when the player upgrades it.
+  private maxCompanions: number = 3;
   private projectiles: { mesh: BABYLON.Mesh; velocity: BABYLON.Vector3; lifetime: number; damage: number }[] = [];
 
   constructor(scene: BABYLON.Scene) {

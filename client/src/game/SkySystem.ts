@@ -73,6 +73,10 @@ export class SkySystem {
   private secondsPerDay = 300;
   private weather: WeatherType = "clear";
   private paused = false;
+  /** When true, the sky renders a starfield-only "deep space" look — owned
+   *  by SpaceLevelSystem (Level 5). Overrides the day/night palette and the
+   *  sun disc for as long as the orbital level is active. */
+  private spaceMode = false;
   /** Multiplicative RGB tint applied on top of the palette. (1,1,1) = neutral.
    *  Used by LevelSystem to shift the world (e.g. red sky for Level 2). */
   private levelTint: BABYLON.Color3 = new BABYLON.Color3(1, 1, 1);
@@ -130,7 +134,13 @@ export class SkySystem {
         float halo = pow(sunDot, sunSize * 0.07) * 0.35;
         col += sunColor * (disc + halo);
 
-        if (starFactor > 0.01 && dir.y > 0.0) {
+        // The original dir.y > 0.0 gate stopped the lower hemisphere from
+        // ever rendering stars; that's fine for ground levels (terrain
+        // occludes them anyway) but the orbital level needs full-sphere
+        // coverage. Removing the gate is harmless on the ground because the
+        // floor mesh hides the lower hemisphere, but on Level 5 it gives us
+        // a true 360° starfield around the player.
+        if (starFactor > 0.01) {
           vec2 sUV = floor(dir.xz * 240.0);
           float n = hash(sUV);
           float star = step(0.997, n);
@@ -251,6 +261,15 @@ export class SkySystem {
 
   private applyTimeOfDay(): void {
     if (!this.skyMat) return;
+
+    // Deep-space override — owned by SpaceLevelSystem. Bypasses the
+    // day/night palette entirely so the orbital level looks like vacuum
+    // regardless of the underlying time-of-day clock.
+    if (this.spaceMode) {
+      this.applySpaceMode();
+      return;
+    }
+
     const { palette: rawPalette, nightFactor } = this.getPalette();
     const palette = this.applyLevelTint(rawPalette);
     const sunDir = this.getSunDirection();
@@ -317,6 +336,44 @@ export class SkySystem {
       sunIntensity: p.sunIntensity,
       ambientIntensity: p.ambientIntensity,
     };
+  }
+
+  /** Hardcoded "deep space" sky — used by SpaceLevelSystem for Level 5.
+   *  Renders a starfield against near-black with subtle blue cosmic light. */
+  private applySpaceMode(): void {
+    if (!this.skyMat) return;
+    const zenith = new BABYLON.Color3(0.005, 0.008, 0.025);
+    const horizon = new BABYLON.Color3(0.015, 0.020, 0.045);
+    this.skyMat.setColor3("zenithColor", zenith);
+    this.skyMat.setColor3("horizonColor", horizon);
+    // Hide the sun disc entirely — the Earth sphere owned by SpaceLevelSystem
+    // takes its place as the "celestial body" the player orients against.
+    this.skyMat.setColor3("sunColor", new BABYLON.Color3(0, 0, 0));
+    this.skyMat.setVector3("sunDir", new BABYLON.Vector3(0, -1, 0));
+    this.skyMat.setFloat("sunSize", 220);
+    this.skyMat.setFloat("starFactor", 1.5);
+    this.skyMat.setFloat("overcast", 0);
+    this.skyMat.setFloat("time", performance.now() / 1000);
+
+    if (this.sunLight) {
+      this.sunLight.direction = new BABYLON.Vector3(0.2, -0.3, 0.3).normalize();
+      this.sunLight.diffuse = new BABYLON.Color3(0.6, 0.7, 1.0);
+      this.sunLight.intensity = 0.5;
+    }
+    if (this.ambientLight) {
+      this.ambientLight.diffuse = new BABYLON.Color3(0.35, 0.4, 0.6);
+      this.ambientLight.groundColor = new BABYLON.Color3(0.05, 0.05, 0.15);
+      this.ambientLight.intensity = 0.45;
+    }
+    this.scene.fogColor = new BABYLON.Color3(0.005, 0.008, 0.025);
+    this.scene.fogDensity = 0.0001;
+    this.scene.clearColor = new BABYLON.Color4(0.005, 0.008, 0.025, 1);
+  }
+
+  /** Toggle deep-space mode — owned by SpaceLevelSystem (Level 5). */
+  setSpaceMode(enabled: boolean): void {
+    this.spaceMode = enabled;
+    this.applyTimeOfDay();
   }
 
   /** Apply (or clear) the per-level RGB tint and re-render the sky. */

@@ -3,12 +3,44 @@ import { MusicSystem } from "./MusicSystem";
 import { MusicPlayerUI } from "./MusicPlayerUI";
 import { GameplayGuide } from "./GameplayGuide";
 
+/** High-level summary of the player's cloud save — surfaced on the main
+ *  menu so the player can see exactly what's been persisted before they
+ *  press START MISSION. Sourced from ProgressSync.loadProgress() on auth. */
+export interface SaveSummary {
+  level: number;
+  credits: number;
+  totalKills: number;
+  highestWave: number;
+  worldLevel: number;
+  savedAt: number;
+  bioDexCount?: number;
+  companionCount?: number;
+}
+
 interface MainMenuProps {
   onStart: () => void;
   onCustomize?: () => void;
+  saveSummary?: SaveSummary | null;
 }
 
-export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize }) => {
+const WORLD_LEVEL_NAMES: Record<number, string> = {
+  1: "Star City Front",
+  2: "Hold the Line",
+  3: "Purge the Void",
+  4: "Ashur Sanctuary",
+  5: "Orbital Front",
+};
+
+const formatSavedAt = (ts: number): string => {
+  if (!ts) return "—";
+  const ms = Date.now() - ts;
+  if (ms < 60_000) return "just now";
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)} min ago`;
+  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)} hr ago`;
+  return `${Math.floor(ms / 86_400_000)} d ago`;
+};
+
+export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize, saveSummary }) => {
   const [showGuide, setShowGuide] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -112,6 +144,40 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize }) => {
             <span>ARMS READY</span>
           </div>
         </div>
+
+        {/* === SAVE SUMMARY (only when a cloud save exists) === */}
+        {saveSummary && (
+          <div className="mt-5 mx-auto max-w-2xl bg-black/60 border-2 border-cyan-400/50 rounded-lg p-4 backdrop-blur-sm"
+               style={{ boxShadow: "0 0 20px rgba(0,200,255,0.25)" }}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-cyan-300 text-[11px] tracking-[0.3em]"
+                   style={{ fontFamily: "'Press Start 2P', monospace", textShadow: "0 0 6px rgba(0,200,255,0.6)" }}>
+                ▸ CLOUD SAVE
+              </div>
+              <div className="text-amber-300/90 text-[10px] tracking-wider"
+                   style={{ fontFamily: "'Press Start 2P', monospace" }}>
+                {formatSavedAt(saveSummary.savedAt)}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-1 text-[11px] text-gray-100">
+              <div><span className="text-cyan-400">LVL</span> {saveSummary.level}</div>
+              <div><span className="text-cyan-400">CREDITS</span> {saveSummary.credits.toLocaleString()}</div>
+              <div><span className="text-cyan-400">KILLS</span> {saveSummary.totalKills.toLocaleString()}</div>
+              <div><span className="text-cyan-400">WAVE</span> {saveSummary.highestWave}</div>
+              <div className="col-span-2 md:col-span-2"><span className="text-cyan-400">ZONE</span> {WORLD_LEVEL_NAMES[saveSummary.worldLevel] ?? "Unknown"}</div>
+              {saveSummary.companionCount != null && (
+                <div><span className="text-cyan-400">HELPERS</span> {saveSummary.companionCount}</div>
+              )}
+              {saveSummary.bioDexCount != null && (
+                <div><span className="text-cyan-400">BIO-DEX</span> {saveSummary.bioDexCount}</div>
+              )}
+            </div>
+            <div className="text-center text-gray-400 text-[10px] mt-2 tracking-wider"
+                 style={{ fontFamily: "'Press Start 2P', monospace" }}>
+              START MISSION resumes from this save.
+            </div>
+          </div>
+        )}
 
         {/* === ACTION BUTTONS === */}
         <div className="flex gap-4 justify-center mt-6">

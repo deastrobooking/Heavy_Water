@@ -2,6 +2,7 @@ import * as BABYLON from "@babylonjs/core";
 import { EventBus, GameEvents } from "./EventBus";
 import { FriendlyNPCSystem } from "./FriendlyNPCSystem";
 import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
+import type { BaseSystem } from "./BaseSystem";
 
 /**
  * SanctuarySystem
@@ -34,6 +35,10 @@ export class SanctuarySystem {
   private root: BABYLON.TransformNode;
   private npcs: FriendlyNPCSystem | null = null;
   private farming: FarmingSystem | null = null;
+  private base: BaseSystem | null = null;
+  /** Position where the synthetic garden plinth was registered with the
+   *  BaseSystem — kept so dispose() can remove it on fast-travel out. */
+  private gardenPlinthPos: BABYLON.Vector3 | null = null;
 
   /** Sanctuary footprint center (matches LevelSystem.spawnPoint for L4). */
   private static readonly CENTER = new BABYLON.Vector3(-480, 0, -480);
@@ -44,18 +49,21 @@ export class SanctuarySystem {
     inventory: InventorySystem,
     playerPosProvider: () => BABYLON.Vector3,
     inputBlockedProvider: () => boolean,
+    baseSystem?: BaseSystem,
   ) {
     this.scene = scene;
     this.camera = camera;
     this.bus = EventBus.getInstance();
     this.inventory = inventory;
     this.playerPos = playerPosProvider;
+    this.base = baseSystem ?? null;
 
     this.root = new BABYLON.TransformNode("sanctuaryRoot", scene);
 
     this.buildSign();
     this.buildPerimeter();
     this.spawnNPCs(inputBlockedProvider);
+    if (this.base) this.buildGardenPlinth(this.base);
     this.farming = new FarmingSystem(
       scene,
       camera,
@@ -89,6 +97,12 @@ export class SanctuarySystem {
     if (this.farming) {
       try { this.farming.dispose(); } catch {}
       this.farming = null;
+    }
+    // Tear down the synthetic garden so it doesn't linger in BaseSystem's
+    // structure list after the player warps out of the sanctuary.
+    if (this.base && this.gardenPlinthPos) {
+      try { this.base.removeStructureAt(this.gardenPlinthPos, 1.5); } catch {}
+      this.gardenPlinthPos = null;
     }
     try { this.root.dispose(); } catch {}
   }
@@ -237,6 +251,61 @@ export class SanctuarySystem {
     cast.forEach((def, i) => sysAny.spawnNPC(def, i));
 
     this.npcs = npcs;
+  }
+
+  /** Stone pedestal + glowing cyan orb that registers as a synthetic
+   *  "garden" structure with BaseSystem. The existing E-key handler in
+   *  Game.tsx already calls `BaseSystem.getNearestStructure(pos, "garden", 6)`
+   *  and opens the deploy / capture UI when one is found — the plinth lets
+   *  sanctuary visitors send up to 3 captured Animatons into battle without
+   *  having to build a Garden first. Disposed via removeStructureAt on
+   *  warp-out. */
+  private buildGardenPlinth(base: BaseSystem): void {
+    const c = SanctuarySystem.CENTER;
+    const px = c.x - 6;
+    const pz = c.z;
+
+    const plinth = BABYLON.MeshBuilder.CreateCylinder(
+      "sanctuaryGardenPlinth",
+      { diameterTop: 2.0, diameterBottom: 2.6, height: 1.2, tessellation: 16 },
+      this.scene,
+    );
+    plinth.position.set(px, 0.6, pz);
+    plinth.parent = this.root;
+    plinth.isPickable = false;
+    const stoneMat = new BABYLON.StandardMaterial("sanctuaryPlinthMat", this.scene);
+    stoneMat.diffuseColor = new BABYLON.Color3(0.55, 0.55, 0.6);
+    stoneMat.specularColor = new BABYLON.Color3(0.18, 0.18, 0.22);
+    plinth.material = stoneMat;
+
+    const orb = BABYLON.MeshBuilder.CreateSphere(
+      "sanctuaryGardenOrb",
+      { diameter: 0.9 },
+      this.scene,
+    );
+    orb.position.set(px, 1.7, pz);
+    orb.parent = this.root;
+    orb.isPickable = false;
+    const orbMat = new BABYLON.StandardMaterial("sanctuaryOrbMat", this.scene);
+    orbMat.diffuseColor = new BABYLON.Color3(0.10, 0.70, 0.90);
+    orbMat.emissiveColor = new BABYLON.Color3(0.30, 0.85, 1.00);
+    orbMat.specularColor = new BABYLON.Color3(0, 0, 0);
+    orb.material = orbMat;
+
+    // A subtle point light so the plinth reads against the dawn lighting.
+    const light = new BABYLON.PointLight(
+      "sanctuaryPlinthLight",
+      new BABYLON.Vector3(px, 2.0, pz),
+      this.scene,
+    );
+    light.diffuse = new BABYLON.Color3(0.3, 0.85, 1.0);
+    light.intensity = 0.6;
+    light.range = 8;
+    light.parent = this.root;
+
+    const pos = new BABYLON.Vector3(px, 0, pz);
+    base.registerStructure("garden", pos);
+    this.gardenPlinthPos = pos.clone();
   }
 }
 
