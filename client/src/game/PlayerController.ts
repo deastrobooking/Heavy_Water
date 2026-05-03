@@ -879,7 +879,13 @@ export class PlayerController implements IDamageable {
     if (this.isGrounded) this.wallTouchTimer = 0;
 
     if (!this.isGrounded && !this.isJetpacking) {
-      this.velocity.y -= this.gravity;
+      // Asymmetric "fall multiplier" — classic platformer trick: gravity
+      // is normal on the way up so jump height/feel is unchanged, but
+      // ramps up by 2.2× while descending so the player doesn't float
+      // back down. Disabled while flying / using rocket-skates so those
+      // movement modes keep their tuned arcs.
+      const fallMul = (this.velocity.y < 0 && !this.isFlying) ? 2.2 : 1.0;
+      this.velocity.y -= this.gravity * fallMul;
     }
 
     // Wall slide: while airborne, falling, and stuck against a wall, cap the
@@ -891,7 +897,9 @@ export class PlayerController implements IDamageable {
       if (this.velocity.y < -wallSlideMaxFall) this.velocity.y = -wallSlideMaxFall;
     }
 
-    const maxFallSpeed = 0.8;
+    // Raised from 0.8 → 1.4 so the new fall-multiplier actually has room
+    // to express itself before clamping. Wall-slide already capped above.
+    const maxFallSpeed = 1.4;
     if (this.velocity.y < -maxFallSpeed) {
       this.velocity.y = -maxFallSpeed;
     }
