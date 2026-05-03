@@ -825,6 +825,22 @@ export class CityGenerator {
     this.groundMesh = ground;
   }
 
+  /** Returns every static building + walkable platform mesh so the
+   *  LODCullSystem can register them for distance culling. The ground
+   *  plane and skyline-decoration extra surfaces (river, lamp poles) are
+   *  intentionally excluded — the ground is one giant mesh and the river
+   *  / lamps are visual reference at distance.
+   *
+   *  These meshes are already `freezeWorldMatrix()`-ed at generation
+   *  time, so toggling `setEnabled` is the cheapest possible operation
+   *  Babylon offers — no transform recompute on re-show. */
+  getCullableBuildings(): BABYLON.Mesh[] {
+    return this.buildings;
+  }
+  getCullablePlatforms(): BABYLON.Mesh[] {
+    return this.platforms;
+  }
+
   /** Toggle visibility of the entire city (buildings, walkable platforms,
    *  ground plane). Used by SpaceLevelSystem to ensure the orbital level
    *  shows nothing but stars + Earth + asteroids. We use `setEnabled` so

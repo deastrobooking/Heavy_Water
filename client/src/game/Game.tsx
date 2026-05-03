@@ -3,6 +3,7 @@ import * as BABYLON from "@babylonjs/core";
 import "@babylonjs/loaders";
 import { BabylonEngine } from "./BabylonEngine";
 import { CityGenerator } from "./CityGenerator";
+import { LODCullSystem } from "./LODCullSystem";
 import { PlayerController, PlayerStats, PlayerUpgradeInfo } from "./PlayerController";
 import { WeaponsSystem, Weapon } from "./WeaponsSystem";
 import { EnemySystem } from "./EnemySystem";
@@ -381,6 +382,18 @@ export const Game: React.FC = () => {
         const cityGenerator = new CityGenerator(scene);
         cityGenerator.generateCity();
 
+        // ---- Distance LOD culling ---------------------------------------
+        // Open-world with hundreds of city meshes + dozens of bases. The
+        // camera's maxZ already prunes beyond 1 km, but everything inside
+        // that sphere is walked every frame. The LODCullSystem toggles
+        // far-away static meshes via setEnabled, which Babylon completely
+        // skips during render. Registered radius is per-mesh so iconic
+        // skyline shapes (boss fortress) stay visible from far while
+        // small interior platforms drop out at ~250 m.
+        const lodCull = new LODCullSystem();
+        for (const m of cityGenerator.getCullableBuildings()) lodCull.register(m, 350);
+        for (const m of cityGenerator.getCullablePlatforms()) lodCull.register(m, 280);
+
         const sky = new SkySystem(
           scene,
           engine.getSunLight(),
@@ -738,6 +751,8 @@ export const Game: React.FC = () => {
 
         const enemyBaseSystem = new EnemyBaseSystem(scene);
         enemyBaseRef.current = enemyBaseSystem;
+        // Hook the registrar BEFORE seeding so initial bases get culled too.
+        enemyBaseSystem.setCullRegistrar((node, r) => lodCull.register(node, r));
         enemyBaseSystem.seedWorld([
           new BABYLON.Vector3(250, 0, 250),
           new BABYLON.Vector3(-250, 0, 250),
@@ -1550,6 +1565,11 @@ export const Game: React.FC = () => {
 
           enemyBaseSystem.setPlayerPosition(playerPos);
           const baseResult = enemyBaseSystem.update(dt);
+
+          // LOD distance-cull pass. The system internally batches at ~6 Hz
+          // so calling it every frame is essentially free.
+          lodCull.setPlayerPos(playerPos);
+          lodCull.update(deltaTime);
           if (baseResult.damage > 0) {
             const reducedBase = armorSystem.calculateDamageReduction(baseResult.damage, DamageType.Plasma);
             player.takeDamageSimple(reducedBase);

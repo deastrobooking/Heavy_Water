@@ -81,6 +81,16 @@ export class EnemyBaseSystem {
    *  could fire a stale "FIRE AT THE GLOWING RED CORE" message into the
    *  wrong session. */
   private pendingTimeouts: Set<ReturnType<typeof setTimeout>> = new Set();
+  /** Optional callback fired during base/turret/vault creation so the
+   *  LODCullSystem can register the heavy visual nodes for distance
+   *  culling. We pass the visual TransformNode (parent of all walls /
+   *  spire / turret stand+head meshes) plus a recommended cull radius.
+   *  Hitbox meshes are intentionally NOT registered — they're invisible,
+   *  free to render, and used by weapons aim resolution. */
+  private cullRegistrar: ((node: BABYLON.TransformNode, radius: number) => void) | null = null;
+  setCullRegistrar(fn: (node: BABYLON.TransformNode, radius: number) => void): void {
+    this.cullRegistrar = fn;
+  }
 
   static readonly TURRET_RANGE = 60;
   static readonly TURRET_HP = 250;
@@ -519,6 +529,12 @@ export class EnemyBaseSystem {
 
     const base: EnemyBase = { id, position: center.clone(), turrets, vault, centerPillar: baseRoot, ownedMaterials };
     this.bases.push(base);
+    // Register the whole base shell + per-turret visuals for distance culling.
+    if (this.cullRegistrar) {
+      this.cullRegistrar(baseRoot, 320);
+      for (const t of turrets) this.cullRegistrar(t.visual, 260);
+      this.cullRegistrar(vault.visual, 320);
+    }
     return base;
   }
 
@@ -799,6 +815,13 @@ export class EnemyBaseSystem {
       allyFreed: false,
     };
     this.bases.push(base);
+    // Boss fortress is iconic — register with a much larger radius so it's
+    // visible on the horizon, but still drops out beyond the camera maxZ.
+    if (this.cullRegistrar) {
+      this.cullRegistrar(baseRoot, 700);
+      for (const t of turrets) this.cullRegistrar(t.visual, 360);
+      this.cullRegistrar(vault.visual, 700);
+    }
     return base;
   }
 
