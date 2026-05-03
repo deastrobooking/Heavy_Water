@@ -60,7 +60,7 @@ import { EventBus, GameEvents } from "./EventBus";
 import { DamageType } from "./DamageSystem";
 import { GameUI } from "./GameUI";
 import { MainMenu, SaveSummary } from "./MainMenu";
-import { CharacterEditor } from "./CharacterEditor";
+import { CharacterEditor, refreshEnemyStyleOverrides } from "./CharacterEditor";
 import AuthUI from "./AuthUI";
 
 type GamePhase = "auth" | "menu" | "playing" | "paused" | "gameover";
@@ -784,6 +784,11 @@ export const Game: React.FC = () => {
         }).catch((err) => {
           console.log("Drone GLB not loaded:", err);
         });
+
+        // Seed the enemy-style override cache before the first wave spawns
+        // so the player's saved Boss-Style picks (Captain body / tint /
+        // Titan body) are honored on the very first enemy that appears.
+        refreshEnemyStyleOverrides();
 
         const enemySystem = new EnemySystem(scene);
         enemySystemRef.current = enemySystem;

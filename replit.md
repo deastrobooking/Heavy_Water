@@ -48,6 +48,10 @@ The game utilizes Babylon.js v8.x for WebGL/WebGPU rendering, focusing on an ani
     - Orbital Front (Level 5) is a vacuum-only zone focused on aerial combat, placing the player in a CometFighter amidst an asteroid field with adjusted flight mechanics.
     - Pontiac Secret Lab (Level 6) is a peaceful indoor side-zone with a bunker interior, featuring scientific equipment and NPCs, accessible via the TRAVEL tab.
 
+**Customization:**
+- CharacterEditor exposes four tabs (Body / Armor / Colors / Boss Style) plus three armor presets — HUMANOID, TITAN, and the new **DREAD** preset (black-on-blood-red, built from the spike + studded parts in `RobotArmorPartsEvil.ts`: Dread Skull Helm, Studded Plate, Dread Spike Pauldron, Spine Spikes, Studded Greaves).
+- The Boss Style tab persists `EnemyStyleOverrides` (`captainPreset`, `captainVariant`, `titanPreset`) on the SavedCharacter. `EnemySystem.createEnemyMesh()` reads them via `getEnemyStyleOverrides()` so spawned captains/heavies adopt the player's chosen silhouette and tint regardless of which level/wave triggered the spawn; commanders + non-heavy types remain on their canonical roster. Cache is seeded at game start (`refreshEnemyStyleOverrides()` in Game.tsx) and refreshed on customizer save.
+
 **Player Systems:**
 - Character customization includes procedural generation, modular body parts, and a HumanoidCharacter system.
 - ProgressSync.ts handles player progress, stats, inventory, and upgrades with auto-save.

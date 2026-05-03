@@ -6,14 +6,35 @@ import {
   ArmorSetSerialized,
   DEFAULT_ARMOR_SET,
   TITAN_ARMOR_SET,
+  DREAD_ARMOR_SET,
   deserializeArmorSet,
   equipArmorSet,
   EquippedArmor,
   sanitizeArmorSet,
 } from "./RobotArmorSystem";
 import { ARMOR_PART_REGISTRY, ArmorSlot } from "./RobotArmorParts";
+import { BOSS_VARIANTS, BossVariantId } from "./BossVariants";
 
 const CHARACTER_STORAGE_KEY = "detroit3026_character_v1";
+
+/** Per-player overrides for the visual look of spawned enemy elites. The
+ *  art-direction picker in the Captain/Titan tab writes these; EnemySystem
+ *  reads them via `getEnemyStyleOverrides()` on each spawn so the chosen
+ *  preset is what shows up regardless of which level / wave triggered the
+ *  spawn. Unset / "random" keeps the original randomized roster. */
+export interface EnemyStyleOverrides {
+  /** Humanoid preset id used for ALL captain spawns. "random" keeps the
+   *  original Alpha/Beta/Gamma/Omega randomization. The variant tint
+   *  (inferno / plague / frost / storm / void) is still chosen by the
+   *  level system — this only changes the underlying body silhouette. */
+  captainPreset?: "random" | "HumanoidCaptainAlpha" | "HumanoidCaptainBeta" | "HumanoidCaptainGamma" | "HumanoidCaptainOmega";
+  /** Robot preset id used for heavy/titan ground spawns. "random" keeps
+   *  the original TankTitan/OptimusForge coin-flip. */
+  titanPreset?: "random" | "TankTitan" | "OptimusForge";
+  /** Force a single boss-variant tint on every captain regardless of
+   *  level. "byLevel" keeps the LevelSystem's per-level assignment. */
+  captainVariant?: "byLevel" | BossVariantId;
+}
 
 export interface SavedCharacter {
   height: number;
@@ -30,6 +51,28 @@ export interface SavedCharacter {
     hair: [number, number, number];
   };
   armorSet?: ArmorSetSerialized;
+  enemyStyles?: EnemyStyleOverrides;
+}
+
+/** Module-level cache so EnemySystem doesn't have to hit localStorage on
+ *  every spawn. The CharacterEditor refreshes this on save; consumers
+ *  outside the editor can call `refreshEnemyStyleOverrides()` at startup
+ *  to seed it from the persisted SavedCharacter. */
+let _enemyStyleCache: EnemyStyleOverrides = {};
+export function getEnemyStyleOverrides(): EnemyStyleOverrides {
+  return _enemyStyleCache;
+}
+export function refreshEnemyStyleOverrides(): EnemyStyleOverrides {
+  try {
+    const raw = localStorage.getItem(CHARACTER_STORAGE_KEY);
+    if (!raw) { _enemyStyleCache = {}; return _enemyStyleCache; }
+    const parsed = JSON.parse(raw) as SavedCharacter;
+    _enemyStyleCache = parsed.enemyStyles ?? {};
+    return _enemyStyleCache;
+  } catch {
+    _enemyStyleCache = {};
+    return _enemyStyleCache;
+  }
 }
 
 export function loadSavedCharacter(): SavedCharacter | null {
@@ -102,7 +145,7 @@ interface CharacterEditorProps {
   onClose: () => void;
 }
 
-type Tab = "body" | "armor" | "colors";
+type Tab = "body" | "armor" | "colors" | "enemies";
 
 export const CharacterEditor: React.FC<CharacterEditorProps> = ({ onClose }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -212,7 +255,15 @@ export const CharacterEditor: React.FC<CharacterEditorProps> = ({ onClose }) => 
 
   function save() {
     localStorage.setItem(CHARACTER_STORAGE_KEY, JSON.stringify(config));
+    // Refresh the in-memory enemy-style cache so the new captain / titan
+    // overrides take effect on the very next enemy spawn — without this,
+    // EnemySystem would keep reading the stale cache until a full reload.
+    refreshEnemyStyleOverrides();
     onClose();
+  }
+
+  function updateEnemyStyle<K extends keyof EnemyStyleOverrides>(key: K, value: EnemyStyleOverrides[K]) {
+    setConfig({ ...config, enemyStyles: { ...(config.enemyStyles ?? {}), [key]: value } });
   }
 
   function reset() {
@@ -288,15 +339,19 @@ export const CharacterEditor: React.FC<CharacterEditorProps> = ({ onClose }) => 
                 className="px-3 py-1 text-xs rounded bg-red-900/60 border border-orange-500/40 text-orange-200 hover:bg-red-800/60">
                 TITAN PRESET
               </button>
+              <button onClick={() => applyPreset(DREAD_ARMOR_SET)}
+                className="px-3 py-1 text-xs rounded bg-purple-900/70 border border-fuchsia-500/50 text-fuchsia-200 hover:bg-purple-800/70">
+                DREAD PRESET
+              </button>
             </div>
           </div>
 
           <div className="w-[26rem] bg-gray-950/80 flex flex-col border-l border-cyan-500/30">
             <div className="flex border-b border-cyan-500/30">
-              {(["body", "armor", "colors"] as Tab[]).map((t) => (
+              {(["body", "armor", "colors", "enemies"] as Tab[]).map((t) => (
                 <button key={t} onClick={() => setTab(t)}
                   className={`flex-1 px-3 py-2 text-xs font-bold uppercase ${tab === t ? "bg-cyan-500/20 text-cyan-200 border-b-2 border-cyan-400" : "text-gray-400 hover:bg-gray-800/50"}`}>
-                  {t}
+                  {t === "enemies" ? "Boss Style" : t}
                 </button>
               ))}
             </div>
@@ -376,6 +431,63 @@ export const CharacterEditor: React.FC<CharacterEditorProps> = ({ onClose }) => 
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {tab === "enemies" && (
+                <div>
+                  <h3 className="text-fuchsia-300 font-bold mb-2">CAPTAIN & TITAN STYLES</h3>
+                  <p className="text-[11px] text-gray-400 mb-4">
+                    Force every spawned elite to wear the look you pick. Saved with your
+                    character; takes effect on the next spawn.
+                  </p>
+
+                  <div className={groupClass}>
+                    <label className={labelClass}>Captain Body</label>
+                    <select
+                      value={config.enemyStyles?.captainPreset ?? "random"}
+                      onChange={(e) => updateEnemyStyle("captainPreset", e.target.value as EnemyStyleOverrides["captainPreset"])}
+                      className="w-full bg-gray-900 border border-fuchsia-500/40 rounded px-2 py-1 text-sm text-fuchsia-100"
+                    >
+                      <option value="random">Random (default)</option>
+                      <option value="HumanoidCaptainAlpha">Captain Alpha — Heavy Brute</option>
+                      <option value="HumanoidCaptainBeta">Captain Beta — Athletic</option>
+                      <option value="HumanoidCaptainGamma">Captain Gamma — Lean Stalker</option>
+                      <option value="HumanoidCaptainOmega">Captain Omega — Towering</option>
+                    </select>
+                  </div>
+
+                  <div className={groupClass}>
+                    <label className={labelClass}>Captain Tint</label>
+                    <select
+                      value={config.enemyStyles?.captainVariant ?? "byLevel"}
+                      onChange={(e) => updateEnemyStyle("captainVariant", e.target.value as EnemyStyleOverrides["captainVariant"])}
+                      className="w-full bg-gray-900 border border-fuchsia-500/40 rounded px-2 py-1 text-sm text-fuchsia-100"
+                    >
+                      <option value="byLevel">By Level (default)</option>
+                      {(Object.keys(BOSS_VARIANTS) as BossVariantId[]).map((id) => (
+                        <option key={id} value={id}>{BOSS_VARIANTS[id].displayName}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className={groupClass}>
+                    <label className={labelClass}>Titan / Heavy Body</label>
+                    <select
+                      value={config.enemyStyles?.titanPreset ?? "random"}
+                      onChange={(e) => updateEnemyStyle("titanPreset", e.target.value as EnemyStyleOverrides["titanPreset"])}
+                      className="w-full bg-gray-900 border border-fuchsia-500/40 rounded px-2 py-1 text-sm text-fuchsia-100"
+                    >
+                      <option value="random">Random (default)</option>
+                      <option value="TankTitan">Tank Titan — Stocky</option>
+                      <option value="OptimusForge">Optimus Forge — Tall</option>
+                    </select>
+                  </div>
+
+                  <div className="mt-4 p-3 rounded border border-fuchsia-500/30 bg-fuchsia-900/10 text-[11px] text-fuchsia-200/80">
+                    Pair these picks with the new <b>DREAD</b> armor preset above (DREAD button on the
+                    preview) to give yourself the matching evil silhouette.
+                  </div>
                 </div>
               )}
 

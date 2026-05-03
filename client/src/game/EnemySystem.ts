@@ -7,6 +7,7 @@ import { ROBOT_PRESETS } from "./RobotPresets";
 import { HumanoidCharacter } from "./HumanoidCharacter";
 import { HUMANOID_PRESETS } from "./HumanoidPresets";
 import { BossVariant, BossVariantId, BOSS_VARIANTS, getBossVariant } from "./BossVariants";
+import { getEnemyStyleOverrides } from "./CharacterEditor";
 
 export type EnemyType = "drone" | "soldier" | "heavy" | "insectoid" | "hybrid" | "commander" | "captain" | "tank";
 export type EnemyAIState = "idle" | "patrol" | "chase" | "attack" | "stunned" | "dead" | "flying" | "hovering" | "dodging";
@@ -1205,8 +1206,16 @@ export class EnemySystem {
         "HumanoidCaptainGamma",
         "HumanoidCaptainOmega",
       ];
-      const randomPreset = captainPresets[Math.floor(Math.random() * captainPresets.length)];
-      const def = HUMANOID_PRESETS[randomPreset];
+      // Player-side override from the CharacterEditor "Boss Style" tab.
+      // Only applies to captains (commanders keep their canonical preset)
+      // so the wave sub-boss spawns reflect the player's chosen art.
+      const overrides = getEnemyStyleOverrides();
+      const overridePreset =
+        type === "captain" && overrides.captainPreset && overrides.captainPreset !== "random"
+          ? overrides.captainPreset
+          : null;
+      const presetName = overridePreset ?? captainPresets[Math.floor(Math.random() * captainPresets.length)];
+      const def = HUMANOID_PRESETS[presetName];
 
       if (def) {
         const humanoid = new HumanoidCharacter(this.scene, def);
@@ -1230,7 +1239,13 @@ export class EnemySystem {
         // purple). Each level assigns its own variant so the player reads
         // the threat at a glance. Commanders keep their preset palette.
         if (type === "captain") {
-          const v = variant ?? BOSS_VARIANTS.inferno;
+          // Player tint override wins over the level-system pick so the
+          // Boss-Style tab can lock every captain to e.g. Void Stalker
+          // regardless of which front the player is fighting on.
+          const tintOverride = overrides.captainVariant && overrides.captainVariant !== "byLevel"
+            ? BOSS_VARIANTS[overrides.captainVariant as BossVariantId]
+            : null;
+          const v = tintOverride ?? variant ?? BOSS_VARIANTS.inferno;
           for (const m of root.getChildMeshes()) {
             const mat = m.material as BABYLON.StandardMaterial | null;
             if (mat) {
@@ -1274,7 +1289,15 @@ export class EnemySystem {
     };
 
     const variants = presetMap[type] || ["ScoutPrime"];
-    const presetName = variants[Math.floor(Math.random() * variants.length)];
+    // Heavy/titan preset override from the Boss-Style tab. Only "heavy"
+    // type is overridable — drone/soldier/insectoid/hybrid presets are
+    // fixed by gameplay role and would mis-read the silhouette if swapped.
+    const heavyOverrides = getEnemyStyleOverrides();
+    const overridePresetName =
+      type === "heavy" && heavyOverrides.titanPreset && heavyOverrides.titanPreset !== "random"
+        ? heavyOverrides.titanPreset
+        : null;
+    const presetName = overridePresetName ?? variants[Math.floor(Math.random() * variants.length)];
     const preset = ROBOT_PRESETS[presetName];
 
     if (preset) {

@@ -55,6 +55,30 @@ export const DEFAULT_ARMOR_SET: ArmorSetSerialized = {
   },
 };
 
+/** Premium "evil dread" preset built from the new spike + studded armor
+ *  parts in `RobotArmorPartsEvil.ts`. Black-on-blood-red palette with a
+ *  cyan reactor-heart so the silhouette still pops against the cell-shaded
+ *  sky. Used both by the player customizer (DREAD button) and as the
+ *  default look for player-overridden captain / titan styles. */
+export const DREAD_ARMOR_SET: ArmorSetSerialized = {
+  helmet: "helmet_dread_horns",
+  chest: "chest_studded",
+  back: "back_spine_spikes",
+  leftShoulder: "shoulder_dread_spikes",
+  rightShoulder: "shoulder_dread_spikes",
+  leftArm: "arm_blade",
+  rightArm: "arm_thrusters",
+  leftWeapon: "weapon_none",
+  rightWeapon: "weapon_blade",
+  legs: "legs_studded",
+  colors: {
+    primary: [0.08, 0.08, 0.10],
+    secondary: [0.42, 0.04, 0.06],
+    trim: [0.92, 0.18, 0.12],
+    glow: [1.0, 0.20, 0.85],
+  },
+};
+
 export const TITAN_ARMOR_SET: ArmorSetSerialized = {
   helmet: "helmet_horned",
   chest: "chest_titan",
