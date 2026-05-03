@@ -18,8 +18,8 @@ export type Archetype =
   | "flutter" | "slime";
 
 export type ElementalType =
-  | "normal" | "fire" | "water" | "grass" | "electric"
-  | "ice" | "psychic" | "dark" | "steel" | "crystal" | "dragon";
+  | "normal" | "flame" | "water" | "grass" | "electric"
+  | "ice" | "psychic" | "evil" | "steel" | "crystal" | "dragon";
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary";
 
@@ -46,13 +46,13 @@ interface Palette { primary: BABYLON.Color3; secondary: BABYLON.Color3; emissive
 
 export const TYPE_PALETTES: Record<ElementalType, Palette> = {
   normal:   { primary: c(0.78, 0.78, 0.82), secondary: c(0.92, 0.92, 0.95), emissive: c(0.85, 0.85, 0.9) },
-  fire:     { primary: c(1.0, 0.35, 0.1),   secondary: c(1.0, 0.7, 0.25),   emissive: c(1.0, 0.5, 0.15) },
+  flame:    { primary: c(1.0, 0.35, 0.1),   secondary: c(1.0, 0.7, 0.25),   emissive: c(1.0, 0.5, 0.15) },
   water:    { primary: c(0.18, 0.5, 1.0),   secondary: c(0.5, 0.8, 1.0),    emissive: c(0.3, 0.7, 1.0) },
   grass:    { primary: c(0.25, 0.85, 0.35), secondary: c(0.6, 1.0, 0.5),    emissive: c(0.4, 1.0, 0.45) },
   electric: { primary: c(1.0, 0.95, 0.25),  secondary: c(1.0, 1.0, 0.55),   emissive: c(1.0, 1.0, 0.4) },
   ice:      { primary: c(0.55, 0.85, 1.0),  secondary: c(0.85, 0.95, 1.0),  emissive: c(0.6, 0.95, 1.0) },
   psychic:  { primary: c(1.0, 0.4, 0.85),   secondary: c(1.0, 0.7, 0.95),   emissive: c(1.0, 0.5, 0.9) },
-  dark:     { primary: c(0.25, 0.18, 0.4),  secondary: c(0.45, 0.35, 0.6),  emissive: c(0.6, 0.3, 0.85) },
+  evil:     { primary: c(0.25, 0.18, 0.4),  secondary: c(0.45, 0.35, 0.6),  emissive: c(0.6, 0.3, 0.85) },
   steel:    { primary: c(0.55, 0.6, 0.7),   secondary: c(0.85, 0.88, 0.92), emissive: c(0.7, 0.85, 1.0) },
   crystal:  { primary: c(0.4, 0.9, 1.0),    secondary: c(0.85, 1.0, 1.0),   emissive: c(0.6, 1.0, 1.0) },
   dragon:   { primary: c(0.55, 0.25, 0.85), secondary: c(0.95, 0.6, 0.4),   emissive: c(0.8, 0.4, 1.0) },
@@ -60,8 +60,8 @@ export const TYPE_PALETTES: Record<ElementalType, Palette> = {
 
 /** UI hex tint per type (used for badges + dex tabs). */
 export const TYPE_HEX: Record<ElementalType, string> = {
-  normal: "#bdbdc4", fire: "#ff7038", water: "#4f9cff", grass: "#65d24a",
-  electric: "#f7d633", ice: "#9ad9f7", psychic: "#f56fb8", dark: "#6b5392",
+  normal: "#bdbdc4", flame: "#ff7038", water: "#4f9cff", grass: "#65d24a",
+  electric: "#f7d633", ice: "#9ad9f7", psychic: "#f56fb8", evil: "#6b5392",
   steel: "#9aa6b3", crystal: "#7be1ff", dragon: "#a663ff",
 };
 
@@ -113,25 +113,25 @@ export function statsFromRarity(rarity: Rarity): { hp: number; attack: number; s
 // Hand-authored 100+ species. Keep ids stable; the original five are first.
 export const BIO_SPECIES: BioCreatureSpecies[] = [
   // ---- Original five (do not rename / reorder ids) ----
-  spec("robofox",        "RoboFox",         "fox",     "fire",     "common",   0.55, "Agile attacker"),
+  spec("robofox",        "RoboFox",         "fox",     "flame",     "common",   0.55, "Agile attacker"),
   spec("crystalbeetle",  "Crystal Beetle",  "beetle",  "crystal",  "common",   0.40, "Tough scout"),
   spec("hoverserpent",   "Hover Serpent",   "serpent", "grass",    "uncommon", 0.60, "Aerial striker"),
   spec("neonowl",        "Neon Owl",        "owl",     "psychic",  "uncommon", 0.50, "Recon drone"),
   spec("voltfrog",       "Volt Frog",       "frog",    "electric", "common",   0.45, "Shock support"),
 
   // ---- Fire ----
-  spec("emberkit",       "Emberkit",        "fox",     "fire",     "common",   0.50, "Spits ember bursts"),
-  spec("emberpup",       "Emberpup",        "pup",     "fire",     "common",   0.55, "Loyal flame hound"),
-  spec("magmacat",       "Magmacat",        "cat",     "fire",     "uncommon", 0.50, "Searing pounce"),
-  spec("scorchbunny",    "Scorchbunny",     "bunny",   "fire",     "uncommon", 0.45, "Hops on jet flares"),
-  spec("infernodrake",   "Infernodrake",    "dragon",  "fire",     "rare",     0.75, "Fire-spit dragonling"),
-  spec("ashbear",        "Ashbear",         "bear",    "fire",     "rare",     0.85, "Cinder-cloaked tank"),
-  spec("lavalizard",     "Lavalizard",      "lizard",  "fire",     "common",   0.48, "Heat-armored runner"),
-  spec("blazemoth",      "Blazemoth",       "flutter", "fire",     "uncommon", 0.55, "Wings of fire"),
-  spec("pyroowl",        "Pyrowl",          "owl",     "fire",     "uncommon", 0.55, "Twilight burner"),
-  spec("magmacrab",      "Magmacrab",       "crab",    "fire",     "uncommon", 0.60, "Shell of slag"),
-  spec("infernoslime",   "Infernoslime",    "slime",   "fire",     "common",   0.45, "Living lava blob"),
-  spec("phoenixhatch",   "Phoenixhatch",    "bird",    "fire",     "legendary",0.70, "Reborn at zero HP"),
+  spec("emberkit",       "Emberkit",        "fox",     "flame",     "common",   0.50, "Spits ember bursts"),
+  spec("emberpup",       "Emberpup",        "pup",     "flame",     "common",   0.55, "Loyal flame hound"),
+  spec("magmacat",       "Magmacat",        "cat",     "flame",     "uncommon", 0.50, "Searing pounce"),
+  spec("scorchbunny",    "Scorchbunny",     "bunny",   "flame",     "uncommon", 0.45, "Hops on jet flares"),
+  spec("infernodrake",   "Infernodrake",    "dragon",  "flame",     "rare",     0.75, "Fire-spit dragonling"),
+  spec("ashbear",        "Ashbear",         "bear",    "flame",     "rare",     0.85, "Cinder-cloaked tank"),
+  spec("lavalizard",     "Lavalizard",      "lizard",  "flame",     "common",   0.48, "Heat-armored runner"),
+  spec("blazemoth",      "Blazemoth",       "flutter", "flame",     "uncommon", 0.55, "Wings of fire"),
+  spec("pyroowl",        "Pyrowl",          "owl",     "flame",     "uncommon", 0.55, "Twilight burner"),
+  spec("magmacrab",      "Magmacrab",       "crab",    "flame",     "uncommon", 0.60, "Shell of slag"),
+  spec("infernoslime",   "Infernoslime",    "slime",   "flame",     "common",   0.45, "Living lava blob"),
+  spec("phoenixhatch",   "Phoenixhatch",    "bird",    "flame",     "legendary",0.70, "Reborn at zero HP"),
 
   // ---- Water ----
   spec("aquakit",        "Aquakit",         "fox",     "water",    "common",   0.50, "Dives like a sluice"),
@@ -204,17 +204,17 @@ export const BIO_SPECIES: BioCreatureSpecies[] = [
   spec("prismslime",     "Prismslime",      "slime",   "psychic",  "uncommon", 0.45, "Refracting blob"),
 
   // ---- Dark ----
-  spec("voidcat",        "Voidcat",         "cat",     "dark",     "uncommon", 0.50, "Shadow-step striker"),
-  spec("shadefox",       "Shadefox",        "fox",     "dark",     "uncommon", 0.50, "Twilight ambusher"),
-  spec("dreadbeetle",    "Dreadbeetle",     "beetle",  "dark",     "common",   0.40, "Shadow-shell scout"),
-  spec("gloomserpent",   "Gloomserpent",    "serpent", "dark",     "rare",     0.70, "Eclipse-coil flyer"),
-  spec("nightowl",       "Nightowl",        "owl",     "dark",     "uncommon", 0.55, "Silent dive hunter"),
-  spec("eclipsedrake",   "Eclipsedrake",    "dragon",  "dark",     "legendary",0.80, "Black-sun dragonling"),
-  spec("voidpup",        "Voidpup",         "pup",     "dark",     "common",   0.55, "Wisp-trail support"),
-  spec("shadowbear",     "Shadowbear",      "bear",    "dark",     "rare",     0.90, "Umbral cloak tank"),
-  spec("hexmoth",        "Hexmoth",         "flutter", "dark",     "uncommon", 0.55, "Curse-dust wings"),
-  spec("voidturtle",     "Voidturtle",      "turtle",  "dark",     "uncommon", 0.55, "Null-shell defender"),
-  spec("shadeslime",     "Shadeslime",      "slime",   "dark",     "common",   0.45, "Inky absorber"),
+  spec("voidcat",        "Voidcat",         "cat",     "evil",     "uncommon", 0.50, "Shadow-step striker"),
+  spec("shadefox",       "Shadefox",        "fox",     "evil",     "uncommon", 0.50, "Twilight ambusher"),
+  spec("dreadbeetle",    "Dreadbeetle",     "beetle",  "evil",     "common",   0.40, "Shadow-shell scout"),
+  spec("gloomserpent",   "Gloomserpent",    "serpent", "evil",     "rare",     0.70, "Eclipse-coil flyer"),
+  spec("nightowl",       "Nightowl",        "owl",     "evil",     "uncommon", 0.55, "Silent dive hunter"),
+  spec("eclipsedrake",   "Eclipsedrake",    "dragon",  "evil",     "legendary",0.80, "Black-sun dragonling"),
+  spec("voidpup",        "Voidpup",         "pup",     "evil",     "common",   0.55, "Wisp-trail support"),
+  spec("shadowbear",     "Shadowbear",      "bear",    "evil",     "rare",     0.90, "Umbral cloak tank"),
+  spec("hexmoth",        "Hexmoth",         "flutter", "evil",     "uncommon", 0.55, "Curse-dust wings"),
+  spec("voidturtle",     "Voidturtle",      "turtle",  "evil",     "uncommon", 0.55, "Null-shell defender"),
+  spec("shadeslime",     "Shadeslime",      "slime",   "evil",     "common",   0.45, "Inky absorber"),
 
   // ---- Steel ----
   spec("alloyfox",       "Alloyfox",        "fox",     "steel",    "common",   0.50, "Plated dasher"),
@@ -272,7 +272,7 @@ export function speciesByType(type: ElementalType): BioCreatureSpecies[] {
 }
 
 export const ALL_TYPES: ElementalType[] = [
-  "normal", "fire", "water", "grass", "electric", "ice", "psychic", "dark", "steel", "crystal", "dragon",
+  "normal", "flame", "water", "grass", "electric", "ice", "psychic", "evil", "steel", "crystal", "dragon",
 ];
 
 /** Pick a random species weighted by rarity. */

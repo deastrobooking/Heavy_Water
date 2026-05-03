@@ -38,7 +38,7 @@ The game utilizes Babylon.js v8.x for WebGL/WebGPU rendering, focusing on an ani
 
 **Enemies & NPCs:**
 - EnemySystem includes a wave spawner, Commander enemies, aerial enemies, Hostile Enemy Bases with turrets, Boss Fortresses, and Tank ground units. Tanks are slow heavily-armoured siege vehicles that spawn on the city outskirts (90–130 m from the player) on a dedicated 22 s cadence from wave 2 onward, fire long-range tracer shells, and drop scrap-heavy loot.
-- Bio-Creature Dex defines 125+ collectible robotic creatures with archetypes, elemental types, and rarity tiers.
+- Bio-Creature Dex defines 125+ collectible robotic creatures with archetypes, elemental types, and rarity tiers. Elemental types are `normal / flame / water / grass / electric / ice / psychic / evil / steel / crystal / dragon` (renamed `fire`→`flame` and `dark`→`evil` so the dex stops collapsing onto the obvious franchise; saves are unaffected because they store `speciesId`, not type strings). Each type drives a distinct silhouette via `BioCreatureSystem.applyTypeAccents()` (e.g. flame = horns + cinder tail + asymmetry; evil = dense panel lines + shoulder asymmetry + jagged horn; water = side fins + flow-cell backpack; grass = leafy ear-antennae + back tuft; electric = whip antennae; ice = rime plating + chest plate; crystal = heavy plating + cone horns; psychic = full visor + tall antenna; steel = boxy plating + box arms; dragon = wings + horns + armoured tail; normal = clean utility chassis), and a new `applyRarityFlair()` pass scales rare mons up ~1.08× / legendary ~1.18× and adds shoulder pads + plating + denser panel lines so boss-tier captures read as boss-tier at a glance.
 - FriendlyNPCSystem scatters NPCs with interactive dialogue.
 
 **Levels & Zones:**

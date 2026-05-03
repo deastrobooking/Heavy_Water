@@ -190,6 +190,7 @@ export class BioCreatureSystem {
 
     applyArchetype(a, style);
     applyTypeAccents(t, style);
+    applyRarityFlair(style, species.rarity);
 
     return { name: species.name, faction: "pet", style };
   }
@@ -609,36 +610,113 @@ function applyArchetype(a: Archetype, s: RobotStyle): void {
   }
 }
 
-/** Type-themed accent flourishes that don't override archetype silhouette. */
+/** Type-themed accent flourishes that don't override archetype silhouette.
+ *  Each type adds two or more visible flairs (horns, antennae, wings,
+ *  visor, plating, panel lines, asymmetry, glowing tail, etc.) so a
+ *  player can read the elemental type at a glance even before the colour
+ *  palette registers. Renamed in this pass: "fire" → "flame" and "dark"
+ *  → "evil" to keep the dex distinct from the obvious franchise. */
 function applyTypeAccents(t: ElementalType, s: RobotStyle): void {
   switch (t) {
-    case "fire":
-      s.hasHorns = s.hasHorns || true; s.hornLength = Math.max(s.hornLength, 0.3);
+    case "flame":
+      // Twin horns + a subtle asymmetric plate so flame creatures read
+      // as "battle-scarred fire-breathers" rather than just "orange".
+      s.hasHorns = true; s.hornLength = Math.max(s.hornLength, 0.35);
+      s.hasTail = s.hasTail || true;
+      s.tailLength = Math.max(s.tailLength, 0.55);
+      s.panelLineDensity = (s.panelLineDensity ?? 1.0) * 1.2;
+      s.asymmetry = Math.max(s.asymmetry, 0.15);
       break;
     case "electric":
-      s.hasAntennae = true; s.antennaLength = Math.max(s.antennaLength, 0.4);
+      // Long whip antennae + amplified emissive panel lines.
+      s.hasAntennae = true; s.antennaLength = Math.max(s.antennaLength, 0.55);
+      s.panelLineDensity = (s.panelLineDensity ?? 1.0) * 1.4;
       break;
     case "ice":
-    case "crystal":
+      // Heavy plating like rime caked on, with a chest plate (backpack).
       s.extraPlating = Math.max(s.extraPlating, 2);
+      s.hasBackpack = s.hasBackpack || true;
+      s.backpackSize = Math.max(s.backpackSize, 0.5);
+      break;
+    case "crystal":
+      // Geometric plating + cone horns reading as raw crystal shards.
+      s.extraPlating = Math.max(s.extraPlating, 3);
+      s.hasHorns = true; s.hornLength = Math.max(s.hornLength, 0.4);
       break;
     case "psychic":
+      // Full visor (no separate eyes) + tall single antenna for that
+      // mind-control silhouette.
       s.visorStyle = "full";
+      s.hasAntennae = true; s.antennaLength = Math.max(s.antennaLength, 0.5);
       break;
-    case "dark":
-      s.panelLineDensity = (s.panelLineDensity ?? 1.0) * 1.5;
+    case "evil":
+      // Asymmetric, jagged silhouette: shoulder asymmetry + dense panel
+      // lines + a single longer horn make evil units look unhinged
+      // rather than merely shadowy.
+      s.panelLineDensity = (s.panelLineDensity ?? 1.0) * 1.6;
+      s.asymmetry = Math.max(s.asymmetry, 0.35);
+      s.hasHorns = true; s.hornLength = Math.max(s.hornLength, 0.45);
+      s.shoulderPadSize = Math.max(s.shoulderPadSize, 0.3);
       break;
     case "steel":
-      s.extraPlating = Math.max(s.extraPlating, 2);
-      s.armStyle = s.armStyle === "tapered" ? "tapered" : "box";
+      // Boxy heavy industrial silhouette.
+      s.extraPlating = Math.max(s.extraPlating, 3);
+      s.armStyle = "box";
+      s.shoulderPadSize = Math.max(s.shoulderPadSize, 0.32);
       break;
     case "dragon":
+      // Wings + horns + a long armoured tail.
       s.hasWings = true; s.wingSpan = Math.max(s.wingSpan, 1.2);
       s.hasHorns = true; s.hornLength = Math.max(s.hornLength, 0.45);
+      s.hasTail = true; s.tailLength = Math.max(s.tailLength, 1.0);
+      s.extraPlating = Math.max(s.extraPlating, 2);
       break;
     case "water":
+      // Side fins (small wings, swept back) + a flow-cell backpack so
+      // water mons stop looking like blue-painted normal mons.
+      s.hasWings = true; s.wingSpan = Math.max(s.wingSpan, 0.7);
+      s.wingAngle = Math.max(s.wingAngle, 0.65);
+      s.hasBackpack = s.hasBackpack || true;
+      s.backpackSize = Math.max(s.backpackSize, 0.45);
+      break;
     case "grass":
+      // Leafy ear-antennae + a small back tuft (backpack) reading as
+      // sprouting foliage.
+      s.hasAntennae = true; s.antennaLength = Math.max(s.antennaLength, 0.45);
+      s.hasBackpack = s.hasBackpack || true;
+      s.backpackSize = Math.max(s.backpackSize, 0.4);
+      s.panelLineDensity = (s.panelLineDensity ?? 1.0) * 0.8;
+      break;
     case "normal":
+      // Reads as a clean utility chassis — short tufts + tidy round
+      // visor, no extra plating clutter.
+      s.hasAntennae = s.hasAntennae || true;
+      s.antennaLength = Math.max(s.antennaLength, 0.25);
+      s.visorStyle = s.visorStyle === "full" ? "full" : "round";
+      break;
+    default:
+      break;
+  }
+}
+
+/** Bigger / shinier rare and legendary mons read as "boss-tier" without
+ *  needing custom geometry per species. Uses Math.max so an archetype
+ *  that already sets a higher value isn't shrunk back down. */
+function applyRarityFlair(s: RobotStyle, rarity: import("./BioSpecies").Rarity): void {
+  switch (rarity) {
+    case "rare":
+      s.scale *= 1.08;
+      s.extraPlating = Math.max(s.extraPlating, 1);
+      s.shoulderPadSize = Math.max(s.shoulderPadSize, 0.25);
+      break;
+    case "legendary":
+      s.scale *= 1.18;
+      s.extraPlating = Math.max(s.extraPlating, 2);
+      s.shoulderPadSize = Math.max(s.shoulderPadSize, 0.32);
+      s.panelLineDensity = (s.panelLineDensity ?? 1.0) * 1.3;
+      break;
+    case "uncommon":
+    case "common":
     default:
       break;
   }
