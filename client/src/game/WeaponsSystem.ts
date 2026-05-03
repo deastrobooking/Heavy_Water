@@ -106,6 +106,17 @@ export class WeaponsSystem {
   private projectiles: Projectile[] = [];
   private lastFireTime: number = 0;
   private isFiring: boolean = false;
+  /** One StandardMaterial per WeaponType, lazily built on first shot and
+   *  shared by every projectile of that weapon thereafter. The original
+   *  code allocated a fresh StandardMaterial per shot — at rifle / shotgun
+   *  fire rates that's hundreds of materials a minute, all of which the
+   *  GC eventually has to reclaim and which caused visible stutter. */
+  private projectileMatCache: Map<WeaponType, BABYLON.StandardMaterial> = new Map();
+  /** Reusable scratch vectors so createProjectile / getAimForward don't
+   *  allocate two-three Vector3s per shot. */
+  private scratchSpread: BABYLON.Vector3 = new BABYLON.Vector3();
+  private scratchDir: BABYLON.Vector3 = new BABYLON.Vector3();
+  private scratchOrigin: BABYLON.Vector3 = new BABYLON.Vector3();
   private inventory: InventorySystem | null = null;
   private bus: EventBus = EventBus.getInstance();
 
@@ -297,7 +308,12 @@ export class WeaponsSystem {
 
     const spreadX = (Math.random() - 0.5) * weapon.spread;
     const spreadY = (Math.random() - 0.5) * weapon.spread;
-    const direction = forward.add(new BABYLON.Vector3(spreadX, spreadY, 0)).normalize();
+    // Compute direction in-place to avoid the per-shot Vector3 allocation
+    // that was firing dozens of times per second with auto weapons.
+    this.scratchDir.copyFrom(forward);
+    this.scratchDir.x += spreadX;
+    this.scratchDir.y += spreadY;
+    const direction = this.scratchDir.normalize().clone();
 
     // Vehicle amplification: 1.5x size, damage, explosion, 2.5x projectile
     // speed and 2x lifetime (range) — the orbital fighter cruises at 55 m/s
@@ -351,12 +367,30 @@ export class WeaponsSystem {
         color = new BABYLON.Color3(1, 1, 1);
     }
 
-    const material = new BABYLON.StandardMaterial("projectileMat", this.scene);
-    material.emissiveColor = color;
-    material.diffuseColor = color;
+    // Reuse one shared StandardMaterial per weapon type. Babylon happily
+    // shares a single material instance across hundreds of meshes, so this
+    // collapses N material allocations per second down to one per weapon
+    // for the entire session.
+    let material = this.projectileMatCache.get(weapon.type);
+    if (!material) {
+      material = new BABYLON.StandardMaterial(`projectileMat_${weapon.type}`, this.scene);
+      material.emissiveColor = color;
+      material.diffuseColor = color;
+      material.disableLighting = true;
+      material.freeze();
+      this.projectileMatCache.set(weapon.type, material);
+    }
     projectileMesh.material = material;
 
-    projectileMesh.position = this.getAimOrigin().add(forward.scale(1));
+    // Set spawn position in-place to avoid the .add(.scale(1)) allocation
+    // pair (one Vector3 from scale(), another from add()).
+    const aimOrigin = this.getAimOrigin();
+    this.scratchOrigin.set(
+      aimOrigin.x + forward.x,
+      aimOrigin.y + forward.y,
+      aimOrigin.z + forward.z,
+    );
+    projectileMesh.position.copyFrom(this.scratchOrigin);
 
     const baseR = weapon.type === "rocket" ? 5 : weapon.type === "grenade" ? 4 : weapon.type === "tracking_missile" ? 6 : 0;
     const projectile: Projectile = {

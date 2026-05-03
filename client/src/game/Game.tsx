@@ -1195,7 +1195,13 @@ export const Game: React.FC = () => {
         const startAutosaveTimer = () => {
           if (!currentUser) return;
           if (autosaveTimerRef.current !== null) return; // already running
-          autosaveTimerRef.current = window.setInterval(() => { void doSaveProgress(); }, 5000);
+          // Autosave cadence: 30 s. The previous 5 s interval was firing a
+          // full state serialization + POST every five seconds, which both
+          // burned main-thread time on JSON.stringify and triggered visible
+          // sluggishness as the game grew. Event-driven saves (level-up,
+          // weapon upgrade, pickup, etc.) still fire immediately, so the
+          // user never loses meaningful progress to the wider interval.
+          autosaveTimerRef.current = window.setInterval(() => { void doSaveProgress(); }, 30000);
         };
 
         // Initial load + apply
