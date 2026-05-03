@@ -2,6 +2,30 @@ import * as BABYLON from "@babylonjs/core";
 import { SkySystem } from "./SkySystem";
 import { AerialEnemySystem } from "./AerialEnemySystem";
 import { VehicleSystem, VehicleInstance } from "./VehicleSystem";
+import type { CityGenerator } from "./CityGenerator";
+import type { WeaponsSystem } from "./WeaponsSystem";
+import type { SpecialWeaponsSystem } from "./SpecialWeaponsSystem";
+import type { MegaBeamCannonSystem } from "./MegaBeamCannonSystem";
+import type { PlayerController } from "./PlayerController";
+
+/** Bag of optional system handles SpaceLevelSystem can hide / disable for
+ *  the duration of an orbital warp. Each one is null-checked individually
+ *  so the caller can pass only the ones that exist at mount time. */
+export interface SpaceLevelHandles {
+  city?: CityGenerator | null;
+  weapons?: WeaponsSystem | null;
+  specialWeapons?: SpecialWeaponsSystem | null;
+  megaCannon?: MegaBeamCannonSystem | null;
+  /** Anything else exposing `setVisible(bool)`. Passed as a flat array so
+   *  SpaceLevelSystem doesn't need to know each system's type — mountains,
+   *  foliage, environment props, etc. all expose the same method. */
+  worldVisibles?: Array<{ setVisible(visible: boolean): void } | null | undefined>;
+  /** Player controller — needed so SpaceLevelSystem can sync the mounted
+   *  state when it auto-enters / -exits the orbital fighter (otherwise the
+   *  player camera/physics stays in on-foot mode while the vehicle drives
+   *  around). */
+  player?: PlayerController | null;
+}
 
 /**
  * SpaceLevelSystem — Level 5 "Orbital Front"
@@ -36,6 +60,9 @@ export class SpaceLevelSystem {
   private aerial: AerialEnemySystem;
   private playerPos: () => BABYLON.Vector3;
   private vehicles: VehicleSystem | null;
+  private handles: SpaceLevelHandles;
+  /** Visibles we hid on mount; restored on dispose. */
+  private hiddenVisibles: Array<{ setVisible(v: boolean): void }> = [];
 
   /** Top-level transform — disposing it kills every mesh we spawned. */
   private root: BABYLON.TransformNode;
@@ -62,16 +89,20 @@ export class SpaceLevelSystem {
     aerial: AerialEnemySystem,
     playerPosProvider: () => BABYLON.Vector3,
     vehicles: VehicleSystem | null = null,
+    handles: SpaceLevelHandles = {},
   ) {
     this.scene = scene;
     this.sky = sky;
     this.aerial = aerial;
     this.playerPos = playerPosProvider;
     this.vehicles = vehicles;
+    this.handles = handles;
 
     this.root = new BABYLON.TransformNode("spaceLevelRoot", scene);
 
     sky.setSpaceMode(true);
+    this.hideWorldGeometry();
+    this.disablePlayerWeapons();
     this.buildEarth();
     this.spawnAsteroids();
     this.spawnAndEnterFighter();
@@ -87,16 +118,23 @@ export class SpaceLevelSystem {
       this.observer = null;
     }
     this.sky.setSpaceMode(false);
+    this.restoreWorldGeometry();
+    this.enablePlayerWeapons();
+    // Release the perpetual-cruise lock on the way out so warping back to
+    // a ground level lets the player throttle/brake their ATV normally.
+    if (this.vehicles) {
+      try { this.vehicles.setForceForward(false); } catch {}
+    }
+    // Sync the on-foot transition on the player controller — mirror of the
+    // setMounted call we made on entry.
+    try { this.handles.player?.setMounted(null); } catch {}
     // Eject the player from the orbital fighter and despawn the vehicle so
     // we don't leak it across warps. exit() is a no-op if the player has
-    // already manually exited (e.g. tapped F mid-fight).
+    // already manually exited (e.g. tapped F mid-fight). We then call
+    // despawn() (added to VehicleSystem) to also splice the instance out
+    // of the internal `vehicles` array so it doesn't accumulate.
     if (this.vehicles && this.spawnedFighter) {
-      try {
-        if (this.vehicles.getActive() === this.spawnedFighter) {
-          this.vehicles.exit();
-        }
-        try { this.spawnedFighter.meshes.root.dispose(); } catch {}
-      } catch {}
+      try { this.vehicles.despawn(this.spawnedFighter); } catch {}
       this.spawnedFighter = null;
     }
     // The earth (and its halo child) and every asteroid are parented to
@@ -209,6 +247,48 @@ export class SpaceLevelSystem {
     }
   }
 
+  /** Hide every piece of the ground world (city buildings, ground plane,
+   *  walkable platforms, mountains, foliage, environment props, etc.) so
+   *  the orbital scene shows only the void backdrop + asteroids + Earth.
+   *  We use `setEnabled(false)` so render-culling skips them entirely. */
+  private hideWorldGeometry(): void {
+    if (this.handles.city) {
+      try { this.handles.city.setVisible(false); } catch {}
+    }
+    if (this.handles.worldVisibles) {
+      for (const sys of this.handles.worldVisibles) {
+        if (!sys) continue;
+        try { sys.setVisible(false); } catch {}
+        this.hiddenVisibles.push(sys);
+      }
+    }
+  }
+
+  private restoreWorldGeometry(): void {
+    if (this.handles.city) {
+      try { this.handles.city.setVisible(true); } catch {}
+    }
+    for (const sys of this.hiddenVisibles) {
+      try { sys.setVisible(true); } catch {}
+    }
+    this.hiddenVisibles = [];
+  }
+
+  /** Suppress all player firing in vacuum — primary weapons, elemental
+   *  specials, and the Mega Beam Cannon all check their `firingEnabled`
+   *  master gate before discharging. */
+  private disablePlayerWeapons(): void {
+    try { this.handles.weapons?.setFiringEnabled(false); } catch {}
+    try { this.handles.specialWeapons?.setFiringEnabled(false); } catch {}
+    try { this.handles.megaCannon?.setFiringEnabled(false); } catch {}
+  }
+
+  private enablePlayerWeapons(): void {
+    try { this.handles.weapons?.setFiringEnabled(true); } catch {}
+    try { this.handles.specialWeapons?.setFiringEnabled(true); } catch {}
+    try { this.handles.megaCannon?.setFiringEnabled(true); } catch {}
+  }
+
   /** Spawn a CometFighter at the player's spawn altitude and have the
    *  vehicle system "enter" it so the player wakes up already piloting a
    *  spacecraft. Ground levels get an ATV/fighter sitting on the tarmac
@@ -229,6 +309,14 @@ export class SpaceLevelSystem {
     try { this.vehicles.enter(fighter); } catch (err) {
       console.warn("[SpaceLevelSystem] vehicles.enter threw:", err);
     }
+    // Mirror Game.tsx's KeyE-vehicle flow: tell the player controller it's
+    // mounted so the camera/physics swap to vehicle mode. Without this the
+    // player would still be in on-foot state while the fighter cruises.
+    try { this.handles.player?.setMounted(fighter.meshes.root); } catch {}
+    // Lock the throttle so the ship can never come to a stop in space —
+    // exiting / warping out is the only way to disengage. Set after enter()
+    // so the cruise speed kick takes effect on the now-active vehicle.
+    try { this.vehicles.setForceForward(true); } catch {}
   }
 
   /** Engage AerialEnemySystem and seed a couple of close-range targets so

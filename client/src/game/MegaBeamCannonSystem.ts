@@ -89,8 +89,15 @@ export class MegaBeamCannonSystem {
     return Math.max(0, Math.min(1, this.cooldown / this.cooldownDuration));
   }
 
+  /** Master enable gate — flipped off in space so the player can't fire. */
+  private firingEnabled: boolean = true;
+  setFiringEnabled(enabled: boolean): void {
+    this.firingEnabled = enabled;
+  }
+
   /** Fire the combo. Returns true if it actually fired (was off cooldown). */
   fire(): boolean {
+    if (!this.firingEnabled) return false;
     if (this.cooldown > 0) return false;
     this.cooldown = this.cooldownDuration;
 

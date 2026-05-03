@@ -229,6 +229,16 @@ export class AlienFoliageSystem {
     }
   }
 
+  /** Show/hide every alien plant in one go — bypasses the per-frame
+   *  distance culler so SpaceLevelSystem can guarantee none render in
+   *  the orbital scene. The culler still operates as normal once the
+   *  plants are re-enabled (it'll re-cull anything outside its radius). */
+  setVisible(visible: boolean): void {
+    for (const plant of this.plants) {
+      try { plant.root.setEnabled(visible); } catch {}
+    }
+  }
+
   dispose(): void {
     if (this.observer) {
       this.scene.onBeforeRenderObservable.remove(this.observer);

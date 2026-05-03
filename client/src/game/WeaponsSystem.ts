@@ -216,6 +216,16 @@ export class WeaponsSystem {
     this.vehicleMode = active;
   }
 
+  /** Master gate: when false, fire() short-circuits regardless of input
+   *  state. SpaceLevelSystem flips this off on warp-in so the player can't
+   *  shoot from the orbital fighter, and back on when warping to a ground
+   *  level. */
+  private firingEnabled: boolean = true;
+  setFiringEnabled(enabled: boolean): void {
+    this.firingEnabled = enabled;
+    if (!enabled) this.isFiring = false;
+  }
+
   /** Receives the player's armor-mod boosts. damageMul / fireRateMul are
    *  >= 1; values <= 0 are ignored to avoid division-by-zero / negative
    *  damage bugs. Called by Game.tsx whenever the player buys a Power Core
@@ -226,6 +236,7 @@ export class WeaponsSystem {
   }
 
   private fire(): void {
+    if (!this.firingEnabled) return;
     const weapon = this.weapons.get(this.currentWeapon);
     if (!weapon) return;
 

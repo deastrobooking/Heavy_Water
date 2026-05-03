@@ -1467,6 +1467,14 @@ export class EnvironmentPropSystem {
     return this.props.filter(p => p.damageable.isAlive).length;
   }
 
+  /** Show/hide every active prop — used by SpaceLevelSystem to clear the
+   *  surface during the orbital warp. */
+  setVisible(visible: boolean): void {
+    for (const p of this.props) {
+      try { p.root.setEnabled(visible); } catch {}
+    }
+  }
+
   dispose(): void {
     if (this.observer) {
       this.scene.onBeforeRenderObservable.remove(this.observer);

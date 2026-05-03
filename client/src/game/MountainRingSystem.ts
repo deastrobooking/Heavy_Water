@@ -703,6 +703,13 @@ export class MountainRingSystem {
     }
   }
 
+  /** Show/hide both the mountain ring and the temples — used by
+   *  SpaceLevelSystem to clear all surface geometry while in vacuum. */
+  setVisible(visible: boolean): void {
+    try { this.mountainRoot.setEnabled(visible); } catch {}
+    try { this.templeRoot.setEnabled(visible); } catch {}
+  }
+
   dispose(): void {
     if (this.observer) {
       this.scene.onBeforeRenderObservable.remove(this.observer);

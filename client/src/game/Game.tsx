@@ -856,6 +856,18 @@ export const Game: React.FC = () => {
               aerialEnemySystem,
               () => player.getPosition(),
               vehicleRef.current,
+              {
+                city: cityGenerator,
+                weapons: weaponsRef.current,
+                specialWeapons: specialWeaponsRef.current,
+                megaCannon: megaCannonRef.current,
+                player: player,
+                worldVisibles: [
+                  mountainRingRef.current,
+                  alienFoliageRef.current,
+                  propSystemRef.current,
+                ],
+              },
             );
           } else if (!isSpacelike && spaceLevelSystemRef.current) {
             try { spaceLevelSystemRef.current.dispose(); } catch {}
@@ -2452,7 +2464,12 @@ export const Game: React.FC = () => {
     // landing on it keeps the player from falling forever if they don't
     // have flight armor. The asteroid field above (25–105 m) and the
     // distant Earth read as the "in space" framing.
-    player.setPosition(new BABYLON.Vector3(sp.x, 2, sp.z));
+    // Spacelike levels need a high spawn Y so the player wakes up amid the
+    // 25–105 m asteroid band (the orbital fighter is auto-entered there);
+    // ground levels keep the slight 2 m nudge above terrain so they don't
+    // fall through if they don't have flight armor.
+    const spawnY = LevelSystem.isSpacelike(level as WorldLevel) ? 60 : 2;
+    player.setPosition(new BABYLON.Vector3(sp.x, spawnY, sp.z));
     setUpgradeMenuOpen(false);
     showMessage(`WARPED TO ${LevelSystem.getDisplayNameFor(level as WorldLevel)}`, 2200);
   }, [showMessage]);

@@ -118,7 +118,15 @@ export class SpecialWeaponsSystem {
     window.addEventListener("keydown", this.keyHandler);
   }
 
+  /** Master enable gate — flipped off by SpaceLevelSystem so elemental
+   *  specials can't fire while the player is piloting in vacuum. */
+  private firingEnabled: boolean = true;
+  setFiringEnabled(enabled: boolean): void {
+    this.firingEnabled = enabled;
+  }
+
   fireSpecialWeapon(slot: number): void {
+    if (!this.firingEnabled) return;
     const weapon = this.weapons.get(slot);
     if (!weapon || weapon.ammo <= 0) return;
 

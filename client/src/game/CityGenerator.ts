@@ -52,6 +52,14 @@ export class CityGenerator {
     rise: number;
   }> = [];
   private cellShadeMaterial: BABYLON.ShaderMaterial | null = null;
+  /** The 1200×1200 ground plane — kept so we can hide it (along with the
+   *  rest of the city geometry) when the player warps to the space level. */
+  private groundMesh: BABYLON.Mesh | null = null;
+  /** River + street lights — tracked here so `setVisible` can hide them
+   *  alongside the building/platform/ground when the player warps to the
+   *  orbital level. They aren't part of `buildings` or `platforms`. */
+  private extraSurfaceMeshes: BABYLON.AbstractMesh[] = [];
+  private extraSurfaceLights: BABYLON.PointLight[] = [];
   /** Every cell-shaded building material we've created, kept here so
    *  `setLevelTheme` can re-tint the whole city in O(n) without rebuilding
    *  geometry. Each entry stores its original baseColor + glowColor on the
@@ -814,6 +822,29 @@ export class CityGenerator {
     ground.material = groundMat;
     ground.receiveShadows = true;
     this.groundMaterial = groundMat;
+    this.groundMesh = ground;
+  }
+
+  /** Toggle visibility of the entire city (buildings, walkable platforms,
+   *  ground plane). Used by SpaceLevelSystem to ensure the orbital level
+   *  shows nothing but stars + Earth + asteroids. We use `setEnabled` so
+   *  the meshes are also skipped during render culling, not just hidden. */
+  setVisible(visible: boolean): void {
+    for (let i = 0; i < this.buildings.length; i++) {
+      this.buildings[i].setEnabled(visible);
+    }
+    for (let i = 0; i < this.platforms.length; i++) {
+      this.platforms[i].setEnabled(visible);
+    }
+    if (this.groundMesh) this.groundMesh.setEnabled(visible);
+    for (let i = 0; i < this.extraSurfaceMeshes.length; i++) {
+      this.extraSurfaceMeshes[i].setEnabled(visible);
+    }
+    // Toggle PointLights via setEnabled — Babylon respects this so the
+    // light no longer contributes to lighting calc when disabled.
+    for (let i = 0; i < this.extraSurfaceLights.length; i++) {
+      this.extraSurfaceLights[i].setEnabled(visible);
+    }
   }
 
   private createRiver(): void {
@@ -892,6 +923,7 @@ export class CityGenerator {
     waterMat.alpha = 0.85;
     waterMat.backFaceCulling = false;
     river.material = waterMat;
+    this.extraSurfaceMeshes.push(river);
 
     this.scene.onBeforeRenderObservable.add(() => {
       waterMat.setFloat("time", performance.now() / 1000);
@@ -922,6 +954,7 @@ export class CityGenerator {
         poleMat.diffuseColor = new BABYLON.Color3(0.15, 0.15, 0.2);
         poleMat.emissiveColor = new BABYLON.Color3(0.02, 0.02, 0.03);
         pole.material = poleMat;
+        this.extraSurfaceMeshes.push(pole);
 
         const lamp = BABYLON.MeshBuilder.CreateSphere("streetLamp", { diameter: 0.8 }, this.scene);
         lamp.position = new BABYLON.Vector3(x, poleHeight + 0.2, z);
@@ -933,12 +966,14 @@ export class CityGenerator {
         lampMat.emissiveColor = color;
         lampMat.diffuseColor = color;
         lamp.material = lampMat;
+        this.extraSurfaceMeshes.push(lamp);
 
         if ((x + z) % 90 === 0) {
           const light = new BABYLON.PointLight("streetLight", new BABYLON.Vector3(x, poleHeight + 0.5, z), this.scene);
           light.diffuse = color;
           light.intensity = 0.6;
           light.range = 25;
+          this.extraSurfaceLights.push(light);
         }
       }
     }

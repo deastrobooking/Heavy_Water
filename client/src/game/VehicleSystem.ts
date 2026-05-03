@@ -44,9 +44,23 @@ export class VehicleSystem {
   private input: VehicleInputState = { forward: false, back: false, left: false, right: false, up: false, down: false, boost: false };
   private nextId: number = 0;
   private wallColliders: WallCollider[] = [];
+  /** When true, fighter throttle is locked — the ship cruises at full
+   *  speed regardless of player input. Used by SpaceLevelSystem so the
+   *  player can never stop in vacuum (orbital combat = always moving). */
+  private forceForward: boolean = false;
+  /** Cruise speed used when forceForward is on. */
+  private static readonly FORCED_CRUISE_SPEED = 55;
 
   setBuildingColliders(colliders: WallCollider[]): void {
     this.wallColliders = colliders;
+  }
+
+  /** Lock the active fighter to perpetual forward cruise — see field doc. */
+  setForceForward(active: boolean): void {
+    this.forceForward = active;
+    if (active && this.active && this.active.kind !== "atv") {
+      this.active.speed = VehicleSystem.FORCED_CRUISE_SPEED;
+    }
   }
 
   /**
@@ -196,6 +210,19 @@ export class VehicleSystem {
     EventBus.getInstance().emit("vehicle:entered", { id: v.id, kind: v.kind, name: v.descriptor.name });
   }
 
+  /** Remove a spawned vehicle from the world (and the internal registry).
+   *  Used by SpaceLevelSystem on warp-out so the orbital fighter doesn't
+   *  pile up across repeat L5 visits. If the despawned vehicle is the
+   *  active one, we exit() first so player state stays consistent. */
+  despawn(v: VehicleInstance): void {
+    if (this.active === v) {
+      try { this.exit(); } catch {}
+    }
+    const i = this.vehicles.indexOf(v);
+    if (i >= 0) this.vehicles.splice(i, 1);
+    try { v.meshes.root.dispose(); } catch {}
+  }
+
   exit(): VehicleInstance | null {
     const v = this.active;
     if (!v) return null;
@@ -296,13 +323,20 @@ export class VehicleSystem {
     const accel = 30;
     const maxSpeed = this.input.boost ? 95 : 55;
     const drag = 3;
-    if (this.input.forward) v.speed += accel * dt;
-    if (this.input.back) v.speed -= accel * 0.6 * dt;
-    if (!this.input.forward && !this.input.back) {
-      if (v.speed > 0) v.speed = Math.max(0, v.speed - drag * dt);
-      else if (v.speed < 0) v.speed = Math.min(0, v.speed + drag * dt);
+    if (this.forceForward) {
+      // Orbital cruise — boost still works (overdrive past cruise) but
+      // the brake/back input is suppressed so the ship can never stop.
+      if (this.input.boost) v.speed += accel * dt;
+      v.speed = Math.max(VehicleSystem.FORCED_CRUISE_SPEED, Math.min(maxSpeed, v.speed));
+    } else {
+      if (this.input.forward) v.speed += accel * dt;
+      if (this.input.back) v.speed -= accel * 0.6 * dt;
+      if (!this.input.forward && !this.input.back) {
+        if (v.speed > 0) v.speed = Math.max(0, v.speed - drag * dt);
+        else if (v.speed < 0) v.speed = Math.min(0, v.speed + drag * dt);
+      }
+      v.speed = Math.max(-maxSpeed * 0.4, Math.min(maxSpeed, v.speed));
     }
-    v.speed = Math.max(-maxSpeed * 0.4, Math.min(maxSpeed, v.speed));
 
     // Direction in 3D from yaw + pitch (negate pitch so look up = nose up)
     const cp = Math.cos(-v.pitch);
