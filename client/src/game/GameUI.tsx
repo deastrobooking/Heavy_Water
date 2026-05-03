@@ -570,24 +570,12 @@ export const GameUI: React.FC<GameUIProps> = ({
         </div>
       )}
 
-      <div className="absolute bottom-4 right-4 bg-black/80 border-2 border-gray-600 p-3 rounded-lg text-xs">
-        <div className="text-gray-400 mb-2">CONTROLS</div>
-        <div className="text-gray-300 space-y-1">
-          <div>WASD - Move | SHIFT - Sprint</div>
-          <div>MOUSE - Look | LMB - Fire</div>
-          <div>1-6 - Weapons | P - Hunter Missile</div>
-          <div>, / .  - Cycle Weapon (D-Pad ◀▶)</div>
-          <div>7-0 - Special Arsenal | R - Reload</div>
-          <div>SPACE - Jump (x3 = Fly) | X - Flight</div>
-          <div>Q - Dodge | <span className="text-yellow-300">L - Boost Dash</span> | F - Parry</div>
-          <div>E - Interact | G - Build</div>
-          <div>V - Melee | B - Heavy Melee</div>
-          <div><span className="text-yellow-300">Y / J - Beam Sabre Slash</span> (L→J = arc wave!)</div>
-          <div className="text-cyan-300">Z/I/N - Lightning/Ice/Fire (track)</div>
-          <div className="text-cyan-300">U/T/M - Inferno/Wind/Psychic (dome)</div>
-          <div className="text-yellow-300">K - Cast Selected | O / . - Cycle</div>
-        </div>
-      </div>
+      {/* CONTROLS reference panel deliberately removed — the canonical
+          stylish version lives inside the in-game map (`M` key, owned by
+          MapSystem.buildControlsPanel) and is grouped by Movement /
+          Combat / Build-World / Gamepad. Keeping a second HUD copy here
+          duplicated keys and drifted out of sync as new bindings landed
+          (e.g. flight toggle, prefab plan-mode, gamepad mappings). */}
 
       {!anyModalOpen && (
         <div
