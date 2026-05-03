@@ -422,36 +422,15 @@ export class MegaBeamCannonSystem {
   }
 
   private spawnExplosion(pos: BABYLON.Vector3, radius: number): void {
-    const sphere = BABYLON.MeshBuilder.CreateSphere("megaCannonExpl", { diameter: radius * 2 }, this.scene);
-    sphere.position.copyFrom(pos);
-    const mat = new BABYLON.StandardMaterial("megaCannonExplMat", this.scene);
-    mat.emissiveColor = new BABYLON.Color3(1, 0.5, 0.85);
-    mat.alpha = 0.7;
-    mat.disableLighting = true;
-    sphere.material = mat;
-    sphere.isPickable = false;
-
-    const light = new BABYLON.PointLight("megaCannonExplLight", pos.clone(), this.scene);
-    light.diffuse = new BABYLON.Color3(1, 0.5, 0.85);
-    light.intensity = 6;
-    light.range = radius * 3;
-
-    let frame = 0;
-    const animate = () => {
-      frame++;
-      const s = 1 + frame * 0.18;
-      sphere.scaling.setAll(s);
-      mat.alpha = Math.max(0, 0.7 - frame * 0.08);
-      light.intensity = Math.max(0, 6 - frame * 0.7);
-      if (frame < 10) {
-        requestAnimationFrame(animate);
-      } else {
-        mat.dispose();
-        sphere.dispose();
-        light.dispose();
-      }
-    };
-    animate();
+    // Pink missile detonation routed through the unified ExplosionSystem.
+    const tier: "small" | "medium" | "large" =
+      radius >= 5 ? "large" : radius >= 2.5 ? "medium" : "small";
+    this.bus.emit("effect:explosion", {
+      position: pos.clone(),
+      radius,
+      tier,
+      color: new BABYLON.Color3(1.0, 0.5, 0.85),
+    });
   }
 
   dispose(): void {

@@ -497,34 +497,16 @@ export class SpecialWeaponsSystem {
   }
 
   private createExplosion(position: BABYLON.Vector3, radius: number, color: BABYLON.Color3): void {
-    const explosion = BABYLON.MeshBuilder.CreateSphere("specialExplosion", { diameter: radius * 2 }, this.scene);
-    explosion.position = position.clone();
-
-    const material = new BABYLON.StandardMaterial("specialExplosionMat", this.scene);
-    material.emissiveColor = color;
-    material.alpha = 0.7;
-    explosion.material = material;
-
-    const light = new BABYLON.PointLight("specialExplosionLight", position, this.scene);
-    light.diffuse = color;
-    light.intensity = 6;
-    light.range = radius * 3;
-
-    let frame = 0;
-    const animate = () => {
-      frame++;
-      const scale = 1 + frame * 0.12;
-      explosion.scaling = new BABYLON.Vector3(scale, scale, scale);
-      material.alpha = Math.max(0, 0.7 - frame * 0.07);
-      light.intensity = Math.max(0, 6 - frame * 0.6);
-      if (frame < 10) {
-        requestAnimationFrame(animate);
-      } else {
-        explosion.dispose();
-        light.dispose();
-      }
-    };
-    animate();
+    // Routed through the unified ExplosionSystem so every special weapon
+    // detonation gets pooled meshes, debris, shockwave, and camera shake.
+    const tier: "small" | "medium" | "large" =
+      radius >= 5 ? "large" : radius >= 2.5 ? "medium" : "small";
+    EventBus.getInstance().emit("effect:explosion", {
+      position: position.clone(),
+      radius,
+      tier,
+      color,
+    });
   }
 
   private createChainEffect(from: BABYLON.Vector3, to: BABYLON.Vector3): void {

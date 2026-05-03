@@ -435,35 +435,17 @@ export class WeaponsSystem {
   }
 
   private createExplosion(position: BABYLON.Vector3, radius: number): void {
-    const explosion = BABYLON.MeshBuilder.CreateSphere("explosion", { diameter: radius * 2 }, this.scene);
-    explosion.position = position.clone();
-    
-    const material = new BABYLON.StandardMaterial("explosionMat", this.scene);
-    material.emissiveColor = new BABYLON.Color3(1, 0.5, 0);
-    material.alpha = 0.8;
-    explosion.material = material;
-
-    const explosionLight = new BABYLON.PointLight("explosionLight", position, this.scene);
-    explosionLight.diffuse = new BABYLON.Color3(1, 0.5, 0);
-    explosionLight.intensity = 5;
-    explosionLight.range = radius * 3;
-
-    let frame = 0;
-    const animateExplosion = () => {
-      frame++;
-      const scale = 1 + frame * 0.1;
-      explosion.scaling = new BABYLON.Vector3(scale, scale, scale);
-      material.alpha = Math.max(0, 0.8 - frame * 0.08);
-      explosionLight.intensity = Math.max(0, 5 - frame * 0.5);
-
-      if (frame < 10) {
-        requestAnimationFrame(animateExplosion);
-      } else {
-        explosion.dispose();
-        explosionLight.dispose();
-      }
-    };
-    animateExplosion();
+    // Routed through the unified ExplosionSystem (subscribes to
+    // "effect:explosion"). Tier is picked from the radius the caller asked
+    // for so rocket vs grenade vs cluster all read visually distinct.
+    const tier: "small" | "medium" | "large" =
+      radius >= 5 ? "large" : radius >= 2.5 ? "medium" : "small";
+    EventBus.getInstance().emit("effect:explosion", {
+      position: position.clone(),
+      radius,
+      tier,
+      color: new BABYLON.Color3(1.0, 0.5, 0.1),
+    });
   }
 
   selectWeapon(type: WeaponType): void {

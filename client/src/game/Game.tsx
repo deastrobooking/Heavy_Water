@@ -42,6 +42,7 @@ import { LabBlueprint } from "./LabUI";
 import { LevelSerializer } from "./LevelSerializer";
 import { MultiplayerSystem } from "./MultiplayerSystem";
 import { EffectsSystem } from "./EffectsSystem";
+import { ExplosionSystem } from "./ExplosionSystem";
 import { PropAudioSystem } from "./PropAudioSystem";
 import { SoundSystem } from "./SoundSystem";
 import { SkySystem } from "./SkySystem";
@@ -136,6 +137,7 @@ export const Game: React.FC = () => {
   const loadInputRef = useRef<HTMLInputElement | null>(null);
   const multiplayerRef = useRef<MultiplayerSystem | null>(null);
   const effectsRef = useRef<EffectsSystem | null>(null);
+  const explosionsRef = useRef<ExplosionSystem | null>(null);
   const propAudioRef = useRef<PropAudioSystem | null>(null);
   const soundRef = useRef<SoundSystem | null>(null);
   const skyRef = useRef<SkySystem | null>(null);
@@ -579,6 +581,9 @@ export const Game: React.FC = () => {
 
         const effects = new EffectsSystem(scene, engine.getCamera());
         effectsRef.current = effects;
+
+        const explosions = new ExplosionSystem(scene);
+        explosionsRef.current = explosions;
 
         const propAudio = new PropAudioSystem();
         propAudioRef.current = propAudio;
@@ -1462,6 +1467,7 @@ export const Game: React.FC = () => {
           shopSystem.update();
           buildingSystem.update(dt);
           effects.update(dt);
+          explosions.update(dt);
           sky.update(dt);
           multiplayer.update(dt);
 
@@ -1613,6 +1619,7 @@ export const Game: React.FC = () => {
         // their EventBus subscriptions / scene refs don't leak between
         // failed-init retries.
         if (effectsRef.current) { try { effectsRef.current.dispose(); } catch {} effectsRef.current = null; }
+        if (explosionsRef.current) { try { explosionsRef.current.dispose(); } catch {} explosionsRef.current = null; }
         if (propAudioRef.current) { try { propAudioRef.current.dispose(); } catch {} propAudioRef.current = null; }
         if (soundRef.current) { try { soundRef.current.dispose(); } catch {} soundRef.current = null; }
         if (vehicleRef.current) { try { vehicleRef.current.dispose(); } catch {} vehicleRef.current = null; }
@@ -1680,6 +1687,7 @@ export const Game: React.FC = () => {
     // every restart left a fresh listener stack on the bus, so each event
     // fanned out to N stale handlers that walked dead meshes.
     if (effectsRef.current) { try { effectsRef.current.dispose(); } catch {} effectsRef.current = null; }
+    if (explosionsRef.current) { try { explosionsRef.current.dispose(); } catch {} explosionsRef.current = null; }
     if (propAudioRef.current) { try { propAudioRef.current.dispose(); } catch {} propAudioRef.current = null; }
     if (soundRef.current) { try { soundRef.current.dispose(); } catch {} soundRef.current = null; }
     if (vehicleRef.current) { try { vehicleRef.current.dispose(); } catch {} vehicleRef.current = null; }
@@ -2275,6 +2283,7 @@ export const Game: React.FC = () => {
       if (autosaveTimerRef.current !== null) window.clearInterval(autosaveTimerRef.current);
       if (respawnTimeoutRef.current !== null) window.clearTimeout(respawnTimeoutRef.current);
       if (effectsRef.current) effectsRef.current.dispose();
+      if (explosionsRef.current) explosionsRef.current.dispose();
       if (propAudioRef.current) propAudioRef.current.dispose();
       if (soundRef.current) soundRef.current.dispose();
       if (skyRef.current) skyRef.current.dispose();
