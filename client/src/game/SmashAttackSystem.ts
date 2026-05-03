@@ -33,16 +33,15 @@ export class SmashAttackSystem {
   private aerialEnemySystem: AerialEnemySystem;
   private bus: EventBus;
 
-  private keyHeld: boolean = false;
+  // Trigger is the *combo* Space + KeyJ both held while airborne for
+  // CHARGE_SECONDS. KeyJ alone stays bound to the beam-sabre — those are
+  // intentionally independent so the player can still slash mid-air.
+  private jumpHeld: boolean = false;
+  private attackHeld: boolean = false;
   private charging: boolean = false;
   private chargeElapsed: number = 0;
   private smashing: boolean = false;
   private cooldown: number = 0;
-  // True if the most recent KeyJ press was claimed by the smash (i.e. the
-  // player was airborne and not on cooldown). Game.tsx reads this on the
-  // matching keyup so it can skip the beam-sabre release that would
-  // otherwise fire alongside the smash.
-  private claimedLastPress: boolean = false;
 
   // Per-smash set of enemy ids hit on the way down so a single dive can't
   // re-tick the same enemy every frame.
@@ -61,60 +60,41 @@ export class SmashAttackSystem {
     this.bus = bus;
   }
 
-  /** Called from the keyboard handler on KeyJ down (gamepad LT foot).
-   *  Game.tsx is responsible for only routing the press here when the
-   *  player is airborne (so the beam-sabre still owns ground presses).
-   *  We still re-validate so a race / stale call doesn't mis-trigger. */
-  notifyKeyDown(): void {
-    this.claimedLastPress = false;
-    if (this.keyHeld) return; // ignore key-repeat
-    this.keyHeld = true;
-    if (this.smashing || this.cooldown > 0) return;
-    if (this.player.getIsGrounded() || this.player.getIsJetpacking()) return;
-    this.charging = true;
-    this.chargeElapsed = 0;
-    this.claimedLastPress = true;
-  }
+  /** Called from Game.tsx on Space down / up. */
+  notifyJumpDown(): void { this.jumpHeld = true; }
+  notifyJumpUp(): void { this.jumpHeld = false; }
 
-  /** Called from the keyboard handler on KeyJ up. */
-  notifyKeyUp(): void {
-    this.keyHeld = false;
-    // Releasing the key before the threshold cancels the pending smash.
-    // A smash that's already in flight keeps going — once committed, the
-    // player can't bail out.
-    if (this.charging) {
-      this.charging = false;
-      this.chargeElapsed = 0;
-    }
-  }
-
-  /** True if the most recent press was routed into the smash (used by
-   *  Game.tsx to suppress the matching beam-sabre release). Read once
-   *  per keyup. */
-  consumedLastPress(): boolean {
-    const v = this.claimedLastPress;
-    this.claimedLastPress = false;
-    return v;
-  }
+  /** Called from Game.tsx on KeyJ (gamepad LT foot) down / up. */
+  notifyAttackDown(): void { this.attackHeld = true; }
+  notifyAttackUp(): void { this.attackHeld = false; }
 
   update(dt: number): void {
     if (this.cooldown > 0) this.cooldown = Math.max(0, this.cooldown - dt);
 
-    if (this.charging) {
-      // Cancel if the player landed before the threshold (the "in air"
-      // requirement only matters at trigger time, but landing during the
-      // wind-up should obviously void the move).
-      if (this.player.getIsGrounded() || this.player.getIsJetpacking()) {
+    // Combo gate: both keys must be held, the player must be airborne,
+    // not jetpacking (jetpack owns velocity.y), not already smashing /
+    // cooling down. Charging starts the moment all conditions are met
+    // and resets the moment any of them drops.
+    const comboValid =
+      this.jumpHeld && this.attackHeld &&
+      !this.player.getIsGrounded() &&
+      !this.player.getIsJetpacking() &&
+      !this.smashing && this.cooldown <= 0;
+
+    if (comboValid) {
+      if (!this.charging) {
+        this.charging = true;
+        this.chargeElapsed = 0;
+      }
+      this.chargeElapsed += dt;
+      if (this.chargeElapsed >= SmashAttackSystem.CHARGE_SECONDS) {
         this.charging = false;
         this.chargeElapsed = 0;
-      } else {
-        this.chargeElapsed += dt;
-        if (this.chargeElapsed >= SmashAttackSystem.CHARGE_SECONDS) {
-          this.charging = false;
-          this.chargeElapsed = 0;
-          this.tryStartSmash();
-        }
+        this.tryStartSmash();
       }
+    } else if (this.charging) {
+      this.charging = false;
+      this.chargeElapsed = 0;
     }
 
     if (this.smashing) {
@@ -245,7 +225,8 @@ export class SmashAttackSystem {
   dispose(): void {
     this.charging = false;
     this.smashing = false;
-    this.keyHeld = false;
+    this.jumpHeld = false;
+    this.attackHeld = false;
     this.descentHitGround.clear();
     this.descentHitAerial.clear();
   }

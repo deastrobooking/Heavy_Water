@@ -2501,20 +2501,20 @@ export const Game: React.FC = () => {
           if (megaCannonRef.current && (weaponHeldRef.current || now - weaponPressTimeRef.current < COMBO_WINDOW_MS)) {
             megaCannonRef.current.fire();
           }
-          // Smash takes priority while airborne: if the player is in the
-          // air, route KeyJ exclusively to the smash so the sabre charge
-          // doesn't compete (the spinning-blade release on keyup would
-          // also fire alongside the smash). Sabre slash + charge still
-          // own the key when grounded.
-          const playerCtl = playerRef.current;
-          const routeToSmash = !!playerCtl && !playerCtl.getIsGrounded() && !playerCtl.isMounted();
-          if (!routeToSmash && beamSabreRef.current) {
+          if (beamSabreRef.current) {
             beamSabreRef.current.startCharge();
           }
-          if (routeToSmash) {
-            smashAttackRef.current?.notifyKeyDown();
-          }
+          // Smash combo: KeyJ held + Space held + airborne for 1 s. The
+          // sabre still owns the key on its own — the smash only fires
+          // when Space is also held, so dogfighting in the air with
+          // sabre slashes stays untouched.
+          smashAttackRef.current?.notifyAttackDown();
         }
+      } else if (e.code === "Space") {
+        // Track Space for the smash combo. We don't preventDefault here
+        // because PlayerController owns the actual jump impulse via its
+        // own keydown listener — we're just mirroring the held state.
+        if (!e.repeat) smashAttackRef.current?.notifyJumpDown();
       } else if (e.code === "Semicolon") {
         // Fury Slash — LT + Y combo (gamepad) or `;` (keyboard).
         // Note: these combo keys are intentionally rare codes — KeyU/KeyI
@@ -2561,17 +2561,15 @@ export const Game: React.FC = () => {
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === "KeyY" || e.code === "KeyJ") {
         beamHeldRef.current = false;
-        // Mirror the keydown routing: the sabre release only fires if
-        // the press was for the sabre (i.e. wasn't routed to the smash).
-        // notifyKeyUp is always safe — it's a no-op when nothing is
-        // charging, and it's how a player aborts an in-progress charge
-        // by releasing the trigger before the 1 s threshold.
-        const smash = smashAttackRef.current;
-        const routedToSmash = !!smash && smash.consumedLastPress();
-        if (!routedToSmash && beamSabreRef.current) {
+        // The beam-sabre release is essential for air combat (Spinning
+        // Blade), so it always fires alongside the smash combo's
+        // attack-key tracking — the two systems are independent.
+        if (beamSabreRef.current) {
           beamSabreRef.current.releaseCharge();
         }
-        smash?.notifyKeyUp();
+        smashAttackRef.current?.notifyAttackUp();
+      } else if (e.code === "Space") {
+        smashAttackRef.current?.notifyJumpUp();
       }
     };
     // Mouse left button drives the Mega Beam Cannon combo too: pressing it
