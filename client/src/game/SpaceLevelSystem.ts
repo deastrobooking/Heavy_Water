@@ -7,6 +7,7 @@ import type { WeaponsSystem } from "./WeaponsSystem";
 import type { SpecialWeaponsSystem } from "./SpecialWeaponsSystem";
 import type { MegaBeamCannonSystem } from "./MegaBeamCannonSystem";
 import type { PlayerController } from "./PlayerController";
+import type { GamepadInput } from "./GamepadInput";
 
 /** Bag of optional system handles SpaceLevelSystem can hide / disable for
  *  the duration of an orbital warp. Each one is null-checked individually
@@ -29,6 +30,13 @@ export interface SpaceLevelHandles {
    *  so the hidden city can't flip back on as the player flies around
    *  near previously-culled sectors. */
   lodCull?: { setSuppressed(b: boolean): void } | null;
+  /** Optional gamepad input. Flipped into spacecraft mode on warp-in so
+   *  RT/LT both fire weapons (LT also triggers the Mega Beam Cannon combo)
+   *  instead of throttle/brake — the orbital fighter has its throttle
+   *  locked by VehicleSystem.setForceForward, so the vehicle KeyW/KeyS
+   *  mapping is useless and the player would otherwise have no way to
+   *  shoot from a controller. */
+  gamepad?: GamepadInput | null;
 }
 
 /**
@@ -114,6 +122,9 @@ export class SpaceLevelSystem {
     // setFiringEnabled gates on WeaponsSystem / SpecialWeaponsSystem /
     // MegaBeamCannonSystem are kept available (they still default to
     // true) for any future use case that does want to silence fire.
+    // Re-route gamepad triggers so a controller player can actually shoot
+    // in space (RT + LT both fire; LT also drives the Mega Beam Cannon).
+    try { this.handles.gamepad?.setSpacecraftMode(true); } catch {}
     this.buildEarth();
     this.spawnAsteroids();
     this.spawnAndEnterFighter();
@@ -150,6 +161,10 @@ export class SpaceLevelSystem {
     // anything else that flipped these off would otherwise leak across
     // the warp.
     this.enablePlayerWeapons();
+    // Restore standard gamepad trigger mapping (vehicle = throttle/brake,
+    // foot = LMB/KeyJ). Important: do this before player.setMounted(null)
+    // so any held trigger is released under the spacecraft binding.
+    try { this.handles.gamepad?.setSpacecraftMode(false); } catch {}
     // Release the perpetual-cruise lock on the way out so warping back to
     // a ground level lets the player throttle/brake their ATV normally.
     if (this.vehicles) {

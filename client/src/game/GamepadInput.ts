@@ -71,6 +71,14 @@ export class GamepadInput {
   // and reverse instead of firing the weapon / beam slash. The host wires
   // this provider so the gamepad can ask which context to use each frame.
   private contextProvider: (() => "foot" | "vehicle") | null = null;
+  // Hard override: when true (set by SpaceLevelSystem on warp-in), BOTH
+  // triggers re-route to the on-foot firing bindings so the player can
+  // shoot from the orbital fighter — the spacecraft locks throttle on
+  // anyway, so the vehicle KeyW/KeyS mapping isn't useful in space. RT
+  // dispatches LMB (primary fire) and LT dispatches LMB + KeyJ together,
+  // which trips the existing combo window and fires the Mega Beam Cannon
+  // alongside the regular shot. Cleared on warp-out.
+  private spacecraftMode: boolean = false;
 
   constructor(camera: BABYLON.FreeCamera) {
     this.camera = camera;
@@ -94,6 +102,37 @@ export class GamepadInput {
    *  the weapon (LMB). */
   setContextProvider(fn: () => "foot" | "vehicle"): void {
     this.contextProvider = fn;
+  }
+
+  /** Flip spacecraft trigger overrides on/off. Called by SpaceLevelSystem
+   *  when the orbital fighter is mounted/unmounted so LT and RT both fire
+   *  weapons (and LT additionally drives the Mega Beam Cannon combo). */
+  setSpacecraftMode(active: boolean): void {
+    if (this.spacecraftMode === active) return;
+    // Release whatever was held under the OLD mapping before switching so
+    // we don't leave a stuck KeyW / KeyS / LMB / KeyJ across the swap.
+    if (this.spacecraftMode) {
+      this.releaseSpacecraftTriggers();
+    } else {
+      if (this.prevTriggers.lt) this.releaseLT(this.prevTriggerContext);
+      if (this.prevTriggers.rt) this.releaseRT(this.prevTriggerContext);
+    }
+    this.prevTriggers.lt = false;
+    this.prevTriggers.rt = false;
+    this.spacecraftMode = active;
+  }
+
+  /** Lift any LMB / KeyJ that the spacecraft trigger mapping latched.
+   *  LMB is ref-counted on (lt OR rt) so it's released exactly once if
+   *  either trigger was down. KeyJ tracks LT alone. Used by mode swap,
+   *  context change, and gamepad-disconnect cleanup. */
+  private releaseSpacecraftTriggers(): void {
+    if (this.prevTriggers.lt || this.prevTriggers.rt) {
+      this.dispatchMouseButton(false, 0);
+    }
+    if (this.prevTriggers.lt) {
+      this.dispatchKeyUp("KeyJ", "j");
+    }
   }
 
   private notify(connected: boolean, id: string): void {
@@ -209,14 +248,40 @@ export class GamepadInput {
     // binding before dispatching the new one so we don't leave a "stuck"
     // KeyW/KeyS/LMB after entering or exiting a vehicle.
     if (context !== this.prevTriggerContext) {
-      if (this.prevTriggers.lt) this.releaseLT(this.prevTriggerContext);
-      if (this.prevTriggers.rt) this.releaseRT(this.prevTriggerContext);
+      // Spacecraft mode owns its own LMB/KeyJ mapping regardless of the
+      // foot/vehicle context, so use the spacecraft release path when
+      // it's active — otherwise we'd send KeyW/KeyS up while the player
+      // is actually firing LMB and leak a stuck mouse button.
+      if (this.spacecraftMode) {
+        this.releaseSpacecraftTriggers();
+      } else {
+        if (this.prevTriggers.lt) this.releaseLT(this.prevTriggerContext);
+        if (this.prevTriggers.rt) this.releaseRT(this.prevTriggerContext);
+      }
       this.prevTriggers.lt = false;
       this.prevTriggers.rt = false;
       this.prevTriggerContext = context;
     }
 
-    if (context === "vehicle") {
+    if (this.spacecraftMode) {
+      // Orbital fighter: throttle is locked by SpaceLevelSystem so RT/LT
+      // are repurposed for combat. Either trigger fires the primary
+      // weapon (LMB), and LT additionally pulses KeyJ on the same edge so
+      // the existing LMB+J combo window triggers the Mega Beam Cannon
+      // alongside the regular shot.
+      //
+      // LMB is ref-counted on the COMBINED trigger intent (lt OR rt) so
+      // releasing one trigger while the other is still held doesn't
+      // prematurely send mouseup and stop the fire stream.
+      const wantFire = ltDown || rtDown;
+      const hadFire = this.prevTriggers.lt || this.prevTriggers.rt;
+      if (wantFire && !hadFire) this.dispatchMouseButton(true, 0);
+      else if (!wantFire && hadFire) this.dispatchMouseButton(false, 0);
+      // KeyJ tracks LT alone — it's the combo half that drives the Mega
+      // Beam Cannon and the Beam Sabre slash.
+      if (ltDown && !this.prevTriggers.lt) this.dispatchKeyDown("KeyJ", "j");
+      else if (!ltDown && this.prevTriggers.lt) this.dispatchKeyUp("KeyJ", "j");
+    } else if (context === "vehicle") {
       // Vehicle: RT → throttle (KeyW), LT → reverse / brake (KeyS).
       if (rtDown && !this.prevTriggers.rt) this.dispatchKeyDown("KeyW", "w");
       else if (!rtDown && this.prevTriggers.rt) this.dispatchKeyUp("KeyW", "w");
@@ -285,8 +350,14 @@ export class GamepadInput {
         this.prevAxisKeys[slot] = false;
       }
     }
-    if (this.prevTriggers.rt) { this.releaseRT(this.prevTriggerContext); this.prevTriggers.rt = false; }
-    if (this.prevTriggers.lt) { this.releaseLT(this.prevTriggerContext); this.prevTriggers.lt = false; }
+    if (this.spacecraftMode) {
+      this.releaseSpacecraftTriggers();
+      this.prevTriggers.lt = false;
+      this.prevTriggers.rt = false;
+    } else {
+      if (this.prevTriggers.rt) { this.releaseRT(this.prevTriggerContext); this.prevTriggers.rt = false; }
+      if (this.prevTriggers.lt) { this.releaseLT(this.prevTriggerContext); this.prevTriggers.lt = false; }
+    }
     this.prevButtons.forEach((prev, padIndex) => {
       for (let i = 0; i < prev.length; i++) {
         const map = BUTTON_TO_KEY[i];

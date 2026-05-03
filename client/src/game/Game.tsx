@@ -1018,6 +1018,7 @@ export const Game: React.FC = () => {
                   propSystemRef.current,
                 ],
                 lodCull,
+                gamepad: gamepadRef.current,
               },
             );
           } else if (!isSpacelike && spaceLevelSystemRef.current) {
