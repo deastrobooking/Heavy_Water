@@ -86,7 +86,11 @@ export class AerialUnit {
   // AI state
   private orbitAngle: number;
   private orbitRadius: number;
-  private orbitAltitude: number;
+  /** Public so AerialEnemySystem can re-anchor units in orbital combat
+   *  (Level 5 / Orbital Front) — the default altitudes are tuned for a
+   *  ground-level player and leave bullets way above the orbiting fighters
+   *  when the player is piloting a fighter at y≈60. */
+  orbitAltitude: number;
   private fireCooldown: number = 0;
   private divePhase: number = 0; // 0 = orbit, 1 = diving, 2 = climbing
   private bus: EventBus;
@@ -738,12 +742,46 @@ export class AerialEnemySystem {
 
   isAggro(): boolean { return this.aggro; }
 
+  /** Orbital-Front anchor. When non-null, every spawn (and any existing
+   *  unit) re-anchors its orbit altitude to `playerY + perKindOffset` so
+   *  the squadron actually fights at the player's altitude in vacuum.
+   *  SpaceLevelSystem sets this on warp-in and clears it on warp-out. */
+  private spaceAltitudeAnchor: (() => number) | null = null;
+  private static readonly SPACE_ALT_OFFSETS = { fighter: -6, battleship: 6, fortress: 24 };
+  setSpaceCombat(active: boolean, playerYProvider?: () => number): void {
+    if (active && playerYProvider) {
+      this.spaceAltitudeAnchor = playerYProvider;
+      // Re-anchor existing units so they immediately migrate up to the
+      // player's altitude band instead of waiting for natural respawn.
+      const py = playerYProvider();
+      for (const u of this.units) {
+        const off = AerialEnemySystem.SPACE_ALT_OFFSETS[u.kind] ?? 0;
+        u.orbitAltitude = py + off;
+        u.hitbox.position.y = u.orbitAltitude;
+      }
+    } else {
+      this.spaceAltitudeAnchor = null;
+    }
+  }
+
+  /** Returns the altitude a newly-spawned unit of `kind` should orbit at,
+   *  honouring the orbital-front anchor when active. */
+  private spawnAltitudeFor(kind: AerialKind): number {
+    if (this.spaceAltitudeAnchor) {
+      return this.spaceAltitudeAnchor() + AerialEnemySystem.SPACE_ALT_OFFSETS[kind];
+    }
+    if (kind === "fighter") return 28 + Math.random() * 12;
+    if (kind === "battleship") return 55;
+    return 75;
+  }
+
   spawnFighter(playerPos: BABYLON.Vector3): AerialUnit {
     const angle = Math.random() * Math.PI * 2;
     const dist = 50 + Math.random() * 30;
+    const altY = this.spawnAltitudeFor("fighter");
     const pos = new BABYLON.Vector3(
       playerPos.x + Math.cos(angle) * dist,
-      28 + Math.random() * 12,
+      altY,
       playerPos.z + Math.sin(angle) * dist
     );
     const u = new AerialUnit(this.scene, "fighter", pos);
@@ -759,7 +797,7 @@ export class AerialEnemySystem {
     const dist = 90 + Math.random() * 30;
     const pos = new BABYLON.Vector3(
       playerPos.x + Math.cos(angle) * dist,
-      55,
+      this.spawnAltitudeFor("battleship"),
       playerPos.z + Math.sin(angle) * dist
     );
     const u = new AerialUnit(this.scene, "battleship", pos);
@@ -786,7 +824,7 @@ export class AerialEnemySystem {
     const dist = 130 + Math.random() * 40;
     const pos = new BABYLON.Vector3(
       playerPos.x + Math.cos(angle) * dist,
-      75,
+      this.spawnAltitudeFor("fortress"),
       playerPos.z + Math.sin(angle) * dist
     );
     const u = new AerialUnit(this.scene, "fortress", pos);
@@ -851,6 +889,19 @@ export class AerialEnemySystem {
         this.spawnFighter(playerPos);
       } else if (this.aggro && battleships < AerialEnemySystem.MAX_BATTLESHIPS && Math.random() < 0.4) {
         this.spawnBattleship(playerPos);
+      }
+    }
+
+    // In orbital combat the player altitude can drift over time (the
+    // fighter climbs/dives), so re-anchor every live unit's orbit altitude
+    // each frame to keep the squadron fighting at the player's altitude
+    // band instead of the original ground-level defaults.
+    if (this.spaceAltitudeAnchor) {
+      const py = this.spaceAltitudeAnchor();
+      for (const u of this.units) {
+        if (!u.isAlive) continue;
+        const off = AerialEnemySystem.SPACE_ALT_OFFSETS[u.kind] ?? 0;
+        u.orbitAltitude = py + off;
       }
     }
 

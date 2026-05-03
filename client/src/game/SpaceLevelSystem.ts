@@ -128,6 +128,9 @@ export class SpaceLevelSystem {
     // this, repeated L5 visits stack extra aerial enemies that follow the
     // player back to ground levels, breaking difficulty pacing.
     try { this.aerial.disengageAndClear(); } catch {}
+    // Drop the orbital altitude anchor so any future ground-level aerial
+    // spawns return to their normal y=28/55/75 patrol altitudes.
+    try { this.aerial.setSpaceCombat(false); } catch {}
     // Defensive re-enable — even though we no longer disable on mount,
     // anything else that flipped these off would otherwise leak across
     // the warp.
@@ -333,8 +336,14 @@ export class SpaceLevelSystem {
 
   /** Engage AerialEnemySystem and seed a couple of close-range targets so
    *  the player has immediate enemies on warp-in instead of the 6–10 s
-   *  drip-spawn delay. */
+   *  drip-spawn delay. Also flips the squadron into "orbital" altitude
+   *  mode so units orbit at the player's altitude (~60 m) instead of the
+   *  ground-level defaults that left bullets sailing way over their
+   *  heads — the actual root cause of "weapons don't work in space". */
   private engageCombat(): void {
+    // Anchor altitudes to the live player Y so units track up/down with
+    // the orbital fighter as it climbs and dives.
+    try { this.aerial.setSpaceCombat(true, () => this.playerPos().y); } catch {}
     this.aerial.engage();
     const p = this.playerPos();
     try { this.aerial.spawnFighter(p); } catch {}
