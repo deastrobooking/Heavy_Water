@@ -21,6 +21,10 @@ export interface SpecialsOwnedSnapshot {
   sabreGiant: boolean;
   autoLoot: boolean;
   roboDragon: boolean;
+  /** Auto-Target Module — bends primary fire toward the nearest enemy
+   *  inside an aim cone. Premium SPECIALS unlock so it must persist
+   *  across death/restart like the other one-time purchases. */
+  autoTarget?: boolean;
 }
 
 export interface ProgressSnapshot {

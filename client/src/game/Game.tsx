@@ -67,7 +67,7 @@ type GamePhase = "auth" | "menu" | "playing" | "paused" | "gameover";
 // One source of truth for the SPECIALS-tab unlocks. Used both for
 // affordability checks in `specialsList` and for charging in
 // `handleUnlockSpecial`, so prices can never drift between the two.
-type SpecialId = "sabreSpin" | "sabreTwin" | "sabreGiant" | "autoLoot" | "roboDragon";
+type SpecialId = "sabreSpin" | "sabreTwin" | "sabreGiant" | "autoLoot" | "roboDragon" | "autoTarget";
 interface SpecialDef {
   id: SpecialId;
   name: string;
@@ -85,6 +85,11 @@ const SPECIALS_DEFS: readonly SpecialDef[] = [
     cost: { gears: 60,  cores: 10, nanofiber: 6 } },
   { id: "roboDragon", name: "Robot Dragon",     description: "Summon the elite Robot Dragon companion (third slot).",
     cost: { gears: 250, cores: 60, nanofiber: 35, circuits: 30, credits: 1500 } },
+  // Premium aim-assist module. Priced higher than every other SPECIAL because
+  // it is a permanent, always-on combat modifier that benefits every weapon
+  // the player owns from the moment of purchase forward.
+  { id: "autoTarget", name: "Auto-Target Module", description: "Magnetizes primary fire toward the nearest enemy in a 25° cone (range 140 m). Works on every weapon.",
+    cost: { gears: 300, cores: 75, nanofiber: 45, circuits: 35, credits: 3000 } },
 ];
 
 export const Game: React.FC = () => {
@@ -186,8 +191,8 @@ export const Game: React.FC = () => {
   // Persisted owned-flags for one-time SPECIALS unlocks.
   const [specialsOwned, setSpecialsOwned] = useState<{
     sabreSpin: boolean; sabreTwin: boolean; sabreGiant: boolean;
-    autoLoot: boolean; roboDragon: boolean;
-  }>({ sabreSpin: false, sabreTwin: false, sabreGiant: false, autoLoot: false, roboDragon: false });
+    autoLoot: boolean; roboDragon: boolean; autoTarget: boolean;
+  }>({ sabreSpin: false, sabreTwin: false, sabreGiant: false, autoLoot: false, roboDragon: false, autoTarget: false });
   // Mirror of `specialsOwned` for use inside long-lived bus.on closures
   // (e.g. PLAYER_DIED) where the latest React state isn't directly visible.
   // Kept in sync via a useEffect below.
@@ -807,6 +812,31 @@ export const Game: React.FC = () => {
         const l1Center = LevelSystem.getFortressCenterFor(1);
         enemyBaseSystem.spawnBossFortress(new BABYLON.Vector3(l1Center.x, 0, l1Center.z));
 
+        // Wire the Auto-Target Module's enemy source. The provider is
+        // called once per shot when the module is enabled; it returns the
+        // world-space positions of every live ground + aerial enemy. The
+        // scratch array is reused so an automatic-fire weapon doesn't
+        // allocate a fresh array dozens of times per second.
+        {
+          const autoAimScratch: BABYLON.Vector3[] = [];
+          weapons.setEnemyTargetProvider(() => {
+            autoAimScratch.length = 0;
+            const ground = enemySystem.getEnemyMeshes();
+            for (let i = 0; i < ground.length; i++) {
+              const m = ground[i];
+              if (m.isDisposed()) continue;
+              autoAimScratch.push(m.position);
+            }
+            const air = aerialEnemySystem.getActiveUnits();
+            for (let i = 0; i < air.length; i++) {
+              const u = air[i];
+              if (!u.isAlive) continue;
+              autoAimScratch.push(u.hitbox.position);
+            }
+            return autoAimScratch;
+          });
+        }
+
         // Level system — drives Level 1 → 2 → 3 progression, sky tint,
         // boss-variant assignment, and per-level fortress placement.
         const levelSystem = new LevelSystem();
@@ -1229,6 +1259,10 @@ export const Game: React.FC = () => {
             // The roster carries the dragon by preset name; the flag mirrors
             // the SPECIALS-tab state for affordability/UI on reload.
             roboDragon: companions.some(c => c.presetName === "RoboDragon"),
+            // Read live state from WeaponsSystem so a hot-toggle (or a
+            // future debug command) is what actually persists, not the
+            // React mirror which can lag a frame.
+            autoTarget: weapons.isAutoTargetEnabled(),
           };
           return {
             stats: player.getStats(),
@@ -1312,6 +1346,10 @@ export const Game: React.FC = () => {
               if (snap.specialsOwned) {
                 setSpecialsOwned(prev => ({ ...prev, ...snap.specialsOwned! }));
                 if (snap.specialsOwned.autoLoot) pickupSystem.setAutoLootEnabled(true);
+                // Restore the Auto-Target Module side-effect on load so the
+                // module is live from frame one of the new session, not just
+                // the first time the player re-opens the SPECIALS tab.
+                if (snap.specialsOwned.autoTarget) weapons.setAutoTargetEnabled(true);
               }
               // Beam sabre level + sabre special unlocks.
               if (snap.beamSabreLevel || snap.specialsOwned) {
@@ -2262,6 +2300,10 @@ export const Game: React.FC = () => {
       const pickup = pickupRef.current;
       if (!pickup) { showMessage("PICKUP SYSTEM OFFLINE", 1500); return; }
       runEffect = () => { pickup.setAutoLootEnabled(true); showMessage("AUTO-LOOT ENGAGED", 2000); return true; };
+    } else if (id === "autoTarget") {
+      const weapons = weaponsRef.current;
+      if (!weapons) { showMessage("WEAPONS OFFLINE", 1500); return; }
+      runEffect = () => { weapons.setAutoTargetEnabled(true); showMessage("AUTO-TARGET MODULE ONLINE", 2200); return true; };
     } else if (id === "roboDragon") {
       const comp = companionRef.current;
       if (!comp) { showMessage("HELPER SYSTEM OFFLINE", 1500); return; }

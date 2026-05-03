@@ -142,6 +142,46 @@ export class WeaponsSystem {
     | (() => { origin: BABYLON.Vector3; forward: BABYLON.Vector3 } | null)
     | null = null;
 
+  /** Auto-Target Module (premium SPECIALS unlock). When enabled AND a
+   *  target provider has been registered, getAimForward() bends the shot
+   *  toward the nearest enemy that lies inside an aim cone in front of
+   *  the firing origin. Off by default so the assist never silently turns
+   *  itself on for players who haven't paid for it. */
+  private autoTargetEnabled: boolean = false;
+  private enemyTargetProvider: (() => BABYLON.Vector3[]) | null = null;
+  /** Cone half-angle (cos of) the auto-target will pull within. cos(25°). */
+  private static readonly AUTO_TARGET_CONE_COS = Math.cos(25 * Math.PI / 180);
+  /** Maximum range squared the auto-target will consider a target valid. */
+  private static readonly AUTO_TARGET_RANGE_SQ = 140 * 140;
+  /** How aggressively the aim is bent toward the target (0 = none, 1 =
+   *  hard snap). 0.55 reads as "the gun gently magnetizes toward the
+   *  enemy" instead of yanking the camera. */
+  private static readonly AUTO_TARGET_PULL = 0.55;
+  /** Scratch vector reused by the auto-aim path so the per-shot adjust
+   *  doesn't allocate. */
+  private autoAimScratch: BABYLON.Vector3 = new BABYLON.Vector3();
+
+  /** Toggle the Auto-Target Module on/off. Owned by Game.tsx — flipped on
+   *  when the player buys the SPECIALS unlock or when a save with the
+   *  unlock loads. */
+  setAutoTargetEnabled(enabled: boolean): void {
+    this.autoTargetEnabled = enabled;
+  }
+
+  /** Returns true if the player currently owns + has the Auto-Target
+   *  Module enabled. Lets the HUD show a "LOCK" indicator. */
+  isAutoTargetEnabled(): boolean {
+    return this.autoTargetEnabled;
+  }
+
+  /** Wire a callback that returns the world-space positions of every live
+   *  enemy in the scene (ground + aerial). Called once per shot — keep it
+   *  cheap; do NOT allocate a new array per call (return a cached scratch
+   *  if possible). */
+  setEnemyTargetProvider(fn: (() => BABYLON.Vector3[]) | null): void {
+    this.enemyTargetProvider = fn;
+  }
+
   setInventory(inv: InventorySystem): void {
     this.inventory = inv;
   }
@@ -172,8 +212,55 @@ export class WeaponsSystem {
 
   private getAimForward(): BABYLON.Vector3 {
     const va = this.getVehicleAim();
-    if (va) return va.forward.clone();
-    return this.camera.getDirection(BABYLON.Vector3.Forward());
+    const baseFwd = va ? va.forward.clone() : this.camera.getDirection(BABYLON.Vector3.Forward());
+    // Auto-target gates: only bend aim for offensive weapons (skip the
+    // capture net + grenade arc — those need their raw camera direction
+    // for the player's intent to read correctly).
+    if (!this.autoTargetEnabled || !this.enemyTargetProvider) return baseFwd;
+    if (this.currentWeapon === "capture_net" || this.currentWeapon === "grenade") return baseFwd;
+    const origin = va ? va.origin : (this.aimOriginProvider ? this.aimOriginProvider() : this.camera.position);
+    const targets = this.enemyTargetProvider();
+    if (!targets || targets.length === 0) return baseFwd;
+    // First pass: pick the NEAREST target (smallest squared distance) that
+    // also lies inside the aim cone. Squared distance is the comparison
+    // key so we skip a per-target sqrt; the single sqrt for the winner is
+    // computed below once we know which one we picked.
+    const coneCos = WeaponsSystem.AUTO_TARGET_CONE_COS;
+    const rangeSq = WeaponsSystem.AUTO_TARGET_RANGE_SQ;
+    let bestDSq = Infinity;
+    let bestDx = 0, bestDy = 0, bestDz = 0;
+    let found = false;
+    const fx = baseFwd.x, fy = baseFwd.y, fz = baseFwd.z;
+    for (let i = 0; i < targets.length; i++) {
+      const t = targets[i];
+      const dx = t.x - origin.x;
+      const dy = t.y - origin.y;
+      const dz = t.z - origin.z;
+      const dSq = dx * dx + dy * dy + dz * dz;
+      if (dSq > rangeSq || dSq < 1 || dSq >= bestDSq) continue;
+      // Cone test without sqrt: (d·f)^2 >= cos²(theta) * |d|², AND the
+      // sign of d·f must be positive (target in front, not behind).
+      const dotRaw = dx * fx + dy * fy + dz * fz;
+      if (dotRaw <= 0) continue;
+      if (dotRaw * dotRaw < coneCos * coneCos * dSq) continue;
+      bestDSq = dSq; bestDx = dx; bestDy = dy; bestDz = dz; found = true;
+    }
+    if (!found) return baseFwd;
+    // Slerp-ish blend: linearly interpolate then renormalise into the
+    // already-allocated scratch vector. Returning the scratch directly
+    // (no .clone()) keeps the auto-target path allocation-free; the only
+    // reader, createProjectile(), copies the value into its own scratch
+    // before mutating, so handing out a shared reference is safe.
+    const inv = 1 / Math.sqrt(bestDSq);
+    const nx = bestDx * inv, ny = bestDy * inv, nz = bestDz * inv;
+    const pull = WeaponsSystem.AUTO_TARGET_PULL;
+    const inv1 = 1 - pull;
+    const bx = fx * inv1 + nx * pull;
+    const by = fy * inv1 + ny * pull;
+    const bz = fz * inv1 + nz * pull;
+    const blen = Math.sqrt(bx * bx + by * by + bz * bz) || 1;
+    this.autoAimScratch.set(bx / blen, by / blen, bz / blen);
+    return this.autoAimScratch;
   }
 
   constructor(scene: BABYLON.Scene, camera: BABYLON.FreeCamera) {
