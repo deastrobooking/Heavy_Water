@@ -62,6 +62,7 @@ export class SanctuarySystem {
 
     this.buildSign();
     this.buildPerimeter();
+    this.buildVillage();
     this.spawnNPCs(inputBlockedProvider);
     if (this.base) this.buildGardenPlinth(this.base);
     this.farming = new FarmingSystem(
@@ -253,6 +254,247 @@ export class SanctuarySystem {
     this.npcs = npcs;
   }
 
+  /** Cozy farming-village dressing: 4 wooden cottages with peaked roofs,
+   *  a central stone well, 4 lantern posts with point lights, a fence
+   *  around the farm, hay bales, and scattered conifer trees. None of
+   *  these are colliders — they're pure decoration to give Level 4 a
+   *  radically different "village farming" silhouette from the combat
+   *  fronts. Everything parents to `this.root` so dispose cleans up. */
+  private buildVillage(): void {
+    const c = SanctuarySystem.CENTER;
+    const scene = this.scene;
+
+    // ---- shared materials (each parented mesh references one) ----
+    const wallMat = new BABYLON.StandardMaterial("villageWallMat", scene);
+    wallMat.diffuseColor = new BABYLON.Color3(0.82, 0.66, 0.42);
+    wallMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const roofMat = new BABYLON.StandardMaterial("villageRoofMat", scene);
+    roofMat.diffuseColor = new BABYLON.Color3(0.45, 0.18, 0.14);
+    roofMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const beamMat = new BABYLON.StandardMaterial("villageBeamMat", scene);
+    beamMat.diffuseColor = new BABYLON.Color3(0.30, 0.20, 0.12);
+    beamMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const stoneMat = new BABYLON.StandardMaterial("villageStoneMat", scene);
+    stoneMat.diffuseColor = new BABYLON.Color3(0.62, 0.60, 0.55);
+    stoneMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+
+    const leafMat = new BABYLON.StandardMaterial("villageLeafMat", scene);
+    leafMat.diffuseColor = new BABYLON.Color3(0.18, 0.55, 0.25);
+    leafMat.emissiveColor = new BABYLON.Color3(0.04, 0.12, 0.06);
+    leafMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const trunkMat = new BABYLON.StandardMaterial("villageTrunkMat", scene);
+    trunkMat.diffuseColor = new BABYLON.Color3(0.32, 0.20, 0.10);
+    trunkMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const lanternMat = new BABYLON.StandardMaterial("villageLanternMat", scene);
+    lanternMat.diffuseColor = new BABYLON.Color3(1.0, 0.75, 0.35);
+    lanternMat.emissiveColor = new BABYLON.Color3(1.0, 0.7, 0.25);
+    lanternMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const hayMat = new BABYLON.StandardMaterial("villageHayMat", scene);
+    hayMat.diffuseColor = new BABYLON.Color3(0.92, 0.78, 0.32);
+    hayMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    // ---- helper: build one cottage at (x,z) with a yaw rotation ----
+    const buildCottage = (x: number, z: number, yaw: number, idx: number) => {
+      const W = 6, D = 5, H = 3;
+      const wall = BABYLON.MeshBuilder.CreateBox(`cottageWall_${idx}`,
+        { width: W, height: H, depth: D }, scene);
+      wall.position.set(x, H / 2, z);
+      wall.rotation.y = yaw;
+      wall.parent = this.root;
+      wall.material = wallMat;
+      wall.isPickable = false;
+
+      // Peaked roof — a thin box rotated 45° on Z, scaled long.
+      const roof = BABYLON.MeshBuilder.CreateCylinder(`cottageRoof_${idx}`, {
+        diameter: 0,
+        diameterTop: W * 1.15,
+        diameterBottom: 0.1,
+        height: D * 1.05,
+        tessellation: 4,
+      }, scene);
+      // Cylinder w/ tessellation 4 is a square prism; lay it on its side
+      // so the "peak" runs along the cottage's depth axis.
+      roof.rotation.x = Math.PI / 2;
+      roof.rotation.y = yaw;
+      roof.position.set(x, H + 0.6, z);
+      roof.parent = this.root;
+      roof.material = roofMat;
+      roof.isPickable = false;
+
+      // Door beam — dark plank centered on the front face.
+      const door = BABYLON.MeshBuilder.CreateBox(`cottageDoor_${idx}`,
+        { width: 1.2, height: 2.0, depth: 0.15 }, scene);
+      const fwd = new BABYLON.Vector3(Math.sin(yaw), 0, Math.cos(yaw)).scale(D / 2 + 0.08);
+      door.position.set(x + fwd.x, 1.0, z + fwd.z);
+      door.rotation.y = yaw;
+      door.parent = this.root;
+      door.material = beamMat;
+      door.isPickable = false;
+
+      // Two warm windows that read at night/dawn.
+      const winMat = new BABYLON.StandardMaterial(`cottageWinMat_${idx}`, scene);
+      winMat.diffuseColor = new BABYLON.Color3(1.0, 0.85, 0.4);
+      winMat.emissiveColor = new BABYLON.Color3(1.0, 0.75, 0.3);
+      winMat.specularColor = new BABYLON.Color3(0, 0, 0);
+      const right = new BABYLON.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+      for (const sgn of [-1, 1]) {
+        const win = BABYLON.MeshBuilder.CreateBox(`cottageWin_${idx}_${sgn}`,
+          { width: 0.9, height: 0.9, depth: 0.12 }, scene);
+        const off = right.scale(sgn * (W / 2 - 1.2)).add(fwd.scale(1.005));
+        win.position.set(x + off.x, 1.6, z + off.z);
+        win.rotation.y = yaw;
+        win.parent = this.root;
+        win.material = winMat;
+        win.isPickable = false;
+      }
+    };
+
+    // Four cottages around the sanctuary plaza, doors facing the plinth.
+    // West cottage faces east, east cottage faces west, two north cottages
+    // face south back toward the central well + farm.
+    buildCottage(c.x - 20, c.z + 2,  Math.PI / 2,  0);
+    buildCottage(c.x + 18, c.z + 2, -Math.PI / 2, 1);
+    buildCottage(c.x + 4,  c.z - 18, Math.PI,     2);
+    buildCottage(c.x - 12, c.z - 16, Math.PI,     3);
+
+    // ---- central stone well, between plinth and sign ----
+    const wellBase = BABYLON.MeshBuilder.CreateCylinder("villageWellBase",
+      { diameter: 2.6, height: 1.2, tessellation: 18 }, scene);
+    wellBase.position.set(c.x, 0.6, c.z + 4);
+    wellBase.parent = this.root;
+    wellBase.material = stoneMat;
+    wellBase.isPickable = false;
+
+    const wellInner = BABYLON.MeshBuilder.CreateCylinder("villageWellInner",
+      { diameter: 1.6, height: 1.0, tessellation: 18 }, scene);
+    wellInner.position.set(c.x, 0.7, c.z + 4);
+    wellInner.parent = this.root;
+    const waterMat = new BABYLON.StandardMaterial("villageWaterMat", scene);
+    waterMat.diffuseColor = new BABYLON.Color3(0.10, 0.30, 0.50);
+    waterMat.emissiveColor = new BABYLON.Color3(0.05, 0.18, 0.30);
+    waterMat.specularColor = new BABYLON.Color3(0.4, 0.5, 0.6);
+    wellInner.material = waterMat;
+    wellInner.isPickable = false;
+
+    // Two posts + a crossbeam over the well.
+    for (const sgn of [-1, 1]) {
+      const post = BABYLON.MeshBuilder.CreateBox(`villageWellPost_${sgn}`,
+        { width: 0.18, height: 2.6, depth: 0.18 }, scene);
+      post.position.set(c.x + sgn * 1.3, 1.3, c.z + 4);
+      post.parent = this.root;
+      post.material = beamMat;
+      post.isPickable = false;
+    }
+    const cross = BABYLON.MeshBuilder.CreateBox("villageWellBeam",
+      { width: 3.2, height: 0.18, depth: 0.18 }, scene);
+    cross.position.set(c.x, 2.5, c.z + 4);
+    cross.parent = this.root;
+    cross.material = beamMat;
+    cross.isPickable = false;
+
+    // ---- 4 lantern posts ringing the plaza ----
+    const lanternSpots = [
+      { x: c.x - 10, z: c.z - 4 },
+      { x: c.x + 10, z: c.z - 4 },
+      { x: c.x - 10, z: c.z + 8 },
+      { x: c.x + 10, z: c.z + 8 },
+    ];
+    lanternSpots.forEach((s, i) => {
+      const post = BABYLON.MeshBuilder.CreateBox(`villageLantPost_${i}`,
+        { width: 0.18, height: 3.2, depth: 0.18 }, scene);
+      post.position.set(s.x, 1.6, s.z);
+      post.parent = this.root;
+      post.material = beamMat;
+      post.isPickable = false;
+
+      const head = BABYLON.MeshBuilder.CreateBox(`villageLantHead_${i}`,
+        { width: 0.55, height: 0.55, depth: 0.55 }, scene);
+      head.position.set(s.x, 3.1, s.z);
+      head.parent = this.root;
+      head.material = lanternMat;
+      head.isPickable = false;
+
+      const lt = new BABYLON.PointLight(`villageLantLight_${i}`,
+        new BABYLON.Vector3(s.x, 3.1, s.z), scene);
+      lt.diffuse = new BABYLON.Color3(1.0, 0.75, 0.35);
+      lt.intensity = 0.55;
+      lt.range = 12;
+      lt.parent = this.root;
+    });
+
+    // ---- conifer trees scattered around the sanctuary ring ----
+    const treeOffsets = [
+      [-22, -12], [-26, 6], [-18, 22], [-2, 26], [14, 22],
+      [22, 8], [22, -10], [12, -22], [-8, -24], [-24, -24],
+    ];
+    treeOffsets.forEach(([dx, dz], i) => {
+      const trunk = BABYLON.MeshBuilder.CreateCylinder(`villageTrunk_${i}`,
+        { diameter: 0.5, height: 1.6, tessellation: 8 }, scene);
+      trunk.position.set(c.x + dx, 0.8, c.z + dz);
+      trunk.parent = this.root;
+      trunk.material = trunkMat;
+      trunk.isPickable = false;
+
+      const canopy = BABYLON.MeshBuilder.CreateCylinder(`villageCanopy_${i}`,
+        { diameterTop: 0.05, diameterBottom: 2.2, height: 3.6, tessellation: 10 }, scene);
+      canopy.position.set(c.x + dx, 3.4, c.z + dz);
+      canopy.parent = this.root;
+      canopy.material = leafMat;
+      canopy.isPickable = false;
+    });
+
+    // ---- wooden fence ringing the farm patch (south of sign) ----
+    // Farm sits at startX=c.x-8, z=c.z+12, 4 wide × 2 deep with spacing 4.
+    // Fence box: x in [c.x-11, c.x+9], z in [c.z+9, c.z+21].
+    const fenceX0 = c.x - 11, fenceX1 = c.x + 9;
+    const fenceZ0 = c.z + 9,  fenceZ1 = c.z + 21;
+    const buildFenceRail = (x0: number, z0: number, x1: number, z1: number, idx: number) => {
+      const dx = x1 - x0, dz = z1 - z0;
+      const len = Math.sqrt(dx * dx + dz * dz);
+      const yaw = Math.atan2(dx, dz);
+      const rail = BABYLON.MeshBuilder.CreateBox(`villageFence_${idx}`,
+        { width: 0.12, height: 0.7, depth: len }, scene);
+      rail.position.set((x0 + x1) / 2, 0.45, (z0 + z1) / 2);
+      rail.rotation.y = yaw;
+      rail.parent = this.root;
+      rail.material = beamMat;
+      rail.isPickable = false;
+    };
+    // 4 sides; leave a gap on the north side facing the plinth (player walks in).
+    buildFenceRail(fenceX0, fenceZ0, c.x - 4,  fenceZ0, 0); // north-left
+    buildFenceRail(c.x + 2,  fenceZ0, fenceX1, fenceZ0, 1); // north-right
+    buildFenceRail(fenceX0, fenceZ1, fenceX1, fenceZ1, 2); // south
+    buildFenceRail(fenceX0, fenceZ0, fenceX0, fenceZ1, 3); // west
+    buildFenceRail(fenceX1, fenceZ0, fenceX1, fenceZ1, 4); // east
+
+    // ---- two hay bales by the fence gate ----
+    for (let i = 0; i < 2; i++) {
+      const hay = BABYLON.MeshBuilder.CreateCylinder(`villageHay_${i}`,
+        { diameter: 1.4, height: 1.4, tessellation: 14 }, scene);
+      hay.rotation.x = Math.PI / 2;
+      hay.position.set(c.x - 6 + i * 12, 0.7, c.z + 7.5);
+      hay.parent = this.root;
+      hay.material = hayMat;
+      hay.isPickable = false;
+    }
+
+    // ---- soft ambient light over the plaza so the village reads warmly
+    // even when the time-of-day cycle drifts away from dawn ----
+    const plazaLight = new BABYLON.HemisphericLight("villagePlazaLight",
+      new BABYLON.Vector3(0, 1, 0), scene);
+    plazaLight.diffuse = new BABYLON.Color3(1.0, 0.85, 0.6);
+    plazaLight.groundColor = new BABYLON.Color3(0.25, 0.20, 0.12);
+    plazaLight.intensity = 0.35;
+    plazaLight.includeOnlyWithLayerMask = 0xFFFFFFFF;
+    plazaLight.parent = this.root;
+  }
+
   /** Stone pedestal + glowing cyan orb that registers as a synthetic
    *  "garden" structure with BaseSystem. The existing E-key handler in
    *  Game.tsx already calls `BaseSystem.getNearestStructure(pos, "garden", 6)`
@@ -413,35 +655,45 @@ class FarmingSystem {
     try { this.prompt.remove(); } catch {}
   }
 
-  /** Five plots in a tidy 5-wide row south of the sanctuary sign. */
+  /** Eight plots in two rows of four, fenced to the south of the sign. */
   private spawnPlots(): void {
     const c = SanctuarySystem["CENTER"] as BABYLON.Vector3;
-    const startX = c.x - 8;
-    const z = c.z + 12;
+    const startX = c.x - 7.5;
+    const startZ = c.z + 12;
     const spacing = 4;
+    const cols = 4;
+    const rows = 2;
 
-    for (let i = 0; i < 5; i++) {
-      const pos = new BABYLON.Vector3(startX + i * spacing, 0, z);
-      const soil = BABYLON.MeshBuilder.CreateBox(
-        `farmPlot_${i}`,
-        { width: 3, height: 0.2, depth: 3 },
-        this.scene,
-      );
-      soil.position.set(pos.x, 0.1, pos.z);
-      soil.parent = this.parent;
-      const mat = new BABYLON.StandardMaterial(`farmPlotMat_${i}`, this.scene);
-      mat.diffuseColor = new BABYLON.Color3(0.32, 0.18, 0.10);
-      mat.specularColor = new BABYLON.Color3(0, 0, 0);
-      soil.material = mat;
+    let idx = 0;
+    for (let r = 0; r < rows; r++) {
+      for (let col = 0; col < cols; col++) {
+        const pos = new BABYLON.Vector3(
+          startX + col * spacing,
+          0,
+          startZ + r * spacing,
+        );
+        const soil = BABYLON.MeshBuilder.CreateBox(
+          `farmPlot_${idx}`,
+          { width: 3, height: 0.2, depth: 3 },
+          this.scene,
+        );
+        soil.position.set(pos.x, 0.1, pos.z);
+        soil.parent = this.parent;
+        const mat = new BABYLON.StandardMaterial(`farmPlotMat_${idx}`, this.scene);
+        mat.diffuseColor = new BABYLON.Color3(0.32, 0.18, 0.10);
+        mat.specularColor = new BABYLON.Color3(0, 0, 0);
+        soil.material = mat;
 
-      this.plots.push({
-        index: i,
-        position: pos.clone(),
-        stage: 0,
-        stageStart: 0,
-        soil,
-        crop: null,
-      });
+        this.plots.push({
+          index: idx,
+          position: pos.clone(),
+          stage: 0,
+          stageStart: 0,
+          soil,
+          crop: null,
+        });
+        idx++;
+      }
     }
   }
 
