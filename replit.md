@@ -16,7 +16,7 @@ The game utilizes Babylon.js v8.x for WebGL/WebGPU rendering, focusing on an ani
 - Babylon.js handles 3D rendering with a fallback from WebGPU to WebGL2.
 - Custom GLSL-ES-1.0 cell-shading with ink outlines, bloom, chromatic aberration, and FXAA.
 - SkySystem manages a custom-shader gradient skybox, day/night cycle, and weather.
-- LODCullSystem batches per-mesh distance culling at ~6 Hz: registers the city's buildings/platforms (350/280 m radius), enemy bases (320 m, turrets 260 m), and the boss fortress (700 m). Foliage and environment props keep their own per-system culling at 200–220 m. Mesh materials for projectiles are cached/frozen per-weapon-type and projectile spawn math reuses scratch vectors to avoid per-shot GC.
+- LODCullSystem batches per-mesh distance culling at ~6 Hz: registers the city's buildings/platforms (600/450 m radius — pushed beyond Exp2 fog visibility so disables read as fog falloff, not popping), enemy bases (320 m, turrets 260 m), and the boss fortress (700 m). Lamp posts and rooftop neon center-lines stay always-on. Foliage and environment props keep their own per-system culling at 200–220 m. Mesh materials for projectiles are cached/frozen per-weapon-type and projectile spawn math reuses scratch vectors to avoid per-shot GC.
 
 **Core Gameplay Mechanics:**
 - **Combat:** Features a unified ExplosionSystem, melee combo chains, elemental casting (6 elements), Beam Sabre with special attacks, and unlimited ammo for ranged weapons. WeaponsSystem supports both on-foot and vehicle aim providers.

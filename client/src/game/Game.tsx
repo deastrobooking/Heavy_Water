@@ -391,8 +391,16 @@ export const Game: React.FC = () => {
         // skyline shapes (boss fortress) stay visible from far while
         // small interior platforms drop out at ~250 m.
         const lodCull = new LODCullSystem();
-        for (const m of cityGenerator.getCullableBuildings()) lodCull.register(m, 350);
-        for (const m of cityGenerator.getCullablePlatforms()) lodCull.register(m, 280);
+        // Cull radii are deliberately set BEYOND the fog visibility band so
+        // disabling a mesh is invisible to the player. With Exp2 fog at the
+        // default density (0.0015) a mesh at 600 m is already ~44% absorbed
+        // by fog and at 700 m it's ~18%. Disabling around 600 m therefore
+        // looks like a continuation of the fog falloff instead of a pop.
+        // (The earlier 350 m radius cut INSIDE the fog falloff which made
+        // distant skyline lights visibly flicker on during storms when
+        // fog density rose and shrank the band the eye accepts.)
+        for (const m of cityGenerator.getCullableBuildings()) lodCull.register(m, 600);
+        for (const m of cityGenerator.getCullablePlatforms()) lodCull.register(m, 450);
 
         const sky = new SkySystem(
           scene,
