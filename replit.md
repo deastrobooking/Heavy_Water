@@ -29,6 +29,9 @@ A 6-element casting system operates parallel to weapons, offering Tracking Strik
 ### Beam Sabre
 The Beam Sabre is always equipped, featuring wide cross-screen slashes with multi-hit combos and arc-shaped energy waves. Damage scales with level, and level-5 waves pierce and apply AoE splash. Special unlocks include Spinning Blade, Twin Wave, and Giant Blade.
 
+### Mega Beam Cannon (Beam + Weapon Combo)
+Pressing the beam attack (Y / J) and the weapon attack (LMB) within ~220ms (or while either is already held) triggers `MegaBeamCannonSystem.fire()` — a single combo special on a 6-second cooldown. The cannon launches **20 self-seeking missiles** in a spiral fan around the aim direction (each homes onto the nearest enemy with strong steering, detonates on contact for AoE damage with falloff) and one **Kamehameha-style high-energy laser**: a 220m × 5m beam built from three coaxial emissive cylinders (white core + cyan halo + soft outer glow) plus a charge-orb muzzle and bright fill point-light. The beam fades + pulses over a 1.4s lifetime and damages each enemy intersecting its ray once for ~1800 damage (routed through the central `routeHit` so it hurts every hit category and engages the aerial squadron). The lone slash and weapon shot still fire alongside it; the cannon adds on top. Wired in `Game.tsx` via `beamPressTimeRef` / `weaponPressTimeRef` / `beamHeldRef` / `weaponHeldRef` against keydown(KeyY|KeyJ) and mousedown(button 0).
+
 ### Music and Sound
 A singleton MusicSystem manages dynamic music loading and playback, with an in-game UI and automatic pausing on player death.
 

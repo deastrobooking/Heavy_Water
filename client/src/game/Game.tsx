@@ -15,6 +15,7 @@ import { CombatSystem } from "./CombatSystem";
 import { SpecialWeaponsSystem } from "./SpecialWeaponsSystem";
 import { ElementalSpecialsSystem, ElementalDisplay, ElementalKind } from "./ElementalSpecialsSystem";
 import { BeamSabreSystem } from "./BeamSabreSystem";
+import { MegaBeamCannonSystem } from "./MegaBeamCannonSystem";
 import { ArmorSystem } from "./ArmorSystem";
 import { CraftingSystem } from "./CraftingSystem";
 import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
@@ -105,6 +106,14 @@ export const Game: React.FC = () => {
   const specialWeaponsRef = useRef<SpecialWeaponsSystem | null>(null);
   const elementalSpecialsRef = useRef<ElementalSpecialsSystem | null>(null);
   const beamSabreRef = useRef<BeamSabreSystem | null>(null);
+  const megaCannonRef = useRef<MegaBeamCannonSystem | null>(null);
+  // Combo input timestamps for the Mega Beam Cannon (beam + weapon press
+  // within the window). Held flags let us also fire when one input is
+  // pressed while the other is already down.
+  const beamPressTimeRef = useRef<number>(0);
+  const weaponPressTimeRef = useRef<number>(0);
+  const beamHeldRef = useRef<boolean>(false);
+  const weaponHeldRef = useRef<boolean>(false);
   const armorSystemRef = useRef<ArmorSystem | null>(null);
   const craftingSystemRef = useRef<CraftingSystem | null>(null);
   const inventoryRef = useRef<InventorySystem | null>(null);
@@ -394,6 +403,10 @@ export const Game: React.FC = () => {
 
         const beamSabre = new BeamSabreSystem(scene, engine.getCamera());
         beamSabreRef.current = beamSabre;
+
+        const megaCannon = new MegaBeamCannonSystem(scene, engine.getCamera());
+        megaCannonRef.current = megaCannon;
+        megaCannon.setDamageRouter(() => { /* replaced once render loop starts */ });
         // Initial no-op router so that even an attack pressed before the
         // first render frame uses the routed code path (the real router
         // is reassigned every frame inside the render loop, where all the
@@ -412,6 +425,7 @@ export const Game: React.FC = () => {
         specialWeapons.setAimOriginProvider(aimOrigin);
         combatSystem.setAimOriginProvider(aimOrigin);
         beamSabre.setAimOriginProvider(aimOrigin);
+        megaCannon.setAimOriginProvider(aimOrigin);
 
         const inventory = new InventorySystem();
         inventoryRef.current = inventory;
@@ -1263,6 +1277,19 @@ export const Game: React.FC = () => {
           beamSabre.setDamageRouter(routeHit);
           beamSabre.update(dt, enemyMeshes);
 
+          // Mega Beam Cannon (beam + weapon combo). Routes through the same
+          // hit pipeline so the missiles + Kamehameha beam damage every
+          // category and engage the aerial squadron just like normal fire.
+          megaCannon.setDamageRouter(routeHit);
+          const cannonHits = megaCannon.update(dt, enemyMeshes, playerPos);
+          for (const hit of cannonHits) {
+            // routeHit already invoked inside the system's damageRouter;
+            // re-routing here would double-hit. We only use the returned
+            // list to flag aerial engagement when an aerial unit was struck.
+            const meta: any = hit.hitEnemy.metadata;
+            if (meta?.aerialUnit) aerialEnemySystem.engage();
+          }
+
           const companionResult = companionSystem.update(dt, playerPos, enemyMeshes);
           if (companionResult.healed > 0) {
             player.heal(companionResult.healed);
@@ -1548,6 +1575,7 @@ export const Game: React.FC = () => {
         if (elementalSpecialsRef.current) { try { elementalSpecialsRef.current.dispose(); } catch {} }
         elementalSpecialsRef.current = null;
         beamSabreRef.current = null;
+        if (megaCannonRef.current) { try { megaCannonRef.current.dispose(); } catch {} megaCannonRef.current = null; }
         armorSystemRef.current = null;
         craftingSystemRef.current = null;
         inventoryRef.current = null;
@@ -1624,6 +1652,7 @@ export const Game: React.FC = () => {
     if (specialWeaponsRef.current) { try { specialWeaponsRef.current.dispose(); } catch {} specialWeaponsRef.current = null; }
     if (elementalSpecialsRef.current) { try { elementalSpecialsRef.current.dispose(); } catch {} elementalSpecialsRef.current = null; }
     if (beamSabreRef.current) { try { beamSabreRef.current.dispose(); } catch {} beamSabreRef.current = null; }
+    if (megaCannonRef.current) { try { megaCannonRef.current.dispose(); } catch {} megaCannonRef.current = null; }
     if (companionRef.current) { try { companionRef.current.dispose(); } catch {} companionRef.current = null; }
     if (capsuleRef.current) { try { capsuleRef.current.dispose(); } catch {} capsuleRef.current = null; }
     if (shopRef.current) { try { shopRef.current.dispose(); } catch {} shopRef.current = null; }
@@ -2073,8 +2102,20 @@ export const Game: React.FC = () => {
         // entry; KeyG stays reserved for build mode.
         // startCharge only matters once the Spinning Blade upgrade is owned —
         // otherwise it just calls attack() like before.
-        if (beamSabreRef.current && !e.repeat) {
-          beamSabreRef.current.startCharge();
+        if (!e.repeat) {
+          const now = performance.now();
+          beamPressTimeRef.current = now;
+          beamHeldRef.current = true;
+          // Combo: if the weapon attack was pressed (or is held) within the
+          // combo window, trigger the Mega Beam Cannon. The lone slash + shot
+          // still fire alongside it; the cannon adds on top.
+          const COMBO_WINDOW_MS = 220;
+          if (megaCannonRef.current && (weaponHeldRef.current || now - weaponPressTimeRef.current < COMBO_WINDOW_MS)) {
+            megaCannonRef.current.fire();
+          }
+          if (beamSabreRef.current) {
+            beamSabreRef.current.startCharge();
+          }
         }
       } else if (e.code === "KeyK") {
         // Cast the currently-selected elemental special (controller RB).
@@ -2109,6 +2150,7 @@ export const Game: React.FC = () => {
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === "KeyY" || e.code === "KeyJ") {
+        beamHeldRef.current = false;
         // Resolve a held attack — fires the Spinning Blade if the upgrade is
         // owned and the key was held long enough; otherwise it's a no-op
         // (the slash already fired on press).
@@ -2117,11 +2159,30 @@ export const Game: React.FC = () => {
         }
       }
     };
+    // Mouse left button drives the Mega Beam Cannon combo too: pressing it
+    // while the beam button is held (or freshly pressed) fires the cannon.
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      const now = performance.now();
+      weaponPressTimeRef.current = now;
+      weaponHeldRef.current = true;
+      const COMBO_WINDOW_MS = 220;
+      if (megaCannonRef.current && (beamHeldRef.current || now - beamPressTimeRef.current < COMBO_WINDOW_MS)) {
+        megaCannonRef.current.fire();
+      }
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      if (e.button === 0) weaponHeldRef.current = false;
+    };
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mouseup", onMouseUp);
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mouseup", onMouseUp);
     };
   }, [gamePhase, upgradeMenuOpen, labOpen, gardenOpen, showMessage]);
 
@@ -2179,6 +2240,7 @@ export const Game: React.FC = () => {
       if (specialWeaponsRef.current) specialWeaponsRef.current.dispose();
       if (elementalSpecialsRef.current) elementalSpecialsRef.current.dispose();
       if (beamSabreRef.current) beamSabreRef.current.dispose();
+      if (megaCannonRef.current) megaCannonRef.current.dispose();
       if (companionRef.current) companionRef.current.dispose();
       if (capsuleRef.current) capsuleRef.current.dispose();
       if (shopRef.current) shopRef.current.dispose();
