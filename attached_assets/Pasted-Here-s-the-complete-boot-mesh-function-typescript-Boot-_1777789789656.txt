@@ -1,0 +1,135 @@
+Here's the complete boot mesh function:
+
+```typescript
+// ─── Boot / Foot Mesh ─────────────────────────────────────────────────────────
+// A wedge box where:
+//   - bottom face is flat (y = 0)
+//   - front-top edge is LOW  (toeH)  — toe sits close to ground
+//   - rear-top edge is HIGH  (heelH) — heel rises to meet ankle
+//   - front face overhangs the ankle attach point (toeOver)
+//   - front top edge is narrower than rear (toeW ratio)
+//
+// Vertex layout looking down from above (Z+ = forward/toe direction):
+//
+//   3 ──────── 2   back (heel)
+//   │          │
+//   0 ──────── 1   front (toe)    ← bottom face, y = 0
+//
+//   7 ──────── 6   back top  (y = heelH)
+//   │          │
+//   4 ──────── 5   front top (y = toeH, inset X by toeW)
+
+interface BootConfig {
+  toeH:    number;  // height at front top edge  (e.g. 0.18)
+  heelH:   number;  // height at back top edge   (e.g. 0.38)
+  w:       number;  // total width               (e.g. 0.52)
+  len:     number;  // total length heel→toe     (e.g. 0.90)
+  toeOver: number;  // how far toe overhangs ankle origin (e.g. 0.18)
+  toeW:    number;  // front top width as ratio of w (e.g. 0.80)
+  ankleR:  number;  // ankle connector cylinder radius (e.g. 0.10)
+  ankleH:  number;  // ankle connector cylinder height (e.g. 0.12)
+}
+
+function createBoot(scene: BABYLON.Scene, c: BootConfig): BABYLON.Mesh[] {
+  const hw   = c.w / 2;
+  const hlen = c.len / 2;
+  const twH  = hw * c.toeW;        // half-width at toe top edge
+
+  const toe_z  =  hlen + c.toeOver; // front Z (toe)
+  const heel_z = -hlen;             // back  Z (heel)
+
+  // prettier-ignore
+  const positions = [
+    // Bottom flat face (y = 0)
+    -hw,       0,  toe_z,   // 0 bot front-left
+     hw,       0,  toe_z,   // 1 bot front-right
+     hw,       0,  heel_z,  // 2 bot back-right
+    -hw,       0,  heel_z,  // 3 bot back-left
+
+    // Top wedge face — toe low, heel high, toe inset
+    -twH, c.toeH,  toe_z,   // 4 top front-left
+     twH, c.toeH,  toe_z,   // 5 top front-right
+     hw,  c.heelH, heel_z,  // 6 top back-right
+    -hw,  c.heelH, heel_z,  // 7 top back-left
+  ];
+
+  // CCW winding from outside (Babylon convention)
+  const indices = [
+    2, 1, 0,  3, 2, 0,   // bottom
+    4, 5, 6,  4, 6, 7,   // top
+    0, 1, 5,  0, 5, 4,   // front  (toe face)
+    1, 2, 6,  1, 6, 5,   // right
+    2, 3, 7,  2, 7, 6,   // back   (heel face)
+    3, 0, 4,  3, 4, 7,   // left
+  ];
+
+  const normals: number[] = [];
+  BABYLON.VertexData.ComputeNormals(positions, indices, normals);
+
+  const vd = new BABYLON.VertexData();
+  vd.positions = positions;
+  vd.indices   = indices;
+  vd.normals   = normals;
+
+  const boot = new BABYLON.Mesh("boot", scene);
+  vd.applyToMesh(boot);
+
+  // ── Ankle connector cylinder ──────────────────────────────────────────────
+  // Sits on top of the boot at heel_z, bridges to the leg bone above.
+  const ankle = BABYLON.MeshBuilder.CreateCylinder("ankle", {
+    diameterTop:    c.ankleR * 2,
+    diameterBottom: c.ankleR * 2,
+    height:         c.ankleH,
+    tessellation:   10,
+  }, scene);
+
+  // Center the ankle over the heel region, flush with boot top
+  ankle.position.set(
+    0,
+    c.heelH + c.ankleH / 2,  // sits on top of boot heel
+    heel_z + c.len * 0.15,   // slightly forward of pure heel center
+  );
+
+  return [boot, ankle];
+}
+```
+
+And usage with a parent node so both pieces move together:
+
+```typescript
+function buildFoot(scene: BABYLON.Scene, config: BootConfig): BABYLON.TransformNode {
+  const root = new BABYLON.TransformNode("footRoot", scene);
+  const [boot, ankle] = createBoot(scene, config);
+
+  boot.parent   = root;
+  ankle.parent  = root;
+  boot.material = armorMaterial;
+  ankle.material = jointMaterial;
+
+  return root;  // move/rotate root to position the whole foot
+}
+
+// Default X-style boot
+const foot = buildFoot(scene, {
+  toeH:    0.18,
+  heelH:   0.38,
+  w:       0.52,
+  len:     0.90,
+  toeOver: 0.18,
+  toeW:    0.80,
+  ankleR:  0.10,
+  ankleH:  0.12,
+});
+
+// Mirror for left foot — just flip X on the root
+const leftFoot  = buildFoot(scene, config);
+leftFoot.scaling.x = -1;
+```
+
+**The three math decisions that make it read as a robot boot:**
+
+`toeOver` pushes the whole front face past the ankle attach point — so the boot looks like it extends *under* the leg, not just below it. Set it to `0` and it looks like a brick; at `0.18` it gets that planted, heavy-armored stance.
+
+`toeW < 1.0` tapers the front top edge inward. The bottom stays full width for a planted look, but the top narrows toward the toe, which creates that wedge silhouette when viewed from the front.
+
+`heelH / toeH` ratio is your most expressive parameter. X's boots are roughly `2:1` (`0.38 / 0.18`). Push it to `3:1` for a heavier mech boot; bring it to `1.2:1` for a sleeker design.

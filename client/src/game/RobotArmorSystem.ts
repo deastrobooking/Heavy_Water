@@ -45,7 +45,7 @@ export const DEFAULT_ARMOR_SET: ArmorSetSerialized = {
   leftArm: "arm_humanoid_glove",
   rightArm: "arm_humanoid_glove",
   leftWeapon: "weapon_none",
-  rightWeapon: "weapon_humanoid_buster",
+  rightWeapon: "weapon_humanoid_blaster",
   legs: "legs_humanoid",
   colors: {
     primary: [0.18, 0.55, 0.95],
@@ -96,7 +96,11 @@ const LEGACY_PART_ID_ALIASES: Record<string, string> = {
   chest_megaman: "chest_humanoid",
   shoulder_megaman: "shoulder_humanoid",
   arm_megaman_glove: "arm_humanoid_glove",
-  weapon_megaman_buster: "weapon_humanoid_buster",
+  // The buster has been renamed to the blaster — old saves carrying either
+  // the original `*_megaman_buster` id or the intermediate
+  // `weapon_humanoid_buster` id resolve onto the new blaster part.
+  weapon_megaman_buster: "weapon_humanoid_blaster",
+  weapon_humanoid_buster: "weapon_humanoid_blaster",
   legs_megaman: "legs_humanoid",
 };
 function migratePartId(id: string): string {

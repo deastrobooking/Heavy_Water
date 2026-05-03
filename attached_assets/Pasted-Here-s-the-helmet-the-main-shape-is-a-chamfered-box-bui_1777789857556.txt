@@ -1,0 +1,259 @@
+Here's the helmet — the main shape is a chamfered box built from `VertexData`, with a visor slot cut via a separate dark mesh flush against the face:
+
+```typescript
+// ─── Helmet Mesh ──────────────────────────────────────────────────────────────
+// Structure:
+//   - Main shell: rounded-top box (10 vertices — box with top 4 corners beveled)
+//   - Visor:      flattened ellipsoid clipped to face plane
+//   - Crest:      thin box offset upward on top face
+//   - Ear guards: two small boxes flanking the sides (optional)
+//
+// Coordinate origin = center of helmet base (neck attachment point)
+//
+//         crest
+//      ┌──┤├──┐       ← top face (y = h)
+//     /         \     ← bevel corners (bevelR)
+//    │  [visor]  │    ← front face (z = +hd)
+//    └───────────┘    ← base (y = 0)  ← neck attaches here
+
+interface HelmetConfig {
+  w:          number;  // total width           (e.g. 0.70)
+  h:          number;  // total height          (e.g. 0.55)
+  depth:      number;  // front-to-back depth   (e.g. 0.62)
+  bevelR:     number;  // top corner bevel size (e.g. 0.08)
+  // Visor
+  visorW:     number;  // visor width           (e.g. 0.44)
+  visorH:     number;  // visor height          (e.g. 0.14)
+  visorY:     number;  // visor center Y from base (e.g. 0.30)
+  visorTilt:  number;  // backward tilt in radians (e.g. 0.15)
+  // Crest
+  crestH:     number;  // crest protrusion above shell (e.g. 0.14)
+  crestW:     number;  // crest width           (e.g. 0.12)
+  crestDepth: number;  // crest depth           (e.g. 0.50)
+  // Ear guards
+  earW:       number;  // ear guard thickness   (e.g. 0.06)
+  earH:       number;  // ear guard height      (e.g. 0.22)
+  earDepth:   number;  // ear guard depth       (e.g. 0.28)
+}
+
+// ── 1. Main shell — beveled box ───────────────────────────────────────────────
+// Standard box has 4 top corners. We cut each corner with a 45° bevel,
+// turning the top face from a 4-gon into an 8-gon (octagon cross-section at top).
+// That gives 12 unique top vertices + 4 bottom vertices = 16 total.
+//
+// Bottom face (y=0) — 4 verts, full width:
+//   3 ─────────────── 2
+//   │                 │
+//   0 ─────────────── 1
+//
+// Top face (y=h) — 8 verts, corners clipped by bevelR:
+//   b=bevelR
+//   7 ──── 6
+//  /        \
+// 8          5
+// │          │
+// 9          4
+//  \        /
+//   10 ── 11    (indices into top ring, 0-based from front-left going CW)
+
+function createHelmetShell(
+  scene: BABYLON.Scene,
+  c: HelmetConfig
+): BABYLON.Mesh {
+  const hw = c.w / 2;
+  const hd = c.depth / 2;
+  const b  = c.bevelR;
+
+  // Bottom 4 corners (y = 0)
+  const bot: number[] = [
+    -hw, 0, -hd,   // 0 BL
+     hw, 0, -hd,   // 1 BR
+     hw, 0,  hd,   // 2 FR
+    -hw, 0,  hd,   // 3 FL
+  ];
+
+  // Top 8 corners (y = h) — octagon, beveled at each corner
+  // Order: start at front-left, go counter-clockwise from above
+  //   FL-front, FR-front, FR-right, BR-right, BR-back, BL-back, BL-left, FL-left
+  const t = c.h;
+  const top: number[] = [
+    -hw + b, t,  hd,      //  4  FL-front
+     hw - b, t,  hd,      //  5  FR-front
+     hw,     t,  hd - b,  //  6  FR-right
+     hw,     t, -hd + b,  //  7  BR-right
+     hw - b, t, -hd,      //  8  BR-back
+    -hw + b, t, -hd,      //  9  BL-back
+    -hw,     t, -hd + b,  // 10  BL-left
+    -hw,     t,  hd - b,  // 11  FL-left
+  ];
+
+  const positions = [...bot, ...top];
+  // Vertex index reference:
+  // 0=bot-BL, 1=bot-BR, 2=bot-FR, 3=bot-FL
+  // 4=top-FL-front, 5=top-FR-front, 6=top-FR-right, 7=top-BR-right
+  // 8=top-BR-back,  9=top-BL-back, 10=top-BL-left, 11=top-FL-left
+
+  const indices = [
+    // Bottom face
+    0, 2, 1,   0, 3, 2,
+
+    // Top face (octagon, triangulate as fan from center — add center vert)
+    // We'll add center vertex at index 12
+    12, 4,  5,
+    12, 5,  6,
+    12, 6,  7,
+    12, 7,  8,
+    12, 8,  9,
+    12, 9,  10,
+    12, 10, 11,
+    12, 11, 4,
+
+    // Front face (z = +hd): verts 3(bot-FL), 2(bot-FR), 5(top-FR-front), 4(top-FL-front)
+    3, 2, 5,   3, 5, 4,
+
+    // Right face: 2(bot-FR), 1(bot-BR), 7(top-BR-right), 6(top-FR-right)
+    2, 1, 7,   2, 7, 6,
+
+    // Back face: 1(bot-BR), 0(bot-BL), 9(top-BL-back), 8(top-BR-back)
+    1, 0, 9,   1, 9, 8,
+
+    // Left face: 0(bot-BL), 3(bot-FL), 11(top-FL-left), 10(top-BL-left)
+    0, 3, 11,  0, 11, 10,
+
+    // Bevel triangles — each top corner connects a side face to the octagon edge
+    // Front-left bevel:  bot-FL(3), top-FL-front(4), top-FL-left(11)
+    3, 4, 11,
+    // Front-right bevel: bot-FR(2), top-FR-right(6), top-FR-front(5)
+    2, 6, 5,
+    // Back-right bevel:  bot-BR(1), top-BR-back(8), top-BR-right(7)
+    1, 8, 7,
+    // Back-left bevel:   bot-BL(0), top-BL-left(10), top-BL-back(9)
+    0, 10, 9,
+  ];
+
+  // Top face center vertex for fan triangulation
+  const cx = 0, cy = c.h, cz = 0;
+  positions.push(cx, cy, cz); // index 12
+
+  const normals: number[] = [];
+  BABYLON.VertexData.ComputeNormals(positions, indices, normals);
+
+  const vd = new BABYLON.VertexData();
+  vd.positions = positions;
+  vd.indices   = indices;
+  vd.normals   = normals;
+
+  const mesh = new BABYLON.Mesh("helmetShell", scene);
+  vd.applyToMesh(mesh);
+  return mesh;
+}
+
+// ── 2. Visor — flattened ellipsoid, flush with front face ────────────────────
+// A sphere squashed in Z so it's nearly flat, then positioned so its back
+// surface sits exactly at the helmet front face (z = depth/2).
+// Tilting it back by visorTilt gives the classic angled visor look.
+
+function createVisor(scene: BABYLON.Scene, c: HelmetConfig): BABYLON.Mesh {
+  const visor = BABYLON.MeshBuilder.CreateSphere("visor", {
+    diameterX: c.visorW,
+    diameterY: c.visorH,
+    diameterZ: c.visorW * 0.18,  // very flat in Z — just enough for curvature
+    segments:  16,
+  }, scene);
+
+  visor.position.set(
+    0,
+    c.visorY,
+    c.depth / 2 + 0.001,  // 1mm proud of face — prevents z-fighting
+  );
+  visor.rotation.x = c.visorTilt;
+
+  return visor;
+}
+
+// ── 3. Crest — thin box on top ───────────────────────────────────────────────
+function createCrest(scene: BABYLON.Scene, c: HelmetConfig): BABYLON.Mesh {
+  const crest = BABYLON.MeshBuilder.CreateBox("crest", {
+    width:  c.crestW,
+    height: c.crestH,
+    depth:  c.crestDepth,
+  }, scene);
+
+  crest.position.set(
+    0,
+    c.h + c.crestH / 2,  // sits on top of shell
+    0,
+  );
+  return crest;
+}
+
+// ── 4. Ear guards — one each side ────────────────────────────────────────────
+function createEarGuards(scene: BABYLON.Scene, c: HelmetConfig): BABYLON.Mesh[] {
+  const make = (side: 1 | -1) => {
+    const ear = BABYLON.MeshBuilder.CreateBox("ear", {
+      width:  c.earW,
+      height: c.earH,
+      depth:  c.earDepth,
+    }, scene);
+    ear.position.set(
+      side * (c.w / 2 + c.earW / 2),  // flush against side of shell
+      c.h * 0.42,                      // vertically centered on lower helmet
+      0,
+    );
+    return ear;
+  };
+  return [make(1), make(-1)];
+}
+
+// ── 5. Assemble ───────────────────────────────────────────────────────────────
+function buildHelmet(
+  scene:       BABYLON.Scene,
+  config:      HelmetConfig,
+  shellMat:    BABYLON.Material,
+  visorMat:    BABYLON.Material,
+): BABYLON.TransformNode {
+  const root  = new BABYLON.TransformNode("helmetRoot", scene);
+  const shell = createHelmetShell(scene, config);
+  const visor = createVisor(scene, config);
+  const crest = createCrest(scene, config);
+  const ears  = createEarGuards(scene, config);
+
+  [shell, crest, ...ears].forEach(m => {
+    m.parent   = root;
+    m.material = shellMat;
+  });
+  visor.parent   = root;
+  visor.material = visorMat;
+
+  return root;
+}
+
+// ── Default X-style config ────────────────────────────────────────────────────
+const helmetConfig: HelmetConfig = {
+  w:          0.70,
+  h:          0.55,
+  depth:      0.62,
+  bevelR:     0.08,
+
+  visorW:     0.44,
+  visorH:     0.14,
+  visorY:     0.30,
+  visorTilt:  0.12,
+
+  crestH:     0.14,
+  crestW:     0.12,
+  crestDepth: 0.50,
+
+  earW:       0.06,
+  earH:       0.22,
+  earDepth:   0.28,
+};
+```
+
+**The three decisions that make it read as a robot helmet rather than a box:**
+
+`bevelR` at `0.08–0.12` is the biggest visual differentiator. A raw box looks like a crate; the 45° corner cuts on the top face immediately read as manufactured armor. The bevel triangles in the index list are the fiddly part — each one bridges a side face quad to the octagon edge above it.
+
+`visorTilt` around `0.10–0.15` radians tilts the visor backward. Combined with the flat Z depth on the ellipsoid, this catches light differently from the shell and reads as a separate material even before you apply a dark material to it.
+
+`earDepth` should be slightly less than `depth` — if it matches exactly the ears look glued on. Pulling it in by ~30% gives them that recessed panel look. Position them with `c.w / 2 + c.earW / 2` so they're exactly flush against the shell side with no gap and no interpenetration.

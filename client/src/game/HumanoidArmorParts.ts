@@ -21,6 +21,116 @@ function attach(meshes: BABYLON.Mesh[], parent: BABYLON.TransformNode): BABYLON.
   return meshes;
 }
 
+/**
+ * Build a frustum-style tapered box (top face one width, bottom face another,
+ * straight depth on both ends). Used for the torso piece to get the classic
+ * "X" waist silhouette: pass `topW > botW` (or vice versa) and the side
+ * faces will lean inward.
+ *
+ * Bottom face is at y = -h/2, top face at y = +h/2 — same as a regular
+ * MeshBuilder.CreateBox so it's a drop-in replacement.
+ */
+function createTaperedBox(
+  scene: BABYLON.Scene,
+  name: string,
+  topW: number,
+  botW: number,
+  h: number,
+  depth: number,
+): BABYLON.Mesh {
+  const hwB = botW / 2;
+  const hwT = topW / 2;
+  const hh = h / 2;
+  const hd = depth / 2;
+
+  // 8 corners — bottom uses botW, top uses topW.
+  const positions = [
+    -hwB, -hh, -hd,  hwB, -hh, -hd,  hwB, -hh,  hd, -hwB, -hh,  hd, // 0..3 bottom
+    -hwT,  hh, -hd,  hwT,  hh, -hd,  hwT,  hh,  hd, -hwT,  hh,  hd, // 4..7 top
+  ];
+  const indices = [
+    0, 2, 1,  0, 3, 2,   // bottom (CCW from outside / below)
+    4, 5, 6,  4, 6, 7,   // top    (CCW from outside / above)
+    0, 1, 5,  0, 5, 4,   // back  (-z)
+    1, 2, 6,  1, 6, 5,   // right (+x)
+    2, 3, 7,  2, 7, 6,   // front (+z)
+    3, 0, 4,  3, 4, 7,   // left  (-x)
+  ];
+
+  const normals: number[] = [];
+  BABYLON.VertexData.ComputeNormals(positions, indices, normals);
+
+  const vd = new BABYLON.VertexData();
+  vd.positions = positions;
+  vd.indices = indices;
+  vd.normals = normals;
+
+  const mesh = new BABYLON.Mesh(name, scene);
+  vd.applyToMesh(mesh);
+  return mesh;
+}
+
+/**
+ * Build a wedge-style robot boot. Bottom face is flat (y=0), top is
+ * higher at the heel than at the toe (toeH < heelH), the toe top edge is
+ * inset (toeW < 1) for a tapered front, and the toe face overhangs the
+ * ankle origin forward by `toeOver`. Origin = ankle attachment point at
+ * the back of the boot, so the heel sits behind the leg and the toe
+ * extends forward — matches how the leg pivot is positioned above.
+ */
+interface BootConfig {
+  toeH: number;     // height at front-top edge
+  heelH: number;    // height at back-top edge
+  w: number;        // total width
+  len: number;      // total length heel→toe
+  toeOver: number;  // how far the toe overhangs the ankle origin (forward)
+  toeW: number;     // top width at the toe as fraction of `w` (0..1)
+}
+function createWedgeBoot(
+  scene: BABYLON.Scene,
+  name: string,
+  c: BootConfig,
+): BABYLON.Mesh {
+  const hw = c.w / 2;
+  const hlen = c.len / 2;
+  const twH = hw * c.toeW;
+  const toe_z = hlen + c.toeOver;
+  const heel_z = -hlen;
+
+  const positions = [
+    // Bottom flat face (y = 0)
+    -hw,      0,       toe_z,   // 0
+     hw,      0,       toe_z,   // 1
+     hw,      0,       heel_z,  // 2
+    -hw,      0,       heel_z,  // 3
+    // Top wedge face — toe low + tapered, heel high + full width
+    -twH,     c.toeH,  toe_z,   // 4
+     twH,     c.toeH,  toe_z,   // 5
+     hw,      c.heelH, heel_z,  // 6
+    -hw,      c.heelH, heel_z,  // 7
+  ];
+  const indices = [
+    2, 1, 0,  3, 2, 0,   // bottom
+    4, 5, 6,  4, 6, 7,   // top wedge
+    0, 1, 5,  0, 5, 4,   // toe face
+    1, 2, 6,  1, 6, 5,   // right
+    2, 3, 7,  2, 7, 6,   // heel face
+    3, 0, 4,  3, 4, 7,   // left
+  ];
+
+  const normals: number[] = [];
+  BABYLON.VertexData.ComputeNormals(positions, indices, normals);
+
+  const vd = new BABYLON.VertexData();
+  vd.positions = positions;
+  vd.indices = indices;
+  vd.normals = normals;
+
+  const mesh = new BABYLON.Mesh(name, scene);
+  vd.applyToMesh(mesh);
+  return mesh;
+}
+
 export const HUMANOID_HELMET_PARTS: ArmorPartDefinition[] = [
   {
     id: "helmet_humanoid",
@@ -130,11 +240,19 @@ export const HUMANOID_CHEST_PARTS: ArmorPartDefinition[] = [
       const w = ctx.shoulderWidth * 0.78;
       const h = ctx.bodyHeight * 0.24;
 
-      const plate = BABYLON.MeshBuilder.CreateBox("mm_chest_plate", {
-        width: w,
-        height: h,
-        depth: 0.5,
-      }, ctx.scene);
+      // Tapered chest frustum — top face full chest width, bottom face
+      // tucked in at the waist (waist_ratio ≈ 0.78). This gives the
+      // classic "X" silhouette where the shoulders read wide and the
+      // waist reads narrow, instead of the prior straight-edged crate.
+      const waistRatio = 0.78;
+      const plate = createTaperedBox(
+        ctx.scene,
+        "mm_chest_plate",
+        w,                // top width = shoulder width
+        w * waistRatio,   // bottom width = waist
+        h,
+        0.5,
+      );
       plate.position.y = 0;
       plate.material = ctx.materials.metal();
       meshes.push(plate);
@@ -290,55 +408,84 @@ export const HUMANOID_ARM_PARTS: ArmorPartDefinition[] = [
 
 export const HUMANOID_WEAPON_PARTS: ArmorPartDefinition[] = [
   {
-    id: "weapon_humanoid_buster",
-    name: "Humanoid Buster",
+    id: "weapon_humanoid_blaster",
+    name: "Humanoid Blaster",
     slot: "rightWeapon",
     build: (ctx) => {
+      // Three-piece blaster following the canvas spec:
+      //   1. Housing block at the wrist attach point
+      //   2. Tapered cylinder barrel that flares out toward the muzzle
+      //      (diameter at the muzzle end > diameter at the housing end)
+      //   3. Flat muzzle disc at the very tip + a glowing core sphere
+      //
+      // The arm rig hangs down the local -y axis from the shoulder, so
+      // "forward" along the barrel is also -y here. A Babylon cylinder's
+      // diameterBottom is at -y, so for a flared muzzle (wider at the
+      // far/distal end) we want diameterBottom > diameterTop.
       const meshes: BABYLON.Mesh[] = [];
       const foreLen = ctx.armLength * 0.5;
-      const yBase = -ctx.armLength - foreLen * 0.5;
+      const yWrist = -ctx.armLength - foreLen * 0.05;
 
-      const shroud = BABYLON.MeshBuilder.CreateCylinder("mm_buster_shroud", {
-        height: foreLen * 1.1,
-        diameter: 0.95,
+      // 1. Housing block — chunky box at wrist, slightly proud forward.
+      const housing = BABYLON.MeshBuilder.CreateBox("mm_blaster_housing", {
+        width: 0.85,
+        height: 0.78,
+        depth: 0.95,
+      }, ctx.scene);
+      housing.position.y = yWrist;
+      housing.material = ctx.materials.metal();
+      meshes.push(housing);
+
+      // Gold accent stripe wrapping the housing.
+      const housingTrim = BABYLON.MeshBuilder.CreateBox("mm_blaster_housing_trim", {
+        width: 0.88,
+        height: 0.16,
+        depth: 0.98,
+      }, ctx.scene);
+      housingTrim.position.y = yWrist + 0.18;
+      housingTrim.material = ctx.materials.gold();
+      meshes.push(housingTrim);
+
+      // 2. Barrel — tapered cylinder, flared at the muzzle end (-y).
+      const barrelLen = foreLen * 1.05;
+      const barrel = BABYLON.MeshBuilder.CreateCylinder("mm_blaster_barrel", {
+        height: barrelLen,
+        diameterTop: 0.62,     // narrow at housing end
+        diameterBottom: 0.92,  // flared toward muzzle
         tessellation: 18,
       }, ctx.scene);
-      shroud.position.y = yBase;
-      shroud.material = ctx.materials.metal();
-      meshes.push(shroud);
-
-      const accentRing = BABYLON.MeshBuilder.CreateTorus("mm_buster_ring", {
-        diameter: 1.0,
-        thickness: 0.1,
-        tessellation: 24,
-      }, ctx.scene);
-      accentRing.position.y = yBase + foreLen * 0.15;
-      accentRing.material = ctx.materials.gold();
-      meshes.push(accentRing);
-
-      const barrel = BABYLON.MeshBuilder.CreateCylinder("mm_buster_barrel", {
-        height: foreLen * 0.55,
-        diameterTop: 0.85,
-        diameterBottom: 0.62,
-        tessellation: 18,
-      }, ctx.scene);
-      barrel.position.y = yBase - foreLen * 0.7;
+      barrel.position.y = yWrist - 0.34 - barrelLen * 0.5;
       barrel.material = ctx.materials.metal();
       meshes.push(barrel);
 
-      const muzzleRing = BABYLON.MeshBuilder.CreateTorus("mm_buster_muzzle_ring", {
-        diameter: 0.92,
+      // Mid-barrel accent ring (gold) for visual punctuation.
+      const accentRing = BABYLON.MeshBuilder.CreateTorus("mm_blaster_ring", {
+        diameter: 0.86,
         thickness: 0.1,
         tessellation: 24,
       }, ctx.scene);
-      muzzleRing.position.y = yBase - foreLen;
-      muzzleRing.material = ctx.materials.gold();
-      meshes.push(muzzleRing);
+      accentRing.position.y = yWrist - 0.34 - barrelLen * 0.35;
+      accentRing.material = ctx.materials.gold();
+      meshes.push(accentRing);
 
-      const muzzleCore = BABYLON.MeshBuilder.CreateSphere("mm_buster_muzzle_core", {
-        diameter: 0.55,
+      // 3. Flat muzzle disc — thin cylinder oriented across the barrel
+      // axis at the very tip, slightly larger than the barrel's flare.
+      const muzzleTipY = yWrist - 0.34 - barrelLen;
+      const muzzleDisc = BABYLON.MeshBuilder.CreateCylinder("mm_blaster_muzzle_disc", {
+        diameterTop: 1.05,
+        diameterBottom: 1.05,
+        height: 0.1,
+        tessellation: 24,
       }, ctx.scene);
-      muzzleCore.position.y = yBase - foreLen + 0.08;
+      muzzleDisc.position.y = muzzleTipY + 0.05;
+      muzzleDisc.material = ctx.materials.gold();
+      meshes.push(muzzleDisc);
+
+      // Glowing energy core just inside the muzzle.
+      const muzzleCore = BABYLON.MeshBuilder.CreateSphere("mm_blaster_muzzle_core", {
+        diameter: 0.6,
+      }, ctx.scene);
+      muzzleCore.position.y = muzzleTipY + 0.18;
       muzzleCore.material = ctx.materials.neon();
       meshes.push(muzzleCore);
 
@@ -402,21 +549,42 @@ export const HUMANOID_LEG_PARTS: ArmorPartDefinition[] = [
       bootFlare.material = ctx.materials.metal();
       meshes.push(bootFlare);
 
-      const bootBase = BABYLON.MeshBuilder.CreateBox("mm_leg_boot", {
-        width: 0.95,
-        height: 0.42,
-        depth: 1.25,
-      }, ctx.scene);
-      bootBase.position.set(0, -thighLen - shinLen - 0.05, 0.18);
-      bootBase.material = ctx.materials.metal();
-      meshes.push(bootBase);
+      // Wedge-style boot — heel high, toe low, tapered toe top edge,
+      // and a forward toe overhang. Bottom of the wedge sits flush with
+      // the ground at y = -thighLen - shinLen - 0.42 (the previous boot
+      // base height) so the visual ground contact is unchanged.
+      const bootGroundY = -thighLen - shinLen - 0.26;
+      const boot = createWedgeBoot(ctx.scene, "mm_leg_boot", {
+        toeH: 0.22,
+        heelH: 0.5,
+        w: 0.95,
+        len: 1.05,
+        toeOver: 0.22,
+        toeW: 0.82,
+      });
+      boot.position.set(0, bootGroundY, 0.05);
+      boot.material = ctx.materials.metal();
+      meshes.push(boot);
 
-      const toeStripe = BABYLON.MeshBuilder.CreateBox("mm_leg_toe_stripe", {
-        width: 0.96,
-        height: 0.1,
-        depth: 0.18,
+      // Ankle connector — short cylinder bridging the wedge top down
+      // from the shin/flare. Sits on top of the heel region so the
+      // wedge reads as a sculpted boot instead of a floating shoe.
+      const ankle = BABYLON.MeshBuilder.CreateCylinder("mm_leg_ankle", {
+        diameter: 0.48,
+        height: 0.22,
+        tessellation: 14,
       }, ctx.scene);
-      toeStripe.position.set(0, -thighLen - shinLen + 0.05, 0.78);
+      ankle.position.set(0, bootGroundY + 0.5 + 0.11, -0.12);
+      ankle.material = ctx.materials.gold();
+      meshes.push(ankle);
+
+      // Gold toe stripe across the front of the wedge.
+      const toeStripe = BABYLON.MeshBuilder.CreateBox("mm_leg_toe_stripe", {
+        width: 0.78,
+        height: 0.08,
+        depth: 0.16,
+      }, ctx.scene);
+      toeStripe.position.set(0, bootGroundY + 0.06, 0.05 + 1.05 / 2 + 0.22 - 0.08);
       toeStripe.material = ctx.materials.gold();
       meshes.push(toeStripe);
 
