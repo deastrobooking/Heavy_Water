@@ -218,6 +218,24 @@ export class PlayerController implements IDamageable {
 
   private hasFlightArmor: boolean = false;
 
+  // Superman Flight — premium SPECIALS unlock layered ON TOP of the
+  // standard flight-armor mode. Triggered by pressing KeyL + Space
+  // simultaneously while airborne. Distinct from `isFlying` (the X-key
+  // / triple-jump mode) so the existing armor-energy economy keeps
+  // working untouched. While in this mode jetpack is suppressed,
+  // gravity is overridden, and weapons fire normally.
+  private hasSupermanFlight: boolean = false;
+  private isSupermanFlight: boolean = false;
+  // Held-Space boost multiplier eases in/out for a snappy but not
+  // jarring acceleration. Applied to the cruise + ascend speeds.
+  private supermanBoostMul: number = 1;
+  // Cruise + boost speeds (per-frame meters). Boost is ~3× cruise so a
+  // panicked burst genuinely outruns aerial-enemy chase speeds.
+  private supermanCruiseSpeed: number = 0.95;
+  private supermanBoostSpeed: number = 2.6;
+  private supermanAscendSpeed: number = 0.55;
+  private supermanDescendSpeed: number = 0.55;
+
   private animationSystem: AnimationSystem;
   private prevGrounded: boolean = true;
 
@@ -381,8 +399,23 @@ export class PlayerController implements IDamageable {
     this.keyDownHandler = (e: KeyboardEvent) => {
       this.keys[e.code] = true;
 
+      // Superman Flight combo: KeyL + Space pressed while airborne (and
+      // unlock owned) toggles the mode. Detect on either keydown by
+      // checking the OTHER key's currently-held state. This keydown
+      // handler already set `keys[e.code] = true` at line 382, so the
+      // pressed key reads as held too — order doesn't matter. We
+      // short-circuit BEFORE the jump / boost-dash branches so the
+      // combo doesn't also fire those (otherwise pressing the combo
+      // would consume a jump and a dash on top of toggling).
+      if (this.hasSupermanFlight && !this.isGrounded && !this.mountedVehicleRoot && !this.isAirSmashing) {
+        if ((e.code === "Space" && this.keys["KeyL"]) || (e.code === "KeyL" && this.keys["Space"])) {
+          this.toggleSupermanMode();
+          return;
+        }
+      }
+
       if (e.code === "Space") {
-        if (this.isFlying) {
+        if (this.isFlying || this.isSupermanFlight) {
           return;
         }
         this.handleJump();
@@ -392,7 +425,7 @@ export class PlayerController implements IDamageable {
         this.startDodge();
       }
 
-      if (e.code === "KeyL" && !this.isBoostDashing && this.boostDashCooldownTimer <= 0) {
+      if (e.code === "KeyL" && !this.isBoostDashing && this.boostDashCooldownTimer <= 0 && !this.isSupermanFlight) {
         this.startBoostDash();
       }
 
@@ -410,8 +443,16 @@ export class PlayerController implements IDamageable {
         this.onHeavyMeleeAttack?.();
       }
 
-      if (e.code === "KeyX" && this.hasFlightArmor) {
-        this.toggleFlightMode();
+      if (e.code === "KeyX") {
+        // X is the universal flight-cancel: toggles the standard
+        // armor-flight when owned, and also bails out of Superman
+        // mode. Letting both share the key means the player has a
+        // single muscle-memory "land now" button.
+        if (this.isSupermanFlight) {
+          this.exitSupermanMode();
+        } else if (this.hasFlightArmor) {
+          this.toggleFlightMode();
+        }
       }
 
       if (e.code === "KeyC") {
@@ -639,6 +680,13 @@ export class PlayerController implements IDamageable {
       return;
     }
 
+    if (this.isSupermanFlight) {
+      this.updateSuperman(deltaTime);
+      this.updateCamera(deltaTime);
+      this.updateAnimations(deltaTime);
+      return;
+    }
+
     this.updateJetpack(deltaTime);
 
     if (this.isDodging) {
@@ -756,7 +804,7 @@ export class PlayerController implements IDamageable {
   }
 
   private updateJetpack(dt: number): void {
-    if (this.keys["Space"] && !this.isGrounded && this.jetpackFuel > 0 && !this.isDodging && !this.isFlying) {
+    if (this.keys["Space"] && !this.isGrounded && this.jetpackFuel > 0 && !this.isDodging && !this.isFlying && !this.isSupermanFlight) {
       this.isJetpacking = true;
       this.velocity.y = Math.min(this.velocity.y + this.jetpackForce, 0.35);
       this.jetpackFuel -= this.jetpackFuelCost * dt;
@@ -1171,6 +1219,10 @@ export class PlayerController implements IDamageable {
       // never fire and the player would warp out still flagged as
       // smashing. Drop the callback too so a stale onLand can't fire.
       this.cancelAirSmash();
+      // Same reasoning for Superman flight — the per-frame branch is
+      // skipped while mounted, so leaving the flag set would strand
+      // the player in the mode after dismount.
+      this.exitSupermanMode();
       this.mountedVehicleRoot = vehicleRoot;
       this.mountedVehiclePos = vehicleRoot.position;
       this.velocity.setAll(0);
@@ -1540,6 +1592,108 @@ export class PlayerController implements IDamageable {
     this.hasFlightArmor = true;
     console.log("[PlayerController] Flight armor acquired! Triple-jump flight enabled. Press X to toggle flight.");
     this.bus.emit(GameEvents.PLAYER_FLIGHT_ARMOR_ACQUIRED);
+  }
+
+  /** Premium SPECIALS unlock — enables the KeyL + Space airborne combo
+   *  that toggles Superman flight. Idempotent. */
+  unlockSupermanFlight(): void {
+    if (this.hasSupermanFlight) return;
+    this.hasSupermanFlight = true;
+    console.log("[PlayerController] Superman Flight unlocked. Hold dash + jump while airborne to enter, hold Space to boost.");
+  }
+  getHasSupermanFlight(): boolean { return this.hasSupermanFlight; }
+  getIsSupermanFlight(): boolean { return this.isSupermanFlight; }
+
+  private toggleSupermanMode(): void {
+    if (this.isSupermanFlight) {
+      this.exitSupermanMode();
+    } else {
+      this.enterSupermanMode();
+    }
+  }
+  private enterSupermanMode(): void {
+    if (this.isSupermanFlight || this.isGrounded || this.mountedVehicleRoot) return;
+    this.isSupermanFlight = true;
+    // Cancel competing aerial states so updateSuperman owns velocity.
+    this.isJetpacking = false;
+    this.isDodging = false;
+    this.isBoostDashing = false;
+    this.cancelAirSmash();
+    this.velocity.setAll(0);
+    this.supermanBoostMul = 1;
+    this.stateMachine.changeState("flying");
+    this.bus.emit(GameEvents.UI_MESSAGE, { text: "SUPERMAN FLIGHT ENGAGED", duration: 1.4 });
+  }
+  private exitSupermanMode(): void {
+    if (!this.isSupermanFlight) return;
+    this.isSupermanFlight = false;
+    this.supermanBoostMul = 1;
+    // Restore upright posture so the next ground frame doesn't render
+    // the player still pitched forward.
+    if (this.meshRoot) this.meshRoot.rotation.x = 0;
+    this.stateMachine.changeState("idle");
+  }
+
+  /** Free-flight mode that mirrors `updateFlight()` but skips the
+   *  armor-energy drain and adds a held-Space boost. Camera-relative
+   *  WASD with full pitch (so looking down dives, looking up climbs).
+   *  Lands on contact with the ground plane. */
+  private updateSuperman(dt: number): void {
+    // Boost ramps in/out smoothly while Space is held (Space alone in
+    // this mode means "go faster" — the entry combo is a one-shot
+    // toggle, not a hold). The ramp avoids a jarring jolt at boost
+    // start and a hard stop on release.
+    const wantBoost = !!this.keys["Space"];
+    const boostTarget = wantBoost ? this.supermanBoostSpeed / this.supermanCruiseSpeed : 1;
+    const ease = Math.min(1, dt * 6);
+    this.supermanBoostMul += (boostTarget - this.supermanBoostMul) * ease;
+
+    // Full-pitch camera vectors so the player can dive / climb by
+    // looking, just like the space-fighter flight loop.
+    const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
+    const right = this.camera.getDirection(BABYLON.Vector3.Right());
+    forward.normalize();
+    right.normalize();
+    right.y = 0; right.normalize();
+
+    const cruise = this.supermanCruiseSpeed * this.supermanBoostMul;
+    let moveDir = BABYLON.Vector3.Zero();
+    if (this.keys["KeyW"]) moveDir.addInPlace(forward.scale(cruise));
+    if (this.keys["KeyS"]) moveDir.addInPlace(forward.scale(-cruise));
+    if (this.keys["KeyA"]) moveDir.addInPlace(right.scale(-cruise));
+    if (this.keys["KeyD"]) moveDir.addInPlace(right.scale(cruise));
+    if (this.keys["ControlLeft"] || this.keys["ControlRight"] || this.keys["ShiftRight"]) {
+      moveDir.y -= this.supermanDescendSpeed;
+    }
+
+    const damping = 0.82;
+    this.velocity.x = this.velocity.x * damping + moveDir.x * (1 - damping);
+    this.velocity.y = this.velocity.y * damping + moveDir.y * (1 - damping);
+    this.velocity.z = this.velocity.z * damping + moveDir.z * (1 - damping);
+
+    this.meshRoot.position.addInPlace(this.velocity);
+
+    // Mesh pitches forward like a flying cape silhouette. Yaw still
+    // tracks the camera via the standard updateMovement-style yaw
+    // applied below.
+    const horiz = Math.hypot(this.velocity.x, this.velocity.z);
+    if (horiz > 0.05) {
+      const yaw = Math.atan2(this.velocity.x, this.velocity.z);
+      this.meshRoot.rotation.y = yaw;
+    }
+    this.meshRoot.rotation.x = -0.55;
+
+    // Land cancels the mode and restores upright posture.
+    if (this.meshRoot.position.y < this.groundY + 1) {
+      this.meshRoot.position.y = this.groundY + 1;
+      this.velocity.y = 0;
+      this.isGrounded = true;
+      this.jumpCount = 0;
+      this.exitSupermanMode();
+      return;
+    }
+
+    this.stateMachine.changeState(horiz > 0.05 ? "flying" : "hovering");
   }
 
   getHasFlightArmor(): boolean {

@@ -68,7 +68,7 @@ type GamePhase = "auth" | "menu" | "playing" | "paused" | "gameover";
 // One source of truth for the SPECIALS-tab unlocks. Used both for
 // affordability checks in `specialsList` and for charging in
 // `handleUnlockSpecial`, so prices can never drift between the two.
-type SpecialId = "sabreSpin" | "sabreTwin" | "sabreGiant" | "autoLoot" | "roboDragon" | "autoTarget";
+type SpecialId = "sabreSpin" | "sabreTwin" | "sabreGiant" | "autoLoot" | "roboDragon" | "autoTarget" | "supermanFlight";
 interface SpecialDef {
   id: SpecialId;
   name: string;
@@ -91,6 +91,12 @@ const SPECIALS_DEFS: readonly SpecialDef[] = [
   // the player owns from the moment of purchase forward.
   { id: "autoTarget", name: "Auto-Target Module", description: "Magnetizes primary fire toward the nearest enemy in a 25° cone (range 140 m). Works on every weapon.",
     cost: { gears: 300, cores: 75, nanofiber: 45, circuits: 35, credits: 3000 } },
+  // Superman Flight — premium movement upgrade. While airborne, press
+  // dash + jump together to enter free-flight; hold Space to boost
+  // (~3× cruise) and outrun aerial chase enemies. No energy drain;
+  // weapons fire normally. Press X (or the combo again) to land.
+  { id: "supermanFlight", name: "Superman Flight", description: "While airborne, press dash + jump to free-fly. Hold Space to boost (~3× cruise). Press X to land.",
+    cost: { gears: 350, cores: 90, nanofiber: 55, circuits: 40, credits: 4000 } },
 ];
 
 export const Game: React.FC = () => {
@@ -194,7 +200,8 @@ export const Game: React.FC = () => {
   const [specialsOwned, setSpecialsOwned] = useState<{
     sabreSpin: boolean; sabreTwin: boolean; sabreGiant: boolean;
     autoLoot: boolean; roboDragon: boolean; autoTarget: boolean;
-  }>({ sabreSpin: false, sabreTwin: false, sabreGiant: false, autoLoot: false, roboDragon: false, autoTarget: false });
+    supermanFlight: boolean;
+  }>({ sabreSpin: false, sabreTwin: false, sabreGiant: false, autoLoot: false, roboDragon: false, autoTarget: false, supermanFlight: false });
   // Mirror of `specialsOwned` for use inside long-lived bus.on closures
   // (e.g. PLAYER_DIED) where the latest React state isn't directly visible.
   // Kept in sync via a useEffect below.
@@ -1270,6 +1277,7 @@ export const Game: React.FC = () => {
             // future debug command) is what actually persists, not the
             // React mirror which can lag a frame.
             autoTarget: weapons.isAutoTargetEnabled(),
+            supermanFlight: player.getHasSupermanFlight(),
           };
           return {
             stats: player.getStats(),
@@ -1357,6 +1365,10 @@ export const Game: React.FC = () => {
                 // module is live from frame one of the new session, not just
                 // the first time the player re-opens the SPECIALS tab.
                 if (snap.specialsOwned.autoTarget) weapons.setAutoTargetEnabled(true);
+                // Restore Superman Flight unlock so the dash+jump combo
+                // is live from the first airborne frame after load —
+                // otherwise the player would have to re-buy the SPECIAL.
+                if (snap.specialsOwned.supermanFlight) player.unlockSupermanFlight();
               }
               // Beam sabre level + sabre special unlocks.
               if (snap.beamSabreLevel || snap.specialsOwned) {
@@ -2318,6 +2330,11 @@ export const Game: React.FC = () => {
       const weapons = weaponsRef.current;
       if (!weapons) { showMessage("WEAPONS OFFLINE", 1500); return; }
       runEffect = () => { weapons.setAutoTargetEnabled(true); showMessage("AUTO-TARGET MODULE ONLINE", 2200); return true; };
+    } else if (id === "supermanFlight") {
+      // Pure player-controller flag flip; no other system needs to be
+      // online for the unlock to take effect, so the only failure mode
+      // is the player ref itself which we already checked above.
+      runEffect = () => { player.unlockSupermanFlight(); showMessage("SUPERMAN FLIGHT UNLOCKED — DASH+JUMP IN AIR", 2400); return true; };
     } else if (id === "roboDragon") {
       const comp = companionRef.current;
       if (!comp) { showMessage("HELPER SYSTEM OFFLINE", 1500); return; }

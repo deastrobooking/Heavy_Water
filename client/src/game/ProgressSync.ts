@@ -25,6 +25,10 @@ export interface SpecialsOwnedSnapshot {
    *  inside an aim cone. Premium SPECIALS unlock so it must persist
    *  across death/restart like the other one-time purchases. */
   autoTarget?: boolean;
+  /** Superman Flight — Space + KeyL airborne combo enters a free-flight
+   *  mode that re-uses the existing weapons stack with no energy drain
+   *  and a held-Space speed boost. Premium SPECIALS unlock; persists. */
+  supermanFlight?: boolean;
 }
 
 export interface ProgressSnapshot {
