@@ -725,6 +725,17 @@ export class AerialEnemySystem {
     this.bus.emit(GameEvents.UI_MESSAGE, "AERIAL THREAT ENGAGED");
   }
 
+  /** Drop aggro and despawn every active aerial unit. Used by Game.tsx's
+   *  LEVEL_STARTED handler when warping into the peaceful sanctuary so the
+   *  player doesn't trail combat units from a prior front. */
+  disengageAndClear(): void {
+    this.aggro = false;
+    for (const u of this.units) {
+      try { u.dispose(); } catch {}
+    }
+    this.units = [];
+  }
+
   isAggro(): boolean { return this.aggro; }
 
   spawnFighter(playerPos: BABYLON.Vector3): AerialUnit {

@@ -768,6 +768,13 @@ export const Game: React.FC = () => {
           if (payload?.skyTint && skyRef.current) {
             skyRef.current.setLevelTint(payload.skyTint);
           }
+          // Per-level time-of-day so the three combat fronts and the
+          // sanctuary actually look distinct (morning / sunset / night /
+          // dawn) even though they share the same world geometry. Level 5
+          // ignores this — its skybox is owned by SpaceLevelSystem.
+          if (typeof payload?.timeOfDay === "number" && skyRef.current) {
+            skyRef.current.setTimeOfDay(payload.timeOfDay);
+          }
 
           // Mount/dispose the sanctuary side-zone based on the peaceful flag.
           // Idempotent on re-entry: while peaceful=true, leaving the dispose
@@ -777,6 +784,18 @@ export const Game: React.FC = () => {
           const isPeaceful = !!payload?.peaceful
             || (typeof payload?.level === "number"
                 && LevelSystem.isPeaceful(payload.level as WorldLevel));
+          // Silence the wave spawner + clear lingering enemies when
+          // entering a peaceful zone, and re-arm it when leaving. Without
+          // this gate the timer-based drip-spawn keeps fanning out drones
+          // around the player even inside the sanctuary.
+          if (isPeaceful) {
+            enemySystem.setSpawningEnabled(false);
+            enemySystem.clearAllEnemies();
+            aerialEnemySystem.disengageAndClear();
+          } else {
+            enemySystem.setSpawningEnabled(true);
+          }
+
           if (isPeaceful && !sanctuarySystemRef.current) {
             sanctuarySystemRef.current = new SanctuarySystem(
               scene,

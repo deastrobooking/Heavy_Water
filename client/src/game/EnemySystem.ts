@@ -1087,6 +1087,12 @@ export class EnemySystem {
   private maxEnemies: number = 20;
   private waveNumber: number = 1;
   private bus: EventBus;
+  /** Master gate for the wave spawner. Flipped off by Game.tsx's
+   *  LEVEL_STARTED handler when entering a peaceful zone (the sanctuary)
+   *  so the timer-based drip-spawn in update() goes silent. Re-enabled
+   *  on warp out. The spawnEnemy() call site still works directly when
+   *  forced (e.g. the level-init seeding loop). */
+  private spawningEnabled: boolean = true;
 
   private robotFactory: RobotFactory;
 
@@ -1277,10 +1283,16 @@ export class EnemySystem {
   }
 
   update(playerPosition: BABYLON.Vector3, deltaTime: number): { damage: number; hits: EnemyUnit[] } {
-    this.spawnTimer += deltaTime;
-    if (this.spawnTimer >= this.spawnInterval) {
+    if (this.spawningEnabled) {
+      this.spawnTimer += deltaTime;
+      if (this.spawnTimer >= this.spawnInterval) {
+        this.spawnTimer = 0;
+        this.spawnEnemy(playerPosition);
+      }
+    } else {
+      // Bleed the timer back to zero so the next combat zone starts with
+      // a fresh full-interval grace period instead of an immediate spawn.
       this.spawnTimer = 0;
-      this.spawnEnemy(playerPosition);
     }
 
     let totalDamage = 0;
@@ -1332,6 +1344,25 @@ export class EnemySystem {
 
   getEnemyCount(): number {
     return this.enemies.filter(e => e.isAlive).length;
+  }
+
+  /** Toggle the wave spawner. Used by Game.tsx LEVEL_STARTED handler to
+   *  silence ground spawns when entering the peaceful sanctuary. */
+  setSpawningEnabled(enabled: boolean): void {
+    this.spawningEnabled = enabled;
+  }
+
+  /** Despawn every active enemy mesh. Used when warping into a peaceful
+   *  zone so the sanctuary doesn't have leftover drones from the combat
+   *  level the player came from. */
+  clearAllEnemies(): void {
+    for (const e of this.enemies) {
+      if (e.isAlive) {
+        e.isAlive = false;
+        try { e.mesh.dispose(); } catch {}
+      }
+    }
+    this.enemies = [];
   }
 
   nextWave(): void {

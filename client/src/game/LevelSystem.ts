@@ -42,6 +42,12 @@ interface LevelDef {
    *  spawner intensity, and triggers SanctuarySystem mount. Used by Level 4
    *  (Ashur Sanctuary). */
   peaceful?: boolean;
+  /** Per-level time-of-day in 0–24 hour clock. Game.tsx pipes this into
+   *  SkySystem.setTimeOfDay on LEVEL_STARTED so the four ground levels
+   *  read as visually distinct (morning / sunset / night / dawn) even
+   *  though they share the same world geometry. Optional — Level 5 owns
+   *  its own deep-space palette and ignores this. */
+  timeOfDay?: number;
 }
 
 const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
@@ -56,6 +62,7 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     fortressCenter: { x: 380, z: -120 },
     spawnPoint: { x: 0, z: 0 },
     completeSubtitle: "Stand by — the war isn't over.",
+    timeOfDay: 9.0, // crisp morning over Detroit
   },
   2: {
     level: 2,
@@ -68,6 +75,7 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     fortressCenter: { x: -360, z: -360 },
     spawnPoint: { x: -200, z: -200 },
     completeSubtitle: "The plague clears. One stronghold left.",
+    timeOfDay: 18.5, // burning sunset (matches the red sky tint)
   },
   3: {
     level: 3,
@@ -80,6 +88,7 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     fortressCenter: { x: -120, z: 420 },
     spawnPoint: { x: -60, z: 240 },
     completeSubtitle: "DETROIT IS FREE. The hybrids are broken.",
+    timeOfDay: 22.5, // deep night under the violet "void" sky
   },
   4: {
     level: 4,
@@ -105,6 +114,7 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     spawnPoint: { x: -480, z: -480 },
     completeSubtitle: "The sanctuary endures.",
     peaceful: true,
+    timeOfDay: 6.5, // warm dawn over the sanctuary fields
   },
   5: {
     level: 5,
@@ -236,6 +246,7 @@ export class LevelSystem {
       // SanctuarySystem and skip wave bumps + fortress seeding.
       spawnPoint: { ...def.spawnPoint },
       peaceful: def.peaceful === true,
+      timeOfDay: def.timeOfDay,
     });
   }
 
