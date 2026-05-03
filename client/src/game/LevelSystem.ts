@@ -48,6 +48,17 @@ interface LevelDef {
    *  though they share the same world geometry. Optional — Level 5 owns
    *  its own deep-space palette and ignores this. */
   timeOfDay?: number;
+  /** Per-level city palette multiplier. Game.tsx pipes this into
+   *  CityGenerator.setLevelTheme so the buildings + ground feel like a
+   *  *different* city across levels (red Mars-like for L2, deep-violet
+   *  void for L3, default cyan for L1, warm dawn for L4). Each component
+   *  is multiplied against the building's stored original color so the
+   *  per-building variety is preserved. */
+  cityTheme?: {
+    tint: { r: number; g: number; b: number };
+    glowTint: { r: number; g: number; b: number };
+    ground: { r: number; g: number; b: number };
+  };
 }
 
 const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
@@ -63,6 +74,11 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     spawnPoint: { x: 0, z: 0 },
     completeSubtitle: "Stand by — the war isn't over.",
     timeOfDay: 9.0, // crisp morning over Detroit
+    cityTheme: {
+      tint:     { r: 1.0, g: 1.0, b: 1.0 },
+      glowTint: { r: 1.0, g: 1.0, b: 1.0 },
+      ground:   { r: 1.0, g: 1.0, b: 1.0 },
+    },
   },
   2: {
     level: 2,
@@ -76,6 +92,13 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     spawnPoint: { x: -200, z: -200 },
     completeSubtitle: "The plague clears. One stronghold left.",
     timeOfDay: 18.5, // burning sunset (matches the red sky tint)
+    // RED MARS — burnt amber buildings + rust-red ground. Reads as a
+    // completely different city even though the geometry is shared.
+    cityTheme: {
+      tint:     { r: 1.6, g: 0.55, b: 0.35 },
+      glowTint: { r: 1.8, g: 0.65, b: 0.30 },
+      ground:   { r: 2.6, g: 1.20, b: 0.70 },
+    },
   },
   3: {
     level: 3,
@@ -89,6 +112,13 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     spawnPoint: { x: -60, z: 240 },
     completeSubtitle: "DETROIT IS FREE. The hybrids are broken.",
     timeOfDay: 22.5, // deep night under the violet "void" sky
+    // VOID NIGHT — deep blue-violet city with cold magenta neon. Reads as
+    // an entirely different "void-corrupted" Detroit.
+    cityTheme: {
+      tint:     { r: 0.45, g: 0.55, b: 1.30 },
+      glowTint: { r: 1.30, g: 0.40, b: 1.80 },
+      ground:   { r: 0.55, g: 0.50, b: 1.00 },
+    },
   },
   4: {
     level: 4,
@@ -115,6 +145,13 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     completeSubtitle: "The sanctuary endures.",
     peaceful: true,
     timeOfDay: 6.5, // warm dawn over the sanctuary fields
+    // SANCTUARY DAWN — soft warm/golden bias on the distant city behind
+    // the village so it reads as a peaceful frontier outpost.
+    cityTheme: {
+      tint:     { r: 1.20, g: 1.00, b: 0.80 },
+      glowTint: { r: 1.30, g: 1.10, b: 0.70 },
+      ground:   { r: 1.40, g: 1.20, b: 0.90 },
+    },
   },
   5: {
     level: 5,
@@ -247,6 +284,7 @@ export class LevelSystem {
       spawnPoint: { ...def.spawnPoint },
       peaceful: def.peaceful === true,
       timeOfDay: def.timeOfDay,
+      cityTheme: def.cityTheme,
     });
   }
 

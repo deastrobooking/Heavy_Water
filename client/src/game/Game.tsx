@@ -775,6 +775,32 @@ export const Game: React.FC = () => {
           if (typeof payload?.timeOfDay === "number" && skyRef.current) {
             skyRef.current.setTimeOfDay(payload.timeOfDay);
           }
+          // Per-level city palette swap — re-tints every cell-shaded
+          // building + the ground in-place so each combat front reads as
+          // a different city even though the geometry is shared.
+          if (payload?.cityTheme) {
+            try {
+              cityGenerator.setLevelTheme({
+                tint: new BABYLON.Color3(
+                  payload.cityTheme.tint.r,
+                  payload.cityTheme.tint.g,
+                  payload.cityTheme.tint.b,
+                ),
+                glowTint: new BABYLON.Color3(
+                  payload.cityTheme.glowTint.r,
+                  payload.cityTheme.glowTint.g,
+                  payload.cityTheme.glowTint.b,
+                ),
+                ground: new BABYLON.Color3(
+                  payload.cityTheme.ground.r,
+                  payload.cityTheme.ground.g,
+                  payload.cityTheme.ground.b,
+                ),
+              });
+            } catch (err) {
+              console.warn("[Game] setLevelTheme failed:", err);
+            }
+          }
 
           // Mount/dispose the sanctuary side-zone based on the peaceful flag.
           // Idempotent on re-entry: while peaceful=true, leaving the dispose
@@ -829,6 +855,7 @@ export const Game: React.FC = () => {
               skyRef.current,
               aerialEnemySystem,
               () => player.getPosition(),
+              vehicleRef.current,
             );
           } else if (!isSpacelike && spaceLevelSystemRef.current) {
             try { spaceLevelSystemRef.current.dispose(); } catch {}

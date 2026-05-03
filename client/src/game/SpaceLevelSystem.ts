@@ -1,6 +1,7 @@
 import * as BABYLON from "@babylonjs/core";
 import { SkySystem } from "./SkySystem";
 import { AerialEnemySystem } from "./AerialEnemySystem";
+import { VehicleSystem, VehicleInstance } from "./VehicleSystem";
 
 /**
  * SpaceLevelSystem — Level 5 "Orbital Front"
@@ -34,12 +35,17 @@ export class SpaceLevelSystem {
   private sky: SkySystem;
   private aerial: AerialEnemySystem;
   private playerPos: () => BABYLON.Vector3;
+  private vehicles: VehicleSystem | null;
 
   /** Top-level transform — disposing it kills every mesh we spawned. */
   private root: BABYLON.TransformNode;
   private earth: BABYLON.Mesh | null = null;
   private asteroids: { mesh: BABYLON.Mesh; spin: BABYLON.Vector3; drift: BABYLON.Vector3 }[] = [];
   private observer: BABYLON.Observer<BABYLON.Scene> | null = null;
+  /** The fighter we spawned + entered the player into on warp-in. Tracked
+   *  so dispose() can remove it cleanly when the player warps back to a
+   *  ground level. */
+  private spawnedFighter: VehicleInstance | null = null;
 
   /** Number of decorative asteroids — enough to read as a field without
    *  flooding the GPU with separate draw calls. */
@@ -55,17 +61,20 @@ export class SpaceLevelSystem {
     sky: SkySystem,
     aerial: AerialEnemySystem,
     playerPosProvider: () => BABYLON.Vector3,
+    vehicles: VehicleSystem | null = null,
   ) {
     this.scene = scene;
     this.sky = sky;
     this.aerial = aerial;
     this.playerPos = playerPosProvider;
+    this.vehicles = vehicles;
 
     this.root = new BABYLON.TransformNode("spaceLevelRoot", scene);
 
     sky.setSpaceMode(true);
     this.buildEarth();
     this.spawnAsteroids();
+    this.spawnAndEnterFighter();
     this.engageCombat();
 
     this.observer = scene.onBeforeRenderObservable.add(() => this.tick());
@@ -78,6 +87,18 @@ export class SpaceLevelSystem {
       this.observer = null;
     }
     this.sky.setSpaceMode(false);
+    // Eject the player from the orbital fighter and despawn the vehicle so
+    // we don't leak it across warps. exit() is a no-op if the player has
+    // already manually exited (e.g. tapped F mid-fight).
+    if (this.vehicles && this.spawnedFighter) {
+      try {
+        if (this.vehicles.getActive() === this.spawnedFighter) {
+          this.vehicles.exit();
+        }
+        try { this.spawnedFighter.meshes.root.dispose(); } catch {}
+      } catch {}
+      this.spawnedFighter = null;
+    }
     // The earth (and its halo child) and every asteroid are parented to
     // `root` — letting root.dispose() cascade is the cleanest teardown.
     // Don't double-dispose; just clear our own references first.
@@ -185,6 +206,28 @@ export class SpaceLevelSystem {
           (Math.random() - 0.5) * 1.5,
         ),
       });
+    }
+  }
+
+  /** Spawn a CometFighter at the player's spawn altitude and have the
+   *  vehicle system "enter" it so the player wakes up already piloting a
+   *  spacecraft. Ground levels get an ATV/fighter sitting on the tarmac
+   *  for the player to walk up to and press F — orbital combat skips that
+   *  step because the player is in vacuum from frame one. */
+  private spawnAndEnterFighter(): void {
+    if (!this.vehicles) return;
+    const p = this.playerPos();
+    // Spawn a few metres ahead of the player at the same altitude so the
+    // fighter is visible in the cockpit camera the moment the level loads.
+    const spawnPos = new BABYLON.Vector3(p.x, Math.max(p.y, 60), p.z + 4);
+    const fighter = this.vehicles.spawnPreset("CometFighter", spawnPos);
+    if (!fighter) {
+      console.warn("[SpaceLevelSystem] Failed to spawn CometFighter — preset missing?");
+      return;
+    }
+    this.spawnedFighter = fighter;
+    try { this.vehicles.enter(fighter); } catch (err) {
+      console.warn("[SpaceLevelSystem] vehicles.enter threw:", err);
     }
   }
 

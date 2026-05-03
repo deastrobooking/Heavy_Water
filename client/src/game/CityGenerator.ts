@@ -52,6 +52,16 @@ export class CityGenerator {
     rise: number;
   }> = [];
   private cellShadeMaterial: BABYLON.ShaderMaterial | null = null;
+  /** Every cell-shaded building material we've created, kept here so
+   *  `setLevelTheme` can re-tint the whole city in O(n) without rebuilding
+   *  geometry. Each entry stores its original baseColor + glowColor on the
+   *  `metadata` slot the first time it's tinted. */
+  private cellMaterials: BABYLON.ShaderMaterial[] = [];
+  /** Ground material — kept so per-level theming can recolor the asphalt. */
+  private groundMaterial: BABYLON.StandardMaterial | null = null;
+  /** Original ground diffuse — captured first time setLevelTheme runs so
+   *  warping back to L1 restores the default Detroit asphalt. */
+  private groundDiffuseOrig: BABYLON.Color3 | null = null;
 
   constructor(scene: BABYLON.Scene) {
     this.scene = scene;
@@ -122,7 +132,39 @@ export class CityGenerator {
     material.setColor3("baseColor", color);
     material.setColor3("glowColor", glowColor);
     material.backFaceCulling = true;
+    // Stash originals so setLevelTheme can multiply against them on each
+    // call without drift. We use the BABYLON metadata slot to avoid having
+    // to maintain a parallel Map<material, colors>.
+    material.metadata = {
+      baseColorOrig: color.clone(),
+      glowColorOrig: glowColor.clone(),
+    };
+    this.cellMaterials.push(material);
     return material;
+  }
+
+  /** Re-tint every cell-shaded building + the ground in-place to give the
+   *  player the impression that they've warped to a different city. Cheap
+   *  (O(n) over ~hundreds of materials, no geometry touched) and idempotent
+   *  — calling with a new theme overwrites the previous tint via the stored
+   *  originals on each material's metadata. */
+  setLevelTheme(theme: { tint: BABYLON.Color3; glowTint: BABYLON.Color3; ground: BABYLON.Color3 }): void {
+    for (const mat of this.cellMaterials) {
+      const meta = mat.metadata as
+        | { baseColorOrig: BABYLON.Color3; glowColorOrig: BABYLON.Color3 }
+        | null;
+      if (!meta) continue;
+      const tinted = meta.baseColorOrig.multiply(theme.tint);
+      const glow = meta.glowColorOrig.multiply(theme.glowTint);
+      mat.setColor3("baseColor", tinted);
+      mat.setColor3("glowColor", glow);
+    }
+    if (this.groundMaterial) {
+      if (!this.groundDiffuseOrig) {
+        this.groundDiffuseOrig = this.groundMaterial.diffuseColor.clone();
+      }
+      this.groundMaterial.diffuseColor = this.groundDiffuseOrig.multiply(theme.ground);
+    }
   }
 
   /**
@@ -771,6 +813,7 @@ export class CityGenerator {
     groundMat.emissiveColor = new BABYLON.Color3(0.02, 0.02, 0.05);
     ground.material = groundMat;
     ground.receiveShadows = true;
+    this.groundMaterial = groundMat;
   }
 
   private createRiver(): void {
