@@ -89,6 +89,15 @@ const ENEMY_DROP_TABLE: Record<string, PickupSpawnRequest[]> = {
     { type: "circuit_board", amount: 6 },
     { type: "nano_fiber", amount: 4 },
   ],
+  // Tanks are siege artillery — slow, heavily armoured, expensive to take
+  // down — so the loot is meaty: scrap dominates (twisted hull plating)
+  // and the player gets a guaranteed core/circuit pair plus extra gears.
+  tank: [
+    { type: "gear", amount: 11 },
+    { type: "scrap_metal", amount: 14 },
+    { type: "energy_core", amount: 3 },
+    { type: "circuit_board", amount: 2 },
+  ],
   aerial_fighter: [
     { type: "gear", amount: 7 },
     { type: "scrap_metal", amount: 6 },

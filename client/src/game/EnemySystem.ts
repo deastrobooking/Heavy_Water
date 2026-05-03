@@ -8,7 +8,7 @@ import { HumanoidCharacter } from "./HumanoidCharacter";
 import { HUMANOID_PRESETS } from "./HumanoidPresets";
 import { BossVariant, BossVariantId, BOSS_VARIANTS, getBossVariant } from "./BossVariants";
 
-export type EnemyType = "drone" | "soldier" | "heavy" | "insectoid" | "hybrid" | "commander" | "captain";
+export type EnemyType = "drone" | "soldier" | "heavy" | "insectoid" | "hybrid" | "commander" | "captain" | "tank";
 export type EnemyAIState = "idle" | "patrol" | "chase" | "attack" | "stunned" | "dead" | "flying" | "hovering" | "dodging";
 
 /** A homing red orb the BossCaptain fires at the player. Tracked per-captain
@@ -89,6 +89,16 @@ const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     maxHealth: 2400, attackDamage: 38, defense: 22, movementSpeed: 6, attackCooldown: 1.4,
     knockbackForce: 1400, experienceValue: 800, detectionRange: 60, chaseRange: 90,
     attackRange: 6.5, patrolSpeed: 0.08, chaseSpeed: 0.16, credits: 500,
+  },
+  // Tank — slow, heavily-armoured ground vehicle that spawns out on the
+  // city OUTSKIRTS and shells the player from long range. The huge
+  // attackRange (28 m) is what makes the tank distinct: it never closes —
+  // it parks, faces, and fires a tracer shell every ~3.5 s. Treat it
+  // as siege artillery rather than a chaser.
+  tank: {
+    maxHealth: 600, attackDamage: 45, defense: 18, movementSpeed: 1.8, attackCooldown: 3.5,
+    knockbackForce: 1100, experienceValue: 120, detectionRange: 55, chaseRange: 80,
+    attackRange: 28, patrolSpeed: 0.025, chaseSpeed: 0.045, credits: 90,
   },
 };
 
@@ -371,6 +381,8 @@ export class EnemyUnit implements IDamageable {
         this.createCommanderAttackEffect();
       } else if (this.type === "captain") {
         this.captainSabreSlashEffect(playerPos);
+      } else if (this.type === "tank") {
+        this.createTankShellEffect(playerPos);
       } else {
         this.createAttackEffect();
       }
@@ -737,6 +749,73 @@ export class EnemyUnit implements IDamageable {
     animate();
   }
 
+  /** Tank long-range shell: a glowing tracer travels from the muzzle
+   *  toward the player position over ~22 frames, with a brief bright
+   *  muzzle flash at the launch point. Visual-only — actual damage is
+   *  already applied this frame in `updateAttack`, same as every other
+   *  enemy attack effect. */
+  private createTankShellEffect(playerPos: BABYLON.Vector3): void {
+    const scene = this.mesh.getScene();
+    // Spawn the shell ~2.6 m in front of the tank's center at turret
+    // height — close enough to "the barrel" that the player reads it as
+    // muzzle fire. We use mesh.forward so the shell respects the tank's
+    // facing (`faceDirection` runs every attack tick).
+    const fwd = this.mesh.forward || new BABYLON.Vector3(0, 0, 1);
+    const muzzle = this.mesh.position.add(fwd.scale(2.6));
+    muzzle.y = this.mesh.position.y + 0.4;
+
+    // Bright muzzle flash sphere — fades + grows in 8 frames.
+    const flash = BABYLON.MeshBuilder.CreateSphere("tankFlash",
+      { diameter: 1.4, segments: 8 }, scene);
+    flash.position = muzzle.clone();
+    const flashMat = new BABYLON.StandardMaterial("tankFlashMat", scene);
+    flashMat.emissiveColor = new BABYLON.Color3(1.0, 0.55, 0.15);
+    flashMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+    flashMat.alpha = 0.9;
+    flash.material = flashMat;
+
+    // The shell tracer — a small bright orb that lerps from muzzle to
+    // (an estimate of) the player's torso position over the lifetime.
+    const target = playerPos.add(new BABYLON.Vector3(0, 1.0, 0));
+    const shell = BABYLON.MeshBuilder.CreateSphere("tankShell",
+      { diameter: 0.55, segments: 10 }, scene);
+    shell.position = muzzle.clone();
+    const shellMat = new BABYLON.StandardMaterial("tankShellMat", scene);
+    shellMat.emissiveColor = new BABYLON.Color3(1.0, 0.7, 0.2);
+    shellMat.diffuseColor = new BABYLON.Color3(0.4, 0.2, 0.0);
+    shell.material = shellMat;
+
+    const trail = BABYLON.MeshBuilder.CreateCylinder("tankShellTrail",
+      { height: 0.6, diameter: 0.15, tessellation: 6 }, scene);
+    const trailMat = new BABYLON.StandardMaterial("tankShellTrailMat", scene);
+    trailMat.emissiveColor = new BABYLON.Color3(1.0, 0.4, 0.05);
+    trailMat.alpha = 0.6;
+    trail.material = trailMat;
+
+    const start = muzzle.clone();
+    const total = 22;
+    let frame = 0;
+    const animate = () => {
+      frame++;
+      const t = Math.min(1, frame / total);
+      shell.position = BABYLON.Vector3.Lerp(start, target, t);
+      trail.position = shell.position.clone();
+      // Anchor the trail behind the shell so it reads as smoke.
+      const back = BABYLON.Vector3.Lerp(start, target, Math.max(0, t - 0.05));
+      trail.position = BABYLON.Vector3.Lerp(back, shell.position, 0.5);
+      flashMat.alpha = Math.max(0, 0.9 - frame * 0.13);
+      flash.scaling.setAll(1 + frame * 0.18);
+      if (frame < total) {
+        requestAnimationFrame(animate);
+      } else {
+        flash.dispose();
+        shell.dispose();
+        trail.dispose();
+      }
+    };
+    animate();
+  }
+
   private createDodgeEffect(): void {
     const scene = this.mesh.getScene();
     const pos = this.mesh.position.clone();
@@ -1084,6 +1163,13 @@ export class EnemySystem {
   private enemies: EnemyUnit[] = [];
   private spawnTimer: number = 0;
   private spawnInterval: number = 5000;
+  /** Dedicated timer for the outskirts tank spawner. Tanks are too high-
+   *  impact (long-range shells, heavy HP) to gate purely behind the 7%
+   *  random roll in `selectEnemyType` — this guarantees roughly one tank
+   *  appears at the outskirts every 22 s during active combat, which the
+   *  player feels as "siege artillery hammers from the ring road". */
+  private tankSpawnTimer: number = 0;
+  private tankSpawnInterval: number = 22000;
   private maxEnemies: number = 20;
   private waveNumber: number = 1;
   private bus: EventBus;
@@ -1103,6 +1189,14 @@ export class EnemySystem {
   }
 
   private createEnemyMesh(type: EnemyType, position: BABYLON.Vector3, variant?: BossVariant | null): BABYLON.Mesh {
+    // Tanks use a parametric vehicle build (treads + hull + turret +
+    // barrel) — there's no robot/humanoid preset that reads as a tank,
+    // and the proportions matter for the silhouette. Built BEFORE the
+    // humanoid + robot branches so the type-specific dispatch is clean.
+    if (type === "tank") {
+      return this.createTankMesh(position);
+    }
+
     // Commanders + Captains use humanoid models instead of robots.
     if (type === "commander" || type === "captain") {
       const captainPresets = [
@@ -1172,6 +1266,11 @@ export class EnemySystem {
       // Fallback only — captains are normally built in the humanoid branch
       // above and never reach this map.
       captain: ["CommanderOmega"],
+      // Tanks are built parametrically in `createTankMesh` and never reach
+      // this preset path. Entry exists purely to satisfy the exhaustive
+      // record type so a future EnemyType addition fails to compile if it
+      // forgets a preset.
+      tank: ["TankTitan"],
     };
 
     const variants = presetMap[type] || ["ScoutPrime"];
@@ -1208,6 +1307,128 @@ export class EnemySystem {
     return mesh;
   }
 
+  /** Build the tank mesh parametrically. The hitbox is a capsule sized to
+   *  match the hull silhouette so AABB-based weapons hit something
+   *  sensible, and every visible part is parented to it so the chase /
+   *  patrol code can move the whole vehicle by translating one node.
+   *
+   *  Local-space layout (visual root sits at hitbox.y - 1.5 so treads
+   *  meet the ground when the chase code snaps Y to 1.5):
+   *
+   *    treads (left + right)  → y ≈ 0.4
+   *    hull body              → y ≈ 1.0
+   *    turret base            → y ≈ 1.9
+   *    turret housing         → y ≈ 2.3
+   *    barrel                 → y ≈ 2.3, +Z 2.0
+   *    glowing emissive trim along hull mid-line
+   */
+  private createTankMesh(position: BABYLON.Vector3): BABYLON.Mesh {
+    const scene = this.scene;
+    const idSuffix = `${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
+    // Hitbox capsule — matches every other ground enemy's pattern so the
+    // chase code can keep snapping `mesh.position.y = 1.5`.
+    const hitbox = BABYLON.MeshBuilder.CreateCapsule(`enemyHit_tank_${idSuffix}`,
+      { height: 3.6, radius: 1.6 }, scene);
+    hitbox.isVisible = false;
+    hitbox.position.copyFrom(position);
+    hitbox.position.y = 1.5;
+
+    const root = new BABYLON.TransformNode(`tankRoot_${idSuffix}`, scene);
+    root.parent = hitbox;
+    // Tracks rest on the ground when hitbox center is at y=1.5.
+    root.position = new BABYLON.Vector3(0, -1.5, 0);
+
+    // Hull-armor material — desaturated greys with subtle red emissive so
+    // the tank reads as enemy faction (same red-orange palette as drones
+    // / soldiers) without overwhelming the silhouette.
+    const armorMat = new BABYLON.StandardMaterial(`tankArmorMat_${idSuffix}`, scene);
+    armorMat.diffuseColor = new BABYLON.Color3(0.30, 0.27, 0.22);
+    armorMat.emissiveColor = new BABYLON.Color3(0.12, 0.06, 0.04);
+    armorMat.specularColor = new BABYLON.Color3(0.15, 0.15, 0.15);
+
+    const trimMat = new BABYLON.StandardMaterial(`tankTrimMat_${idSuffix}`, scene);
+    trimMat.diffuseColor = new BABYLON.Color3(0.55, 0.10, 0.08);
+    trimMat.emissiveColor = new BABYLON.Color3(0.95, 0.30, 0.10);
+    trimMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const trackMat = new BABYLON.StandardMaterial(`tankTrackMat_${idSuffix}`, scene);
+    trackMat.diffuseColor = new BABYLON.Color3(0.10, 0.10, 0.11);
+    trackMat.emissiveColor = new BABYLON.Color3(0.02, 0.02, 0.02);
+    trackMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    // Treads — two long thin boxes, one per side.
+    for (const side of [-1, 1]) {
+      const tread = BABYLON.MeshBuilder.CreateBox(`tankTread_${side > 0 ? "R" : "L"}_${idSuffix}`,
+        { width: 0.9, height: 0.8, depth: 5.4 }, scene);
+      tread.position.set(side * 1.4, 0.4, 0);
+      tread.parent = root;
+      tread.material = trackMat;
+    }
+
+    // Hull body — wider than the treads, lower than the turret.
+    const hull = BABYLON.MeshBuilder.CreateBox(`tankHull_${idSuffix}`,
+      { width: 3.2, height: 1.2, depth: 4.6 }, scene);
+    hull.position.set(0, 1.0, 0);
+    hull.parent = root;
+    hull.material = armorMat;
+
+    // Hull trim line — a thin emissive strip running along each side at
+    // the hull's mid-height. Pure decoration — sells the "enemy unit"
+    // read at distance.
+    for (const side of [-1, 1]) {
+      const trim = BABYLON.MeshBuilder.CreateBox(`tankTrim_${side > 0 ? "R" : "L"}_${idSuffix}`,
+        { width: 0.08, height: 0.18, depth: 4.4 }, scene);
+      trim.position.set(side * 1.62, 1.0, 0);
+      trim.parent = root;
+      trim.material = trimMat;
+    }
+
+    // Turret base ring — a short cylinder so the housing reads as
+    // pivoting on top of the hull.
+    const turretBase = BABYLON.MeshBuilder.CreateCylinder(`tankTurretBase_${idSuffix}`,
+      { height: 0.4, diameter: 2.4, tessellation: 18 }, scene);
+    turretBase.position.set(0, 1.9, 0);
+    turretBase.parent = root;
+    turretBase.material = armorMat;
+
+    // Turret housing — a smaller box than the hull, tilted forward.
+    const turret = BABYLON.MeshBuilder.CreateBox(`tankTurret_${idSuffix}`,
+      { width: 2.4, height: 1.0, depth: 2.6 }, scene);
+    turret.position.set(0, 2.3, -0.1);
+    turret.parent = root;
+    turret.material = armorMat;
+
+    // Glowing eye/sensor on the turret front so the silhouette has a
+    // recognisable "face".
+    const eye = BABYLON.MeshBuilder.CreateBox(`tankEye_${idSuffix}`,
+      { width: 0.9, height: 0.18, depth: 0.06 }, scene);
+    eye.position.set(0, 2.55, 1.18);
+    eye.parent = root;
+    eye.material = trimMat;
+
+    // Main barrel — long thin cylinder pointing forward (+Z).
+    const barrel = BABYLON.MeshBuilder.CreateCylinder(`tankBarrel_${idSuffix}`,
+      { height: 3.6, diameter: 0.42, tessellation: 14 }, scene);
+    // Cylinders in Babylon point along +Y by default; rotate around X so
+    // the long axis aligns with the tank's forward (+Z).
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.set(0, 2.3, 2.1);
+    barrel.parent = root;
+    barrel.material = armorMat;
+
+    // Muzzle ring — a slightly larger cylinder at the barrel tip so the
+    // muzzle reads visually + where the shell tracer originates.
+    const muzzle = BABYLON.MeshBuilder.CreateCylinder(`tankMuzzle_${idSuffix}`,
+      { height: 0.4, diameter: 0.55, tessellation: 14 }, scene);
+    muzzle.rotation.x = Math.PI / 2;
+    muzzle.position.set(0, 2.3, 3.85);
+    muzzle.parent = root;
+    muzzle.material = trimMat;
+
+    return hitbox;
+  }
+
   spawnEnemy(playerPosition: BABYLON.Vector3): void {
     if (this.enemies.length >= this.maxEnemies) return;
 
@@ -1224,6 +1445,29 @@ export class EnemySystem {
     const enemy = new EnemyUnit(mesh, type, waveMultiplier);
     this.enemies.push(enemy);
     this.bus.emit(GameEvents.ENEMY_SPAWNED, { type, position });
+  }
+
+  /** Spawns a tank at the city OUTSKIRTS — between 90 and 130 m from the
+   *  player, on the ground. The big radius is the whole point: tanks
+   *  are siege artillery, not chasers, so they need to be visible across
+   *  the rooftops on entry and start shelling without ever closing.
+   *
+   *  Caps against the same `maxEnemies` budget as the regular drip-spawn
+   *  so a passive player doesn't accumulate ten tanks parked around the
+   *  city.  */
+  spawnTankAtOutskirts(playerPosition: BABYLON.Vector3): void {
+    if (this.enemies.length >= this.maxEnemies) return;
+    const angle = Math.random() * Math.PI * 2;
+    const distance = 90 + Math.random() * 40;
+    const x = playerPosition.x + Math.cos(angle) * distance;
+    const z = playerPosition.z + Math.sin(angle) * distance;
+    const position = new BABYLON.Vector3(x, 1.5, z);
+
+    const mesh = this.createEnemyMesh("tank", position);
+    const waveMultiplier = 1 + (this.waveNumber - 1) * 0.2;
+    const enemy = new EnemyUnit(mesh, "tank", waveMultiplier);
+    this.enemies.push(enemy);
+    this.bus.emit(GameEvents.ENEMY_SPAWNED, { type: "tank", position });
   }
 
   spawnCommander(playerPosition: BABYLON.Vector3): void {
@@ -1273,9 +1517,23 @@ export class EnemySystem {
   }
 
   private selectEnemyType(): EnemyType {
+    // Rare elite tiers each get their own INDEPENDENT roll (rather than
+    // sharing the cumulative band of the common-tier roll below). The
+    // prior cumulative-band structure broke when tank was inserted: a
+    // 0.07 tank band positioned ahead of hybrid's 0.05 band swallowed
+    // hybrid entirely, and commander's 0.08 band on wave 7+ swallowed
+    // both. Independent rolls let each elite have its stated chance
+    // without cannibalising the next.
+    if (this.waveNumber >= 7 && Math.random() < 0.08) return "commander";
+    if (this.waveNumber >= 5 && Math.random() < 0.05) return "hybrid";
+    // Tank — ~7% of regular drip-spawns from wave 2+. The dedicated
+    // outskirts timer in update() also fires `spawnTankAtOutskirts`
+    // every ~22 s, so this roll is a top-up that occasionally puts a
+    // tank inside the close-in spawn cone.
+    if (this.waveNumber >= 2 && Math.random() < 0.07) return "tank";
+    // Common tier — single shared roll, cumulative-band style preserved
+    // from the original behaviour.
     const roll = Math.random();
-    if (this.waveNumber >= 7 && roll < 0.08) return "commander";
-    if (this.waveNumber >= 5 && roll < 0.05) return "hybrid";
     if (this.waveNumber >= 3 && roll < 0.15) return "heavy";
     if (roll < 0.3) return "insectoid";
     if (roll < 0.5) return "drone";
@@ -1289,10 +1547,20 @@ export class EnemySystem {
         this.spawnTimer = 0;
         this.spawnEnemy(playerPosition);
       }
+      // Outskirts tank spawner — independent cadence from the normal
+      // drip-spawn so even a player camping a single street still sees
+      // a new tank appear on the ring road every ~22 s. Held off until
+      // wave 2 so the very first wave reads as light infantry only.
+      this.tankSpawnTimer += deltaTime;
+      if (this.waveNumber >= 2 && this.tankSpawnTimer >= this.tankSpawnInterval) {
+        this.tankSpawnTimer = 0;
+        this.spawnTankAtOutskirts(playerPosition);
+      }
     } else {
-      // Bleed the timer back to zero so the next combat zone starts with
+      // Bleed the timers back to zero so the next combat zone starts with
       // a fresh full-interval grace period instead of an immediate spawn.
       this.spawnTimer = 0;
+      this.tankSpawnTimer = 0;
     }
 
     let totalDamage = 0;

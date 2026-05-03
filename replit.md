@@ -35,7 +35,7 @@ The game utilizes Babylon.js v8.x for WebGL/WebGPU rendering, focusing on an ani
 - BaseSystem and BuildingSystem enable player-placed, multi-level structures with grid-snapped placement and serialization via PrefabSystem.
 
 **Enemies & NPCs:**
-- EnemySystem includes a wave spawner, Commander enemies, aerial enemies, Hostile Enemy Bases with turrets, and Boss Fortresses.
+- EnemySystem includes a wave spawner, Commander enemies, aerial enemies, Hostile Enemy Bases with turrets, Boss Fortresses, and Tank ground units. Tanks are slow heavily-armoured siege vehicles that spawn on the city outskirts (90–130 m from the player) on a dedicated 22 s cadence from wave 2 onward, fire long-range tracer shells, and drop scrap-heavy loot.
 - Bio-Creature Dex defines 125+ collectible robotic creatures with archetypes, elemental types, and rarity tiers.
 - FriendlyNPCSystem scatters NPCs with interactive dialogue.
 
