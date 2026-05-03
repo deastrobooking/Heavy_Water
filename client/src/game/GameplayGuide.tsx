@@ -60,7 +60,7 @@ const SECTIONS: Section[] = [
     title: "FAST TRAVEL & SANCTUARY",
     body: [
       { label: "Open menu", keys: "TAB" },
-      { text: "Switch to the TRAVEL tab to warp between five zones: three combat fronts (Star City, Hold the Line, Purge the Void), the peaceful Ashur Sanctuary, and the Orbital Front (starfield combat with Earth on the horizon, drifting asteroids, and drone-orbited motherships). Inventory, upgrades and built structures are preserved across warps." },
+      { text: "Switch to the TRAVEL tab to warp between six zones: three combat fronts (Star City, Hold the Line, Purge the Void), the peaceful Ashur Sanctuary, the Orbital Front (starfield combat with Earth on the horizon, drifting asteroids, and drone-orbited motherships), and the Pontiac Secret Lab (a covert pre-war research bunker with cryo pods, server racks, holo terminals and Dr. Cynthia You). Inventory, upgrades and built structures are preserved across warps." },
       { text: "Default helper-bot loadout cap is 3. Upgrade the Lab to raise it. The Sanctuary now has a glowing cyan plinth that opens the deploy / capture UI directly — no need to build a Garden first." },
       { text: "After signing in, the main menu shows a Cloud Save card under the buttons with your level, credits, kills, current zone and last-saved time so you know exactly what START MISSION will resume." },
       { label: "Plant / harvest", keys: "E (sanctuary plots)" },

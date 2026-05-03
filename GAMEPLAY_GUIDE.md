@@ -81,7 +81,7 @@ on enemies) and triggers **Dome Explosions** on impact.
 
 ## 5b. Fast Travel & Ashur Sanctuary
 
-Open the upgrade menu (`TAB`) and switch to the **TRAVEL** tab. Four
+Open the upgrade menu (`TAB`) and switch to the **TRAVEL** tab. Six
 destinations are listed:
 
 | Level | Zone |
@@ -91,6 +91,7 @@ destinations are listed:
 | 3 | Purge the Void |
 | 4 | **Ashur Sanctuary** — peaceful |
 | 5 | **Orbital Front** — starfield combat (Earth, asteroids, motherships) |
+| 6 | **Pontiac Secret Lab** — covert pre-war research wing (peaceful, lore) |
 
 Click **WARP** on any row to instantly relocate. Your inventory, weapons,
 upgrades and built structures are preserved.
@@ -102,6 +103,16 @@ press `E` near a plot with a `bio_seed` in your inventory to plant; wait
 through 3 growth stages (~90 s) and press `E` again to harvest a `bio_crop`.
 
 You start with 5 `bio_seed`s the first time you enter the sanctuary.
+
+**Pontiac Secret Lab** (Level 6) is a covert pre-war research facility just
+north of Detroit, hidden inside a 60×60 m enclosed bunker. The world is
+swapped wholesale on entry — dark metallic floor with a cyan tech grid,
+glowing wall trim, six pulsing cryo pods along the east wall (each with a
+captured Animaton silhouette), four diagnostic-LED server racks along the
+west wall, three holographic command terminals on the north, and a central
+command desk. Two NPCs greet you: **Dr. Cynthia You** (the original
+Animaton-bonding researcher) and **ZIRCON**, the lab's node-locked
+research AI. Peaceful zone — no waves, no fortress.
 
 ---
 

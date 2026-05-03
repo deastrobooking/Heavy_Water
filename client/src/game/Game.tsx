@@ -50,6 +50,7 @@ import { MiningSystem } from "./MiningSystem";
 import { EnemyBaseSystem } from "./EnemyBaseSystem";
 import { LevelSystem, WorldLevel } from "./LevelSystem";
 import { SanctuarySystem } from "./SanctuarySystem";
+import { PontiacLabSystem } from "./PontiacLabSystem";
 import { SpaceLevelSystem } from "./SpaceLevelSystem";
 import { loadProgress, saveProgress, ProgressSnapshot } from "./ProgressSync";
 import { EventBus, GameEvents } from "./EventBus";
@@ -98,6 +99,7 @@ export const Game: React.FC = () => {
   const enemyHealthBarsRef = useRef<EnemyHealthBarSystem | null>(null);
   const friendlyNPCsRef = useRef<FriendlyNPCSystem | null>(null);
   const sanctuarySystemRef = useRef<SanctuarySystem | null>(null);
+  const pontiacLabSystemRef = useRef<PontiacLabSystem | null>(null);
   const spaceLevelSystemRef = useRef<SpaceLevelSystem | null>(null);
   // Mirror modal-open React state into refs so systems wired during the
   // single mount-time `initializeGame` (which captures stale state) can poll
@@ -842,7 +844,15 @@ export const Game: React.FC = () => {
             enemySystem.setSpawningEnabled(true);
           }
 
-          if (isPeaceful && !sanctuarySystemRef.current) {
+          // Sanctuary mounts ONLY for Level 4. Other peaceful zones (e.g.
+           // Level 6 Pontiac Secret Lab) share the `peaceful` flag for
+           // wave-spawn suppression but own their own world-swap system,
+           // so we MUST NOT also mount the sanctuary on top of them — that
+           // would double-hide the city and stack two distinct world-swap
+           // restorations on dispose.
+          const isSanctuary = typeof payload?.level === "number"
+            && (payload.level as WorldLevel) === 4;
+          if (isSanctuary && !sanctuarySystemRef.current) {
             sanctuarySystemRef.current = new SanctuarySystem(
               scene,
               engine.getCamera(),
@@ -867,9 +877,39 @@ export const Game: React.FC = () => {
                 ],
               },
             );
-          } else if (!isPeaceful && sanctuarySystemRef.current) {
+          } else if (!isSanctuary && sanctuarySystemRef.current) {
             try { sanctuarySystemRef.current.dispose(); } catch {}
             sanctuarySystemRef.current = null;
+          }
+
+          // Mount/dispose the Pontiac Secret Lab side-zone (Level 6).
+          // Same handles bag as the sanctuary so the lab swaps the world
+          // wholesale (city, mountains, foliage, props all hidden), but
+          // it's a separate system because the lab interior + dressing
+          // is completely different from the sanctuary's village.
+          const isLab = typeof payload?.level === "number"
+            && LevelSystem.isLab(payload.level as WorldLevel);
+          if (isLab && !pontiacLabSystemRef.current) {
+            pontiacLabSystemRef.current = new PontiacLabSystem(
+              scene,
+              engine.getCamera(),
+              () => player.getPosition(),
+              () => labOpenRef.current
+                || gardenOpenRef.current
+                || upgradeMenuOpenRef.current
+                || (gardenRef.current?.isGardenOpenCheck() ?? false),
+              {
+                city: cityGenerator,
+                worldVisibles: [
+                  mountainRingRef.current,
+                  alienFoliageRef.current,
+                  propSystemRef.current,
+                ],
+              },
+            );
+          } else if (!isLab && pontiacLabSystemRef.current) {
+            try { pontiacLabSystemRef.current.dispose(); } catch {}
+            pontiacLabSystemRef.current = null;
           }
 
           // Mount/dispose the orbital side-zone (Level 5) on the same edge
@@ -1857,6 +1897,7 @@ export const Game: React.FC = () => {
     if (enemyHealthBarsRef.current) { try { enemyHealthBarsRef.current.dispose(); } catch {} enemyHealthBarsRef.current = null; }
     if (friendlyNPCsRef.current) { try { friendlyNPCsRef.current.dispose(); } catch {} friendlyNPCsRef.current = null; }
     if (sanctuarySystemRef.current) { try { sanctuarySystemRef.current.dispose(); } catch {} sanctuarySystemRef.current = null; }
+    if (pontiacLabSystemRef.current) { try { pontiacLabSystemRef.current.dispose(); } catch {} pontiacLabSystemRef.current = null; }
     if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }
     if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} gamepadRef.current = null; }
     if (aerialEnemyRef.current) { try { aerialEnemyRef.current.dispose(); } catch {} aerialEnemyRef.current = null; }
@@ -2468,6 +2509,7 @@ export const Game: React.FC = () => {
       if (enemyHealthBarsRef.current) enemyHealthBarsRef.current.dispose();
       if (friendlyNPCsRef.current) friendlyNPCsRef.current.dispose();
       if (sanctuarySystemRef.current) { try { sanctuarySystemRef.current.dispose(); } catch {} sanctuarySystemRef.current = null; }
+      if (pontiacLabSystemRef.current) { try { pontiacLabSystemRef.current.dispose(); } catch {} pontiacLabSystemRef.current = null; }
       if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }
       if (aerialEnemyRef.current) aerialEnemyRef.current.dispose();
       if (gamepadRef.current) gamepadRef.current.dispose();
@@ -2488,7 +2530,7 @@ export const Game: React.FC = () => {
     const ls = levelSystemRef.current;
     const player = playerRef.current;
     if (!ls || !player) return;
-    if (level < 1 || level > 5) return;
+    if (level < 1 || level > 6) return;
     const sp = LevelSystem.getSpawnPointFor(level as WorldLevel);
     // Spacelike levels need a high spawn Y so the player wakes up amid the
     // 25–105 m asteroid band (the orbital fighter is auto-entered there);
@@ -2519,6 +2561,8 @@ export const Game: React.FC = () => {
         ? "Peaceful side-zone. Rehab rescued Animatons, farm bio-crops, help the Village of Earth."
         : lvl === 5
         ? "Orbital Front — starfield combat. Asteroids, evil ships, drone-orbited motherships."
+        : lvl === 6
+        ? "Pontiac Secret Lab — Dr. You's covert pre-war research wing. Cryo subjects, holo terminals, lore."
         : lvl === 1
         ? "Star City Front — first-stage Detroit defense. Rescue the captured ally."
         : lvl === 2

@@ -11,7 +11,7 @@ import { BossVariantId } from "./BossVariants";
  *  bio-crops, and runs errands for the nearby Village of Earth. It does not
  *  appear in the L1→L2→L3 progression chain; it's reached from the new TRAVEL
  *  tab on the upgrade menu and acts as the player's home base. */
-export type WorldLevel = 1 | 2 | 3 | 4 | 5;
+export type WorldLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
 /** Persisted shape used by ProgressSync. */
 export interface LevelSnapshot {
@@ -151,6 +151,33 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
       tint:     { r: 1.20, g: 1.00, b: 0.80 },
       glowTint: { r: 1.30, g: 1.10, b: 0.70 },
       ground:   { r: 1.40, g: 1.20, b: 0.90 },
+    },
+  },
+  6: {
+    level: 6,
+    displayName: "PONTIAC SECRET LAB",
+    banner: "PONTIAC SECRET LAB — RESTRICTED RESEARCH",
+    objective: "Explore the covert lab. Read the terminals, study the cryo subjects, talk to Dr. You.",
+    difficultyMultiplier: 0.0,
+    // Cool blue-violet tint reads "lab interior under blacklight"; mostly
+    // overridden by PontiacLabSystem's own emissive props anyway.
+    skyTint: { r: 0.55, g: 0.65, b: 1.10 },
+    bossVariantId: "void",
+    fortressCenter: { x: -9999, z: 9999 },
+    // Opposite world corner from Ashur Sanctuary (-480/-480) so the lab's
+    // 1500m hide-bubble can't clip into the sanctuary's, and warps between
+    // them are clearly different places.
+    spawnPoint: { x: 480, z: 480 },
+    completeSubtitle: "The lab keeps its secrets — for now.",
+    peaceful: true,
+    timeOfDay: 0.5, // late-night raid; black sky bleeds in around the lab edges
+    // LAB INTERIOR — cold blue/cyan bias. The world geometry is hidden by
+    // PontiacLabSystem on mount, so this theme only ever multiplies the
+    // background sky / lighting, not visible meshes.
+    cityTheme: {
+      tint:     { r: 0.55, g: 0.75, b: 1.20 },
+      glowTint: { r: 0.50, g: 0.90, b: 1.40 },
+      ground:   { r: 0.40, g: 0.50, b: 0.70 },
     },
   },
   5: {
@@ -356,7 +383,16 @@ export class LevelSystem {
 
   /** All known levels — used by the TRAVEL tab. */
   static getAllLevels(): WorldLevel[] {
-    return [1, 2, 3, 4, 5];
+    return [1, 2, 3, 4, 5, 6];
+  }
+
+  /** `true` for the Pontiac Secret Lab side-zone (Level 6). Like the
+   *  sanctuary it's `peaceful` (no waves, no fortress) but it owns its
+   *  own indoor world — `PontiacLabSystem` mounts on this level and
+   *  hides the city + mountains + foliage + props so the player walks a
+   *  dark metallic lab interior instead of a corner of Detroit. */
+  static isLab(level: WorldLevel): boolean {
+    return level === 6;
   }
 
   /** `true` for off-canon side-zones that should suppress the campaign's
@@ -377,7 +413,8 @@ export class LevelSystem {
   applyLoadedState(snap: Partial<LevelSnapshot> | null | undefined): void {
     let lvl: WorldLevel = 1;
     const raw = snap && typeof snap.worldLevel === "number" ? snap.worldLevel : 1;
-    if (raw >= 5) lvl = 5;
+    if (raw >= 6) lvl = 6;
+    else if (raw === 5) lvl = 5;
     else if (raw === 4) lvl = 4;
     else if (raw === 3) lvl = 3;
     else if (raw === 2) lvl = 2;
@@ -388,11 +425,11 @@ export class LevelSystem {
       this.clearedLevels.clear();
       return;
     }
-    // Levels 4 (sanctuary) and 5 (orbital front) are side-content — don't
-    // auto-mark L1/L2/L3 as cleared just because the player saved there;
-    // that would let them skip the campaign on re-entry. Only treat the
-    // main chain (1→2→3) as cleared-on-load.
-    if (lvl === 4 || lvl === 5) {
+    // Levels 4 (sanctuary), 5 (orbital), 6 (Pontiac Lab) are side-content —
+    // don't auto-mark L1/L2/L3 as cleared just because the player saved
+    // there; that would let them skip the campaign on re-entry. Only treat
+    // the main chain (1→2→3) as cleared-on-load.
+    if (lvl === 4 || lvl === 5 || lvl === 6) {
       this.advanceTo(lvl);
       return;
     }
