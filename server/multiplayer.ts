@@ -166,7 +166,11 @@ export function setupMultiplayer(httpServer: Server): void {
               code,
               hostId: playerId,
               players: new Map([[playerId, player]]),
-              maxPlayers: 4,
+              // Per-room cap. Position updates broadcast every 50ms scale as
+              // N*(N-1) messages/tick; at 16 that's 4 800 msgs/sec/room which
+              // is comfortable on the naive broadcast (no spatial culling /
+              // delta encoding). Raising further would need those optimisations.
+              maxPlayers: 16,
               wave: 0,
               createdAt: Date.now(),
             };

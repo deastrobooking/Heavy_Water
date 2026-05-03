@@ -187,5 +187,5 @@ with a black screen.
 
 ## 11. Multiplayer
 
-Up to 4 players can join a session via WebSocket. The lobby is reachable
+Up to 16 players can join a session via WebSocket. The lobby is reachable
 from the main menu after auth. Enemy damage and chat are synchronized.
