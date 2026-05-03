@@ -558,6 +558,176 @@ export class BeamSabreSystem {
     });
   }
 
+  /** Cancel any pending slash chain (timers + state). Used by combo specials
+   *  to preempt the regular slash that fires from the LT trigger one frame
+   *  before the combo button is processed. Cooldown is intentionally NOT
+   *  cleared — the combo's own cooldown check still gates re-entry. */
+  private cancelInFlightSlash(): void {
+    for (const t of this.slashTimers) clearTimeout(t);
+    this.slashTimers = [];
+    this.isSlashing = false;
+    this.currentSlash = 0;
+    this.chargeStart = null;
+  }
+
+  // Set while a Fury or Smash combo is mid-execution. The combo's own guard
+  // checks this so a re-press of the same combo key cannot cancel and restart
+  // an in-flight combo before its cooldown begins.
+  private specialComboActive: boolean = false;
+
+  /** Fury Slash special (LT + Y combo): 5 rapid LARGE slashes in front of
+   *  the player, each with a wider hit radius and bumped damage. No trailing
+   *  energy wave — the slashes are the payload. Locked out by isSlashing /
+   *  cooldown like the regular attack so it can't stack with itself. */
+  performFurySlash(): boolean {
+    if (!this.sabre.isActive || this.cooldownTimer > 0 || this.specialComboActive) return false;
+    // Preempt any in-flight regular slash sequence triggered by the LT key
+    // dispatch that comes a frame before the combo key — without this, the
+    // LT-then-Y order would always fail the isSlashing guard.
+    this.cancelInFlightSlash();
+    this.specialComboActive = true;
+    this.isSlashing = true;
+    this.currentSlash = 0;
+    const SLASH_COUNT = 5;
+    const INTERVAL_MS = 95;
+    const radiusMul = 1.6;
+    const dmgMul = 1.4;
+    const giantMul = this.sabre.hasGiantBlade ? 1.5 : 1.0;
+
+    const doSlash = () => {
+      // Inline a beefed-up version of performSlashHit so we don't have to
+      // re-plumb optional multipliers through the regular slash path.
+      const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
+      const origin = this.getAimOrigin().add(forward.scale(3.2 * giantMul));
+      const hitRadius = 7 * giantMul * radiusMul;
+      const dmg = this.sabre.damage * giantMul * dmgMul;
+      for (const mesh of this.scene.meshes) {
+        if (!this.isHittable(mesh)) continue;
+        const dist = BABYLON.Vector3.Distance(origin, mesh.position);
+        const meshHitR = (mesh.metadata as any)?.hitRadius ?? 1.5;
+        if (dist < hitRadius + meshHitR) {
+          const info: DamageInfo = {
+            amount: dmg,
+            hitPoint: mesh.position.clone(),
+            hitDirection: mesh.position.subtract(this.getAimOrigin()).normalize(),
+            damageType: DamageType.Melee,
+            knockbackForce: 7,
+          };
+          const dealt = this.dealDamage(mesh, dmg, info);
+          this.bus.emit(GameEvents.UI_DAMAGE_NUMBER, {
+            position: mesh.position.clone(),
+            damage: dealt,
+            isCritical: true,
+          });
+        }
+      }
+      this.bus.emit(GameEvents.COMBO_HIT, {
+        comboName: "Fury Slash",
+        attackName: `Fury ${this.currentSlash + 1}`,
+        comboIndex: this.currentSlash,
+      });
+      // Drive the visible blade swing — alternate direction per slash so the
+      // blade visibly criss-crosses across the screen.
+      this.slashAnimTimer = this.slashAnimDuration * 0.65;
+      this.slashSwingDir = this.currentSlash % 2 === 0 ? 1 : -1;
+      this.currentSlash++;
+      if (this.currentSlash < SLASH_COUNT) {
+        const t = window.setTimeout(doSlash, INTERVAL_MS);
+        this.slashTimers.push(t);
+      } else {
+        this.isSlashing = false;
+        this.currentSlash = 0;
+        this.cooldownTimer = Math.max(this.sabre.cooldown, 1.8);
+        this.specialComboActive = false;
+      }
+    };
+
+    doSlash();
+    this.bus.emit(GameEvents.UI_MESSAGE, { text: "FURY SLASH!", duration: 1.2 });
+    return true;
+  }
+
+  /** Smash Lash special (LT + X combo): one big overhead smash followed by
+   *  a ring of energy waves radiating outward in all directions on the
+   *  horizontal plane. Each ring wave reuses the regular wave config so the
+   *  range, speed, hit radius and damage match a normal energy wave — there
+   *  are just twelve of them, fanning out around the player. */
+  performSmashLash(): boolean {
+    if (!this.sabre.isActive || this.cooldownTimer > 0 || this.specialComboActive) return false;
+    this.cancelInFlightSlash();
+    this.specialComboActive = true;
+    this.isSlashing = true;
+    this.currentSlash = 0;
+    const giantMul = this.sabre.hasGiantBlade ? 1.5 : 1.0;
+
+    // ----- The smash: a single beefy hit in front of the player. -----
+    const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
+    const origin = this.getAimOrigin().add(forward.scale(3.2 * giantMul));
+    const hitRadius = 9 * giantMul;
+    const dmg = this.sabre.damage * 1.8 * giantMul;
+    for (const mesh of this.scene.meshes) {
+      if (!this.isHittable(mesh)) continue;
+      const dist = BABYLON.Vector3.Distance(origin, mesh.position);
+      const meshHitR = (mesh.metadata as any)?.hitRadius ?? 1.5;
+      if (dist < hitRadius + meshHitR) {
+        const info: DamageInfo = {
+          amount: dmg,
+          hitPoint: mesh.position.clone(),
+          hitDirection: mesh.position.subtract(this.getAimOrigin()).normalize(),
+          damageType: DamageType.Melee,
+          knockbackForce: 16,
+        };
+        const dealt = this.dealDamage(mesh, dmg, info);
+        this.bus.emit(GameEvents.UI_DAMAGE_NUMBER, {
+          position: mesh.position.clone(),
+          damage: dealt,
+          isCritical: true,
+        });
+      }
+    }
+    // Use the regular slash visual — alternate dir gives a downward-cross
+    // smash read against the prior slash.
+    this.slashAnimTimer = this.slashAnimDuration;
+    this.slashSwingDir = -this.slashSwingDir;
+
+    // ----- The omnidirectional shockwave: 12 waves, 30° apart, on the XZ
+    // plane. Each is a normal cyan wave so it inherits all wave behavior
+    // (lifetime, hit radius, piercing rule, sabre-level scaling). -----
+    const RING_COUNT = 12;
+    for (let i = 0; i < RING_COUNT; i++) {
+      const ang = (i / RING_COUNT) * Math.PI * 2;
+      const dir = new BABYLON.Vector3(Math.sin(ang), 0, Math.cos(ang)).normalize();
+      this.spawnArcWave(dir, {
+        sizeMul: 1.0,
+        damageMul: 1.0,
+        speedMul: 1.0,
+        spawnForwardOffset: 2,
+        emissive: new BABYLON.Color3(0.15, 0.95, 1),
+        diffuse: new BABYLON.Color3(0.05, 0.7, 1),
+        piercing: this.sabre.level >= 3,
+        index: 1000 + i,
+      });
+    }
+
+    this.bus.emit("effect:explosion", {
+      position: this.getAimOrigin().clone(),
+      color: new BABYLON.Color3(0.4, 1, 1),
+      radius: 6,
+    });
+    this.bus.emit(GameEvents.UI_MESSAGE, { text: "SMASH LASH!", duration: 1.3 });
+
+    // Lock state and start cooldown. Reuse a short timer to release the
+    // slash lock once the smash anim finishes so the blade returns to rest.
+    this.cooldownTimer = Math.max(this.sabre.cooldown, 2.5);
+    const t = window.setTimeout(() => {
+      this.isSlashing = false;
+      this.currentSlash = 0;
+      this.specialComboActive = false;
+    }, 280);
+    this.slashTimers.push(t);
+    return true;
+  }
+
   /** Unlock the spin-blade special. */
   unlockSpinAttack(): void {
     this.sabre.hasSpinAttack = true;

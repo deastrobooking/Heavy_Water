@@ -7,8 +7,8 @@ interface ButtonMap {
 // Controller bindings (Xbox-style indices):
 //  0 (A) → Space (jump / fly)
 //  1 (B) → KeyE (interact: enter vehicle, talk, mount)
-//  2 (X) → KeyV (capture)
-//  3 (Y) → KeyY (beam-sabre slash; matches the keyboard binding)
+//  2 (X) → KeyV (capture)        — but if LT is held → Quote (Smash Lash combo)
+//  3 (Y) → KeyY (beam-sabre slash) — but if LT is held → Semicolon (Fury Slash combo)
 //  4 (LB) → KeyL (boost dash with i-frames)
 //  5 (RB) → KeyK (cast currently-selected elemental special)
 //  8 (Select / View) → Tab (upgrade menu)
@@ -50,6 +50,14 @@ export class GamepadInput {
   private prevButtons = new Map<number, boolean[]>();
   private prevAxisKeys = { w: false, a: false, s: false, d: false };
   private prevTriggers = { lt: false, rt: false };
+  // Per-button combo override: when Y/X is pressed while LT is held we
+  // dispatch a combo key (KeyU / KeyI). We must remember which combo key
+  // was sent on the press so the matching key-up is sent on release even
+  // if LT was released first.
+  private comboOverride: Record<number, { code: string; key?: string } | null> = {
+    2: null,
+    3: null,
+  };
   // Track the last context the triggers were dispatched for so we can
   // release the previous mapping cleanly when the player enters/exits
   // a vehicle while a trigger is held.
@@ -145,14 +153,47 @@ export class GamepadInput {
     const prev = this.prevButtons.get(activePad.index) ?? [];
     const next: boolean[] = [];
 
+    // Pre-read LT so we can re-route Y/X press transitions into combo keys
+    // (KeyU / KeyI) when LT is currently held. We still dispatch the normal
+    // mapping if LT is not held.
+    const ltHeldNow = (activePad.buttons[6]?.value ?? (activePad.buttons[6]?.pressed ? 1 : 0)) >= TRIGGER_THRESHOLD;
+    const footCtxNow: "foot" | "vehicle" = this.contextProvider ? this.contextProvider() : "foot";
+
     for (let i = 0; i < activePad.buttons.length; i++) {
       const pressed = activePad.buttons[i].pressed || activePad.buttons[i].value > 0.5;
       next[i] = pressed;
       const wasPressed = prev[i] ?? false;
       const map = BUTTON_TO_KEY[i];
       if (map) {
-        if (pressed && !wasPressed) this.dispatchKeyDown(map.code, map.key);
-        else if (!pressed && wasPressed) this.dispatchKeyUp(map.code, map.key);
+        // Combo override: while LT is held on foot, Y/X fire beam-sabre
+        // specials (Fury / Smash) instead of their normal bindings. Track
+        // the override per-button so the matching key-up is dispatched even
+        // if LT is released before the face button.
+        let dispatchCode = map.code;
+        let dispatchKey = map.key;
+        const isComboButton = (i === 3 || i === 2) && footCtxNow === "foot";
+        if (isComboButton) {
+          // On press: if LT is held now, route to combo key. On release:
+          // route to whichever code was pressed at down-time.
+          if (pressed && !wasPressed) {
+            if (ltHeldNow) {
+              dispatchCode = i === 3 ? "Semicolon" : "Quote";
+              dispatchKey = i === 3 ? ";" : "'";
+              this.comboOverride[i] = { code: dispatchCode, key: dispatchKey };
+            } else {
+              this.comboOverride[i] = null;
+            }
+          } else if (!pressed && wasPressed) {
+            const ov = this.comboOverride[i];
+            if (ov) {
+              dispatchCode = ov.code;
+              dispatchKey = ov.key;
+              this.comboOverride[i] = null;
+            }
+          }
+        }
+        if (pressed && !wasPressed) this.dispatchKeyDown(dispatchCode, dispatchKey);
+        else if (!pressed && wasPressed) this.dispatchKeyUp(dispatchCode, dispatchKey);
       }
     }
     this.prevButtons.set(activePad.index, next);

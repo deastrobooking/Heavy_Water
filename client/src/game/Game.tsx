@@ -2120,6 +2120,18 @@ export const Game: React.FC = () => {
             beamSabreRef.current.startCharge();
           }
         }
+      } else if (e.code === "Semicolon") {
+        // Fury Slash — LT + Y combo (gamepad) or `;` (keyboard).
+        // Note: these combo keys are intentionally rare codes — KeyU/KeyI
+        // are taken by elemental hotkeys (Inferno / Ice).
+        if (!e.repeat && beamSabreRef.current) {
+          beamSabreRef.current.performFurySlash();
+        }
+      } else if (e.code === "Quote") {
+        // Smash Lash — LT + X combo (gamepad) or `'` (keyboard).
+        if (!e.repeat && beamSabreRef.current) {
+          beamSabreRef.current.performSmashLash();
+        }
       } else if (e.code === "KeyK") {
         // Cast the currently-selected elemental special (controller RB).
         if (elementalSpecialsRef.current) {
