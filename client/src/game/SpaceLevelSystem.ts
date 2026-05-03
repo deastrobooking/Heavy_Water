@@ -102,7 +102,11 @@ export class SpaceLevelSystem {
 
     sky.setSpaceMode(true);
     this.hideWorldGeometry();
-    this.disablePlayerWeapons();
+    // NOTE: weapons stay ENABLED in vacuum — orbital combat is the whole
+    // point of L5, so the player needs to be able to shoot. The
+    // setFiringEnabled gates on WeaponsSystem / SpecialWeaponsSystem /
+    // MegaBeamCannonSystem are kept available (they still default to
+    // true) for any future use case that does want to silence fire.
     this.buildEarth();
     this.spawnAsteroids();
     this.spawnAndEnterFighter();
@@ -119,6 +123,9 @@ export class SpaceLevelSystem {
     }
     this.sky.setSpaceMode(false);
     this.restoreWorldGeometry();
+    // Defensive re-enable — even though we no longer disable on mount,
+    // anything else that flipped these off would otherwise leak across
+    // the warp.
     this.enablePlayerWeapons();
     // Release the perpetual-cruise lock on the way out so warping back to
     // a ground level lets the player throttle/brake their ATV normally.
