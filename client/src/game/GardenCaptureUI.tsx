@@ -45,18 +45,24 @@ export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
   upgradeCost, canUpgradeGarden, onDeploy, onUpgradeGarden, onClose,
 }) => {
   const [tab, setTab] = useState<Tab>("roster");
-  if (!open) return null;
 
   // Persistent "ever caught" species ids — also fold the live roster in
   // so any captures from this session are reflected even before the next
   // autosave round-trip. Unknown ids are filtered out so legacy saves
   // can't inflate the count.
+  // IMPORTANT: this hook MUST run on every render (open OR closed) to keep
+  // React's hook-order stable. Putting an `if (!open) return null;` above
+  // it produces React error #310 ("rendered more hooks than the previous
+  // render") when the dialog opens, because the closed render only ran
+  // useState while the open render runs useState + useMemo.
   const dexCaught = useMemo(() => {
     const set = new Set<string>();
     for (const id of dexCaughtIds) if (getSpeciesById(id)) set.add(id);
     for (const c of captured) if (getSpeciesById(c.speciesId)) set.add(c.speciesId);
     return set;
   }, [dexCaughtIds, captured]);
+
+  if (!open) return null;
 
   const dexTotal = BIO_SPECIES.length;
   const dexCount = dexCaught.size;

@@ -1,0 +1,52 @@
+WebGL: INVALID_VALUE: texImage2D: bad image dataUnderstand this warning
+38[.WebGL-0x12c004e7a00] GL_INVALID_OPERATION: glGenerateMipmap: Texture format does not support mipmap generation.Understand this warning
+2index-BjnuS-2p.js:27462 [PlayerController] Jump 1 - Normal jump
+index-BjnuS-2p.js:27462 [PlayerController] Jump 2 - Double jump
+index-BjnuS-2p.js:27462 [PlayerController] Jump 1 - Normal jump
+index-BjnuS-2p.js:27462 [PlayerController] Jump 2 - Double jump
+2index-BjnuS-2p.js:27462 [PlayerController] Jump 1 - Normal jump
+index-BjnuS-2p.js:27462 [PlayerController] Jump 2 - Double jump
+index-BjnuS-2p.js:27462 [PlayerController] Jump 3 - No flight armor, weaker third jump
+index-BjnuS-2p.js:27462 [PlayerController] Jump 1 - Normal jump
+index-BjnuS-2p.js:27462 [PlayerController] Jump 2 - Double jump
+index-BjnuS-2p.js:27462 [PlayerController] Jump 3 - No flight armor, weaker third jump
+index-BjnuS-2p.js:27462 [PlayerController] Jump 1 - Normal jump
+index-BjnuS-2p.js:27462 [PlayerController] Jump 2 - Double jump
+index-BjnuS-2p.js:27462 [PlayerController] Jump 3 - No flight armor, weaker third jump
+index-BjnuS-2p.js:27462 [AerialEnemySystem] AGGRO engaged — aerial squadron will now attack
+4index-BjnuS-2p.js:27462 [PlayerController] Jump 1 - Normal jump
+index-BjnuS-2p.js:27615 [SpaceLevelSystem] Orbital Front mounted
+index-BjnuS-2p.js:27562 [BaseSystem] Placed garden at -486.0 -480.0
+index-BjnuS-2p.js:27615 [SpaceLevelSystem] Orbital Front disposed
+index-BjnuS-2p.js:27462 [AerialEnemySystem] All fortresses defeated — regrouping for 5 minutes
+index-BjnuS-2p.js:27462 [AerialEnemySystem] Skies cleared — all aerial spawns suppressed for 5 minutes
+index-BjnuS-2p.js:27462 [AerialEnemySystem] AGGRO engaged — aerial squadron will now attack
+installHook.js:1 Error: Minified React error #310; visit https://reactjs.org/docs/error-decoder.html?invariant=310 for the full message or use the non-minified dev environment for full errors and additional helpful warnings.
+    at Dl (index-BjnuS-2p.js:38:17629)
+    at Object.T8 [as useMemo] (index-BjnuS-2p.js:38:21323)
+    at ki.useMemo (index-BjnuS-2p.js:9:6253)
+    at Ske (index-BjnuS-2p.js:27615:68603)
+    at Qw (index-BjnuS-2p.js:38:17031)
+    at pI (index-BjnuS-2p.js:40:3143)
+    at q8 (index-BjnuS-2p.js:40:44880)
+    at Y8 (index-BjnuS-2p.js:40:39822)
+    at ale (index-BjnuS-2p.js:40:39748)
+    at mT (index-BjnuS-2p.js:40:39598)
+overrideMethod @ installHook.js:1Understand this error
+index-BjnuS-2p.js:38 Uncaught Error: Minified React error #310; visit https://reactjs.org/docs/error-decoder.html?invariant=310 for the full message or use the non-minified dev environment for full errors and additional helpful warnings.
+    at Dl (index-BjnuS-2p.js:38:17629)
+    at Object.T8 [as useMemo] (index-BjnuS-2p.js:38:21323)
+    at ki.useMemo (index-BjnuS-2p.js:9:6253)
+    at Ske (index-BjnuS-2p.js:27615:68603)
+    at Qw (index-BjnuS-2p.js:38:17031)
+    at pI (index-BjnuS-2p.js:40:3143)
+    at q8 (index-BjnuS-2p.js:40:44880)
+    at Y8 (index-BjnuS-2p.js:40:39822)
+    at ale (index-BjnuS-2p.js:40:39748)
+    at mT (index-BjnuS-2p.js:40:39598)Understand this error
+index-BjnuS-2p.js:27462 [PlayerController] Disposed
+index-BjnuS-2p.js:27562 [BuildingSystem] Disposed
+index-BjnuS-2p.js:27562 [PrefabSystem] Disposed
+index-BjnuS-2p.js:27562 [PickupSystem] Disposed
+index-BjnuS-2p.js:27562 [AlienFoliageSystem] Disposed
+index-BjnuS-2p.js:27562 [EnvironmentPropSystem] Disposed
