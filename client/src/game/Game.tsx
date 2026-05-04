@@ -751,7 +751,12 @@ export const Game: React.FC = () => {
         bioRef.current = bioSystem;
         bioSystem.setHooks(
           () => baseSystem.getGardenCaptureBonus(),
-          () => Math.max(6, baseSystem.getGardenCaptureCap()),
+          // Floor matches the new tier-1 garden cap (15). The floor only
+          // matters when no garden has been built yet — without it a
+          // pre-garden player couldn't capture any creature at all,
+          // which would block the early game. Keep this in sync with
+          // GARDEN_LEVEL_CAPTURE_CAP[0] in BaseSystem.ts.
+          () => Math.max(15, baseSystem.getGardenCaptureCap()),
         );
         bioSystem.spawnInitialCreatures();
 
@@ -3723,7 +3728,7 @@ export const Game: React.FC = () => {
           gardenOpen={gardenOpen}
           gardenLevel={gardenLevel}
           gardenCaptureBonus={baseRef.current?.getGardenCaptureBonus() ?? 0}
-          gardenCapacityMax={Math.max(6, baseRef.current?.getGardenCaptureCap() ?? 6)}
+          gardenCapacityMax={Math.max(15, baseRef.current?.getGardenCaptureCap() ?? 15)}
           gardenCaptured={capturedCreatures}
           gardenDexCaughtIds={dexCaughtIds}
           bioEssenceCount={resourceCounts.bioEssence}

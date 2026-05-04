@@ -72,7 +72,7 @@ export class BioCreatureSystem {
   private idCounter: number = 0;
   private respawnTimer: number = RESPAWN_INTERVAL;
   private getCaptureBonus: () => number = () => 0;
-  private getCaptureCap: () => number = () => 6;
+  private getCaptureCap: () => number = () => 15;
 
   constructor(scene: BABYLON.Scene, inventory: InventorySystem) {
     this.scene = scene;

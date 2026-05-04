@@ -40,7 +40,14 @@ export class InventorySystem {
   private maxSlots: number;
   private bus: EventBus;
 
-  constructor(maxSlots: number = 24) {
+  // Default ceiling bumped from 24 → 100 so the player never gets
+  // "INVENTORY FULL" rejections on rare special-upgrade drops (power
+  // jewels especially — they're a 5%/1.5%/0.4% drop, so losing one to
+  // a packed bag was unacceptable). Stacks still cap at each item's
+  // `maxStack`, so this lifts the SLOT count, not per-item ceilings.
+  // Persisted via `ProgressSnapshot.inventoryCounts` (open-ended JSONB
+  // record — no DB migration needed for the larger ceiling).
+  constructor(maxSlots: number = 100) {
     this.maxSlots = maxSlots;
     this.slots = new Array(maxSlots).fill(null);
     this.bus = EventBus.getInstance();

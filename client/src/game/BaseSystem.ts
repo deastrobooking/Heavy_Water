@@ -20,7 +20,14 @@ export interface BaseStructureUpgradeCost {
 export const MAX_BASE_LEVEL = 3;
 
 const LAB_LEVEL_COMPANION_CAP = [3, 5, 8];
-const GARDEN_LEVEL_CAPTURE_CAP = [3, 6, 10];
+// Garden capture cap per upgrade tier. Bumped from [3, 6, 10] so the
+// max-tier garden can host a real menagerie of pets — players were
+// hitting the old 10-slot ceiling almost immediately and giving up on
+// further captures. Tier scaling stays meaningful (15 → 30 → 50) so
+// each upgrade still feels like a real expansion. Persisted via
+// `ProgressSnapshot.capturedCreatures` (open-ended JSONB array — no
+// DB migration needed for the larger ceiling).
+const GARDEN_LEVEL_CAPTURE_CAP = [15, 30, 50];
 const GARDEN_LEVEL_CAPTURE_BONUS = [0, 0.15, 0.3];
 
 function upgradeCostFor(kind: BaseStructureKind, nextLevel: number): BaseStructureUpgradeCost {
