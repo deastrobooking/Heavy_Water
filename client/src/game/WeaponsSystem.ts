@@ -126,6 +126,10 @@ export class WeaponsSystem {
    *  fire rates that's hundreds of materials a minute, all of which the
    *  GC eventually has to reclaim and which caused visible stutter. */
   private projectileMatCache: Map<WeaponType, BABYLON.StandardMaterial> = new Map();
+  /** Shared black material for the tracking-missile nosecone. Lazy-built
+   *  the first time a tracking missile is fired so unrelated sessions never
+   *  pay for it. Frozen once created — its color never changes. */
+  private trackingMissileNoseMat: BABYLON.StandardMaterial | null = null;
   /** Reusable scratch vectors so createProjectile / getAimForward don't
    *  allocate two-three Vector3s per shot. */
   private scratchSpread: BABYLON.Vector3 = new BABYLON.Vector3();
@@ -503,11 +507,49 @@ export class WeaponsSystem {
         projectileMesh = BABYLON.MeshBuilder.CreateSphere("projectile", { diameter: 0.2 * sizeMul }, this.scene);
         color = new BABYLON.Color3(0.5, 1, 0);
         break;
-      case "tracking_missile":
-        projectileMesh = BABYLON.MeshBuilder.CreateCylinder("projectile", { height: 0.7 * sizeMul, diameter: 0.18 * sizeMul, tessellation: 10 }, this.scene);
+      case "tracking_missile": {
+        const tmHeight = 0.7 * sizeMul;
+        const tmDiameter = 0.18 * sizeMul;
+        projectileMesh = BABYLON.MeshBuilder.CreateCylinder("projectile", {
+          height: tmHeight,
+          diameter: tmDiameter,
+          tessellation: 10,
+        }, this.scene);
         projectileMesh.rotation.x = Math.PI / 2;
         color = new BABYLON.Color3(1, 0.3, 0.7);
+
+        // Black nosecone bolted to the missile's tip. Slightly narrower
+        // than the body so the glowing pink cylinder rims the seam where
+        // the cone meets the shaft. Parented to the cylinder so a single
+        // mesh.dispose() recursively cleans both, and the per-frame
+        // position/orientation update on the parent carries the cone too.
+        const noseHeight = 0.28 * sizeMul;
+        const nose = BABYLON.MeshBuilder.CreateCylinder("trackingNose", {
+          height: noseHeight,
+          diameterTop: 0,
+          diameterBottom: tmDiameter * 0.92,
+          tessellation: 10,
+        }, this.scene);
+        nose.parent = projectileMesh;
+        // Cylinder local Y is its long axis; the +Y end is the nose
+        // direction once the parent's `rotation.x = π/2` puts +Y → +Z
+        // (world-forward). Stack the cone so its base sits flush with
+        // the cylinder's top and the point extends ahead.
+        nose.position.y = tmHeight / 2 + noseHeight / 2;
+        nose.isPickable = false;
+
+        if (!this.trackingMissileNoseMat) {
+          const m = new BABYLON.StandardMaterial("projectileMat_trackingNose", this.scene);
+          m.diffuseColor = new BABYLON.Color3(0.04, 0.04, 0.05);
+          m.emissiveColor = new BABYLON.Color3(0, 0, 0);
+          m.specularColor = new BABYLON.Color3(0.45, 0.45, 0.5);
+          m.specularPower = 64;
+          m.freeze();
+          this.trackingMissileNoseMat = m;
+        }
+        nose.material = this.trackingMissileNoseMat;
         break;
+      }
       default:
         projectileMesh = BABYLON.MeshBuilder.CreateSphere("projectile", { diameter: 0.1 * sizeMul }, this.scene);
         color = new BABYLON.Color3(1, 1, 1);
