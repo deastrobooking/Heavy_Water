@@ -1189,7 +1189,16 @@ export class EnemySystem {
     this.robotFactory = new RobotFactory(scene);
   }
 
-  private createEnemyMesh(type: EnemyType, position: BABYLON.Vector3, variant?: BossVariant | null): BABYLON.Mesh {
+  private createEnemyMesh(
+    type: EnemyType,
+    position: BABYLON.Vector3,
+    variant?: BossVariant | null,
+    /** Forces a specific HUMANOID_PRESETS key for `commander`/`captain`
+     *  spawns, bypassing the random pick + the player's editor override.
+     *  Used by SwarmsLairSystem to spawn the unique General Voidcrown
+     *  preset instead of one of the four standard captain presets. */
+    humanoidPresetOverride?: string,
+  ): BABYLON.Mesh {
     // Tanks use a parametric vehicle build (treads + hull + turret +
     // barrel) — there's no robot/humanoid preset that reads as a tank,
     // and the proportions matter for the silhouette. Built BEFORE the
@@ -1214,7 +1223,11 @@ export class EnemySystem {
         type === "captain" && overrides.captainPreset && overrides.captainPreset !== "random"
           ? overrides.captainPreset
           : null;
-      const presetName = overridePreset ?? captainPresets[Math.floor(Math.random() * captainPresets.length)];
+      // Priority: explicit caller override (SwarmsLair General) > editor
+      // override (Boss Style tab) > random pick from captain roster.
+      const presetName = humanoidPresetOverride
+        ?? overridePreset
+        ?? captainPresets[Math.floor(Math.random() * captainPresets.length)];
       const def = HUMANOID_PRESETS[presetName];
 
       if (def) {
@@ -1521,9 +1534,13 @@ export class EnemySystem {
     healthMultiplier?: number;
     /** Boss-variant theme (defaults to inferno red — the original look). */
     variantId?: BossVariantId;
+    /** Force a specific HUMANOID_PRESETS key. Used by SwarmsLairSystem
+     *  to spawn `HumanoidGeneralVoidcrown` (Level 7's unique boss).
+     *  Bypasses the player's editor "Boss Style" override. */
+    humanoidPreset?: string;
   }): EnemyUnit {
     const variant = getBossVariant(opts?.variantId);
-    const mesh = this.createEnemyMesh("captain", position, variant);
+    const mesh = this.createEnemyMesh("captain", position, variant, opts?.humanoidPreset);
     const waveMultiplier = (1 + (this.waveNumber - 1) * 0.25) * (opts?.healthMultiplier ?? 1);
     const enemy = new EnemyUnit(mesh, "captain", waveMultiplier, variant);
     enemy.isBossCaptain = !!opts?.isBossCaptain;
@@ -1536,6 +1553,21 @@ export class EnemySystem {
       variantName: variant.displayName,
       taunt: variant.taunt,
     });
+    return enemy;
+  }
+
+  /** Spawn a single enemy of an explicit type at a precise world position.
+   *  Bypasses the wave-spawner's distance/angle math so dedicated zones
+   *  (SwarmsLairSystem cave arena) can place swarm minions exactly where
+   *  needed. Counts against `maxEnemies` like the regular drip-spawn so
+   *  a zone can't accidentally overflow the population cap. */
+  spawnEnemyAt(type: EnemyType, position: BABYLON.Vector3): EnemyUnit | null {
+    if (this.enemies.length >= this.maxEnemies) return null;
+    const mesh = this.createEnemyMesh(type, position);
+    const waveMultiplier = 1 + (this.waveNumber - 1) * 0.2;
+    const enemy = new EnemyUnit(mesh, type, waveMultiplier);
+    this.enemies.push(enemy);
+    this.bus.emit(GameEvents.ENEMY_SPAWNED, { type, position });
     return enemy;
   }
 

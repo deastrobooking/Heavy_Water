@@ -41,16 +41,45 @@ export interface PontiacLabHandles {
  * eventually leaked into Char's Swarm program. The lab is "secret" because
  * even Star City's command structure thinks it was demolished.
  */
+/** Per-cage animal definition. The 4 caged lab animals are a fixed roster
+ *  so freeing them maps cleanly onto a persisted id list. Their flavor
+ *  lines surface in the floating proximity prompt. */
+interface LabAnimalDef {
+  id: string;
+  name: string;
+  flavor: string;
+  /** Body color of the small caged creature. */
+  color: BABYLON.Color3;
+}
+
+interface ActiveAnimalCage {
+  def: LabAnimalDef;
+  cageRoot: BABYLON.TransformNode;
+  cageMaterials: BABYLON.Material[];
+  bodyMesh: BABYLON.Mesh;
+  bodyMat: BABYLON.StandardMaterial;
+  basePos: BABYLON.Vector3;
+  /** Wall-clock ms when the freed body should despawn. 0 while caged. */
+  vanishAt: number;
+  freed: boolean;
+}
+
 export class PontiacLabSystem {
   private scene: BABYLON.Scene;
   private camera: BABYLON.Camera;
   private bus: EventBus;
   private playerPos: () => BABYLON.Vector3;
+  private inputBlocked: () => boolean;
+  /** Set of animal ids the player has already freed in prior sessions —
+   *  passed in by Game.tsx from ProgressSnapshot.freedLabAnimalIds.
+   *  Cages whose id is in here are skipped at build time. */
+  private alreadyFreedIds: Set<string>;
 
   /** Top-level transform — disposing this kills every mesh we spawned. */
   private root: BABYLON.TransformNode;
   private npcs: FriendlyNPCSystem | null = null;
   private observer: BABYLON.Observer<BABYLON.Scene> | null = null;
+  private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
   /** Pulsing emissive props (cryo pods, server LEDs) animated by the
    *  per-frame observer. Stored as references + base values so dispose
    *  doesn't have to walk the scene. */
@@ -60,10 +89,64 @@ export class PontiacLabSystem {
   private hiddenVisibles: Array<{ setVisible(v: boolean): void }> = [];
   private cityHidden: boolean = false;
 
+  /** Live caged animals (post-load filter applied). */
+  private animalCages: ActiveAnimalCage[] = [];
+  /** World-space center of the cave hatch — the per-frame proximity tick
+   *  compares the player position against this + HATCH_RANGE. */
+  private hatchCenter: BABYLON.Vector3 | null = null;
+  private hatchPulseMat: BABYLON.StandardMaterial | null = null;
+
+  /** HTML overlay layer for the floating "PRESS E" prompts. Single root,
+   *  child elements are toggled by the per-frame proximity tick. */
+  private overlayRoot: HTMLDivElement | null = null;
+  private animalPromptEl: HTMLDivElement | null = null;
+  private hatchPromptEl: HTMLDivElement | null = null;
+  /** Currently-focused interactable. At most one is non-null at a time —
+   *  E-key handling and the floating prompt position are driven from this
+   *  field by the per-frame tick. */
+  private focusedAnimal: ActiveAnimalCage | null = null;
+  private focusedHatch: boolean = false;
+
   /** Lab footprint center (matches LevelSystem.spawnPoint for L6). */
   private static readonly CENTER = new BABYLON.Vector3(480, 0, 480);
   /** Inner room half-extent — walls sit at ±ROOM. */
   private static readonly ROOM = 30;
+  /** Interaction radius for animal cages and the cave hatch. */
+  private static readonly INTERACT_RANGE = 4.5;
+  /** Cleanup linger after a freed animal is granted, before the body
+   *  fades out and the cage is fully disposed. */
+  private static readonly FREE_LINGER_MS = 1400;
+
+  /** Fixed roster — 4 caged lab animals along the south side of the room.
+   *  Order matches placement (west → east). Coordinates are picked at
+   *  build time so adding a 5th animal later only requires extending
+   *  this array + the matching x positions. */
+  private static readonly ANIMAL_DEFS: LabAnimalDef[] = [
+    {
+      id: "lab_animal_kit",
+      name: "KIT",
+      flavor: "Bio-printed fox cub. Circuits glow under fur.",
+      color: new BABYLON.Color3(1.0, 0.55, 0.25),
+    },
+    {
+      id: "lab_animal_glim",
+      name: "GLIM",
+      flavor: "Bioluminescent glider. Wings folded for transport.",
+      color: new BABYLON.Color3(0.30, 0.95, 0.85),
+    },
+    {
+      id: "lab_animal_mossback",
+      name: "MOSSBACK",
+      flavor: "Tortoise-frame Animaton. Old, gentle, watchful.",
+      color: new BABYLON.Color3(0.40, 0.85, 0.30),
+    },
+    {
+      id: "lab_animal_rivet",
+      name: "RIVET",
+      flavor: "Silvermouse drone. Survived the purges by hiding.",
+      color: new BABYLON.Color3(0.85, 0.85, 1.0),
+    },
+  ];
 
   constructor(
     scene: BABYLON.Scene,
@@ -71,12 +154,15 @@ export class PontiacLabSystem {
     playerPosProvider: () => BABYLON.Vector3,
     inputBlockedProvider: () => boolean,
     handles: PontiacLabHandles = {},
+    alreadyFreedAnimalIds: Iterable<string> = [],
   ) {
     this.scene = scene;
     this.camera = camera;
     this.bus = EventBus.getInstance();
     this.playerPos = playerPosProvider;
+    this.inputBlocked = inputBlockedProvider;
     this.handles = handles;
+    this.alreadyFreedIds = new Set(alreadyFreedAnimalIds);
 
     this.root = new BABYLON.TransformNode("pontiacLabRoot", scene);
 
@@ -96,11 +182,37 @@ export class PontiacLabSystem {
     this.buildHoloTerminals();
     this.buildCommandDesk();
     this.buildLighting();
+    this.buildCagedAnimals();
+    this.buildCaveHatch();
+    this.buildOverlay();
     this.spawnNPCs(inputBlockedProvider);
 
     // Per-frame observer drives the cryo-pod + server-LED pulse so the
     // room reads as "live equipment". Cheap — six sinf calls a frame.
+    // Also drives the cage/hatch proximity check + DOM prompt placement.
     this.observer = scene.onBeforeRenderObservable.add(() => this.tick());
+
+    // E-key handler for animal cages + the cave hatch. Mirrors RescueSystem's
+    // gated-handler pattern: defers when input is blocked by another modal,
+    // and uses stopImmediatePropagation so adjacent listeners (FriendlyNPCs,
+    // RescueSystem) don't double-fire on the same press.
+    this.keydownHandler = (e: KeyboardEvent) => {
+      if (e.code !== "KeyE") return;
+      if (this.inputBlocked()) return;
+      if (this.focusedAnimal && !this.focusedAnimal.freed) {
+        e.stopImmediatePropagation();
+        this.freeAnimal(this.focusedAnimal);
+        return;
+      }
+      if (this.focusedHatch) {
+        e.stopImmediatePropagation();
+        // No payload — the lair lives at fixed L7 spawn coords, so the
+        // Game.tsx LAB_CAVE_ENTERED handler can just call fastTravel(7).
+        this.bus.emit(GameEvents.LAB_CAVE_ENTERED);
+        return;
+      }
+    };
+    window.addEventListener("keydown", this.keydownHandler);
 
     this.bus.emit(GameEvents.UI_MESSAGE, "PONTIAC SECRET LAB — pre-war research recovered.");
     console.log("[PontiacLabSystem] Pontiac Secret Lab mounted");
@@ -119,10 +231,31 @@ export class PontiacLabSystem {
       this.scene.onBeforeRenderObservable.remove(this.observer);
       this.observer = null;
     }
+    if (this.keydownHandler) {
+      try { window.removeEventListener("keydown", this.keydownHandler); } catch {}
+      this.keydownHandler = null;
+    }
     if (this.npcs) {
       try { this.npcs.dispose(); } catch {}
       this.npcs = null;
     }
+    // Tear down any cage materials we still own so a level swap doesn't
+    // strand them on the GPU. Mesh dispose alone never frees materials.
+    for (const cage of this.animalCages) {
+      for (const mat of cage.cageMaterials) { try { mat.dispose(); } catch {} }
+      try { cage.bodyMat.dispose(); } catch {}
+    }
+    this.animalCages = [];
+    this.focusedAnimal = null;
+    this.focusedHatch = false;
+    this.hatchCenter = null;
+    if (this.hatchPulseMat) { try { this.hatchPulseMat.dispose(); } catch {} this.hatchPulseMat = null; }
+    if (this.overlayRoot && this.overlayRoot.parentElement) {
+      try { this.overlayRoot.parentElement.removeChild(this.overlayRoot); } catch {}
+    }
+    this.overlayRoot = null;
+    this.animalPromptEl = null;
+    this.hatchPromptEl = null;
     this.pulsers = [];
     // Restore the outer world we hid on mount BEFORE root.dispose so any
     // mistake here doesn't strand the player on a black void.
@@ -587,13 +720,407 @@ export class PontiacLabSystem {
     this.npcs = npcs;
   }
 
-  /** Per-frame pulse for cryo glow + server LEDs. Keeps the lab visually
-   *  "alive" without pulling FX-system overhead. */
+  // ---------------------------------------------- caged lab animals
+
+  /** Build up to 4 caged lab animals along the south wall. Skips cages
+   *  whose id is already in `alreadyFreedIds` so a re-entry after a
+   *  prior playthrough doesn't respawn freed animals. */
+  private buildCagedAnimals(): void {
+    const c = PontiacLabSystem.CENTER;
+    // West→East row at z = c.z - 18 (south band, well clear of the spawn
+    // point and well clear of the south-wall sign at z = c.z - 26).
+    const xs = [c.x - 14, c.x - 6, c.x + 6, c.x + 14];
+    PontiacLabSystem.ANIMAL_DEFS.forEach((def, i) => {
+      if (this.alreadyFreedIds.has(def.id)) return;
+      const pos = new BABYLON.Vector3(xs[i], 0, c.z - 18);
+      this.spawnAnimalCage(def, pos);
+    });
+  }
+
+  private spawnAnimalCage(def: LabAnimalDef, pos: BABYLON.Vector3): void {
+    const cageRoot = new BABYLON.TransformNode(`labAnimalCage_${def.id}`, this.scene);
+    cageRoot.position.copyFrom(pos);
+    cageRoot.parent = this.root;
+
+    // Mini cage — about half the size of RescueSystem's synth cage so
+    // the lab animals read as smaller, more domestic captives.
+    const barMat = new BABYLON.StandardMaterial(`labAnimalBarMat_${def.id}`, this.scene);
+    barMat.diffuseColor = new BABYLON.Color3(0.85, 0.20, 0.30);
+    barMat.emissiveColor = new BABYLON.Color3(1.0, 0.30, 0.40);
+    barMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const cageRadius = 0.7;
+    const cageHeight = 1.4;
+    const meshes: BABYLON.Mesh[] = [];
+    // 3 vertical bars in a triangle so the animal silhouette stays
+    // visible from any angle.
+    for (let i = 0; i < 3; i++) {
+      const ang = (i / 3) * Math.PI * 2;
+      const bar = BABYLON.MeshBuilder.CreateCylinder(
+        `labAnimalBar_${def.id}_${i}`,
+        { diameter: 0.10, height: cageHeight, tessellation: 8 },
+        this.scene,
+      );
+      bar.position.set(Math.cos(ang) * cageRadius, cageHeight / 2, Math.sin(ang) * cageRadius);
+      bar.material = barMat;
+      bar.parent = cageRoot;
+      bar.isPickable = false;
+      meshes.push(bar);
+    }
+    const ring = BABYLON.MeshBuilder.CreateTorus(
+      `labAnimalRing_${def.id}`,
+      { diameter: cageRadius * 2.2, thickness: 0.12, tessellation: 20 },
+      this.scene,
+    );
+    ring.position.y = 0.05;
+    ring.material = barMat;
+    ring.parent = cageRoot;
+    ring.isPickable = false;
+    meshes.push(ring);
+
+    // The caged animal itself — a glowing sphere body with a smaller head
+    // sphere offset upward so the silhouette reads as a creature rather
+    // than just a colored ball.
+    const bodyMat = new BABYLON.StandardMaterial(`labAnimalBodyMat_${def.id}`, this.scene);
+    bodyMat.diffuseColor = def.color;
+    bodyMat.emissiveColor = def.color.scale(0.55);
+    bodyMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const body = BABYLON.MeshBuilder.CreateSphere(
+      `labAnimalBody_${def.id}`,
+      { diameter: 0.55, segments: 14 },
+      this.scene,
+    );
+    body.position.set(0, 0.45, 0);
+    body.material = bodyMat;
+    body.parent = cageRoot;
+    body.isPickable = false;
+
+    const head = BABYLON.MeshBuilder.CreateSphere(
+      `labAnimalHead_${def.id}`,
+      { diameter: 0.32, segments: 12 },
+      this.scene,
+    );
+    head.position.set(0, 0.78, 0.18);
+    head.material = bodyMat;
+    head.parent = cageRoot;
+    head.isPickable = false;
+
+    this.animalCages.push({
+      def,
+      cageRoot,
+      cageMaterials: [barMat],
+      bodyMesh: body,
+      bodyMat,
+      basePos: pos.clone(),
+      vanishAt: 0,
+      freed: false,
+    });
+
+    // Pulse the cage bars red so the player notices them across the room.
+    this.pulsers.push({
+      mat: barMat,
+      base: barMat.emissiveColor.clone(),
+      phase: this.animalCages.length * 1.3,
+      speed: 1.4,
+    });
+  }
+
+  /** Triggered when the player presses E inside an animal cage's range.
+   *  Breaks the cage, fades the animal, fires ANIMAL_FREED, lets Game.tsx
+   *  persist the id and check the legendary-companion grant condition. */
+  private freeAnimal(cage: ActiveAnimalCage): void {
+    cage.freed = true;
+    // Drop the bars + ring immediately for a satisfying "snap" — the
+    // animal body lingers a moment longer so the rescue reads cleanly.
+    for (const child of cage.cageRoot.getChildMeshes()) {
+      if (child === cage.bodyMesh) continue;
+      try { child.dispose(); } catch {}
+    }
+    for (const mat of cage.cageMaterials) { try { mat.dispose(); } catch {} }
+    cage.cageMaterials = [];
+    cage.vanishAt = performance.now() + PontiacLabSystem.FREE_LINGER_MS;
+
+    // Hide the prompt now so the player doesn't see "PRESS E TO FREE"
+    // floating over an empty cage during the linger window.
+    if (this.focusedAnimal === cage) {
+      this.focusedAnimal = null;
+      if (this.animalPromptEl) this.animalPromptEl.style.display = "none";
+    }
+
+    this.bus.emit(GameEvents.ANIMAL_FREED, {
+      id: cage.def.id,
+      name: cage.def.name,
+      position: { x: cage.basePos.x, y: cage.basePos.y, z: cage.basePos.z },
+    });
+    this.bus.emit(GameEvents.UI_MESSAGE, `${cage.def.name} FREED`);
+    console.log(`[PontiacLabSystem] Animal freed: ${cage.def.id}`);
+  }
+
+  // -------------------------------------------------- cave hatch
+
+  /** Hexagonal glowing hatch in the floor near the south-east of the
+   *  room. Pressing E inside HATCH_RANGE fires LAB_CAVE_ENTERED — Game.tsx
+   *  responds by fast-travelling the player to Level 7 (Swarms Lair). */
+  private buildCaveHatch(): void {
+    const c = PontiacLabSystem.CENTER;
+    // South-east quadrant — clear of the animal cages (south-west / center)
+    // and the cryo pod row along the east wall (x = c.x + 18).
+    const center = new BABYLON.Vector3(c.x + 8, 0, c.z - 22);
+    this.hatchCenter = center.clone();
+
+    // Hexagonal base (6-segment cylinder = hex prism). Sunken slightly
+    // into the floor so it reads as a hatch rather than a platform.
+    const baseMat = new BABYLON.StandardMaterial("labHatchBaseMat", this.scene);
+    baseMat.diffuseColor = new BABYLON.Color3(0.18, 0.10, 0.10);
+    baseMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+
+    const base = BABYLON.MeshBuilder.CreateCylinder(
+      "labHatchBase",
+      { diameter: 4.2, height: 0.20, tessellation: 6 },
+      this.scene,
+    );
+    base.position.copyFrom(center);
+    base.position.y = 0.10;
+    base.parent = this.root;
+    base.isPickable = false;
+    base.material = baseMat;
+
+    // Glowing inset platform — pulses red/orange so the hatch is unmissable.
+    const pulseMat = new BABYLON.StandardMaterial("labHatchPulseMat", this.scene);
+    pulseMat.diffuseColor = new BABYLON.Color3(0.85, 0.20, 0.10);
+    pulseMat.emissiveColor = new BABYLON.Color3(1.0, 0.35, 0.15);
+    pulseMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const inset = BABYLON.MeshBuilder.CreateCylinder(
+      "labHatchInset",
+      { diameter: 3.2, height: 0.10, tessellation: 6 },
+      this.scene,
+    );
+    inset.position.copyFrom(center);
+    inset.position.y = 0.21;
+    inset.parent = this.root;
+    inset.isPickable = false;
+    inset.material = pulseMat;
+    this.hatchPulseMat = pulseMat;
+    this.pulsers.push({
+      mat: pulseMat,
+      base: pulseMat.emissiveColor.clone(),
+      phase: 0,
+      speed: 2.4,
+    });
+
+    // Six warning lights ringing the hatch — small amber bulbs.
+    const warnMat = new BABYLON.StandardMaterial("labHatchWarnMat", this.scene);
+    warnMat.diffuseColor = new BABYLON.Color3(1.0, 0.75, 0.10);
+    warnMat.emissiveColor = new BABYLON.Color3(1.0, 0.85, 0.20);
+    warnMat.specularColor = new BABYLON.Color3(0, 0, 0);
+    for (let i = 0; i < 6; i++) {
+      const ang = (i / 6) * Math.PI * 2;
+      const bulb = BABYLON.MeshBuilder.CreateSphere(`labHatchWarn_${i}`,
+        { diameter: 0.32, segments: 10 }, this.scene);
+      bulb.position.set(center.x + Math.cos(ang) * 2.4, 0.32, center.z + Math.sin(ang) * 2.4);
+      bulb.parent = this.root;
+      bulb.isPickable = false;
+      bulb.material = warnMat;
+    }
+
+    // Down-arrow signal pole behind the hatch so the player reads
+    // "this leads DOWN" at a glance.
+    const polePost = BABYLON.MeshBuilder.CreateBox("labHatchPole",
+      { width: 0.2, height: 3.4, depth: 0.2 }, this.scene);
+    polePost.position.set(center.x, 1.7, center.z - 2.6);
+    polePost.parent = this.root;
+    polePost.isPickable = false;
+    polePost.material = baseMat;
+
+    // Down-pointing chevron — flat box rotated 45° on Z reads as an arrow.
+    const chevron = BABYLON.MeshBuilder.CreateBox("labHatchChevron",
+      { width: 1.0, height: 1.0, depth: 0.12 }, this.scene);
+    chevron.position.set(center.x, 3.4, center.z - 2.6);
+    chevron.rotation.z = Math.PI / 4;
+    chevron.parent = this.root;
+    chevron.isPickable = false;
+    chevron.material = pulseMat;
+
+    // Sign label above the chevron — DynamicTexture, mirrors the welcome
+    // sign so the visual language stays consistent.
+    const sign = BABYLON.MeshBuilder.CreateBox("labHatchSign",
+      { width: 3.6, height: 0.9, depth: 0.10 }, this.scene);
+    sign.position.set(center.x, 4.3, center.z - 2.6);
+    sign.parent = this.root;
+    sign.isPickable = false;
+    const signMat = new BABYLON.StandardMaterial("labHatchSignMat", this.scene);
+    signMat.diffuseColor = new BABYLON.Color3(0.10, 0.05, 0.08);
+    signMat.emissiveColor = new BABYLON.Color3(0.85, 0.30, 0.20);
+    signMat.specularColor = new BABYLON.Color3(0, 0, 0);
+    const tex = new BABYLON.DynamicTexture(
+      "labHatchSignTex",
+      { width: 512, height: 128 },
+      this.scene,
+      false,
+    );
+    tex.drawText("SWARMS  LAIR", null, 50, "bold 40px Arial", "#ffd28a", "#1a0608", true);
+    tex.drawText("DESCEND  AT  OWN  RISK", null, 96, "italic 22px Arial", "#ff6a3a", null as any, true);
+    signMat.diffuseTexture = tex;
+    signMat.emissiveTexture = tex;
+    sign.material = signMat;
+  }
+
+  // -------------------------------------------------- DOM overlay
+
+  /** Build a single fixed-position overlay layer with two prompt children
+   *  (one for animal cages, one for the hatch). The per-frame tick toggles
+   *  visibility + repositions each prompt over the focused world target. */
+  private buildOverlay(): void {
+    const root = document.createElement("div");
+    Object.assign(root.style, {
+      position: "fixed",
+      top: "0",
+      left: "0",
+      width: "100%",
+      height: "100%",
+      pointerEvents: "none",
+      zIndex: "23",
+      overflow: "hidden",
+    } as CSSStyleDeclaration);
+
+    const animal = document.createElement("div");
+    Object.assign(animal.style, {
+      position: "absolute",
+      transform: "translate(-50%, -100%)",
+      padding: "5px 12px",
+      background: "rgba(0,0,0,0.82)",
+      border: "1px solid #ff4a6a",
+      borderRadius: "4px",
+      color: "#ff4a6a",
+      fontFamily: "'Press Start 2P', monospace",
+      fontSize: "10px",
+      letterSpacing: "1px",
+      whiteSpace: "nowrap",
+      textShadow: "0 0 6px #ff2050",
+      boxShadow: "0 0 14px rgba(255, 60, 100, 0.6)",
+      display: "none",
+    } as CSSStyleDeclaration);
+    root.appendChild(animal);
+
+    const hatch = document.createElement("div");
+    Object.assign(hatch.style, {
+      position: "absolute",
+      transform: "translate(-50%, -100%)",
+      padding: "6px 14px",
+      background: "rgba(0,0,0,0.86)",
+      border: "1px solid #ffae3a",
+      borderRadius: "4px",
+      color: "#ffae3a",
+      fontFamily: "'Press Start 2P', monospace",
+      fontSize: "11px",
+      letterSpacing: "1.2px",
+      whiteSpace: "nowrap",
+      textShadow: "0 0 6px #ff7a10",
+      boxShadow: "0 0 18px rgba(255, 150, 30, 0.7)",
+      display: "none",
+    } as CSSStyleDeclaration);
+    hatch.textContent = "PRESS E TO DESCEND";
+    root.appendChild(hatch);
+
+    document.body.appendChild(root);
+    this.overlayRoot = root;
+    this.animalPromptEl = animal;
+    this.hatchPromptEl = hatch;
+  }
+
+  /** Per-frame pulse for cryo glow + server LEDs + cage bars + hatch glow,
+   *  plus proximity check + DOM prompt placement for the cages and hatch.
+   *  Keeps the lab visually "alive" without pulling FX-system overhead. */
   private tick(): void {
     const t = performance.now() * 0.001;
     for (const p of this.pulsers) {
       const k = 0.65 + 0.35 * Math.sin(t * p.speed + p.phase);
       p.mat.emissiveColor.copyFromFloats(p.base.r * k, p.base.g * k, p.base.b * k);
     }
+
+    // Despawn any freed animals whose linger window has elapsed.
+    const now = performance.now();
+    for (let i = this.animalCages.length - 1; i >= 0; i--) {
+      const cage = this.animalCages[i];
+      if (cage.freed && cage.vanishAt > 0 && now >= cage.vanishAt) {
+        try { cage.cageRoot.dispose(); } catch {}
+        try { cage.bodyMat.dispose(); } catch {}
+        this.animalCages.splice(i, 1);
+        if (this.focusedAnimal === cage) this.focusedAnimal = null;
+      }
+    }
+
+    // Proximity check — find the nearest still-caged animal and the hatch
+    // distance. Only one of (animalPrompt, hatchPrompt) is shown per frame,
+    // and the closer of the two wins so they never visually overlap.
+    const player = this.playerPos();
+    const range2 = PontiacLabSystem.INTERACT_RANGE * PontiacLabSystem.INTERACT_RANGE;
+
+    let nearestCage: ActiveAnimalCage | null = null;
+    let nearestCageD2 = range2;
+    for (const cage of this.animalCages) {
+      if (cage.freed) continue;
+      const dx = cage.basePos.x - player.x;
+      const dz = cage.basePos.z - player.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < nearestCageD2) {
+        nearestCageD2 = d2;
+        nearestCage = cage;
+      }
+    }
+
+    let hatchD2 = Infinity;
+    if (this.hatchCenter) {
+      const dx = this.hatchCenter.x - player.x;
+      const dz = this.hatchCenter.z - player.z;
+      hatchD2 = dx * dx + dz * dz;
+    }
+    const hatchInRange = hatchD2 < range2;
+
+    // Closer one wins — this prevents the two prompts from stacking when
+    // the cages and the hatch happen to be near the same spot.
+    if (nearestCage && nearestCageD2 <= hatchD2) {
+      this.focusedAnimal = nearestCage;
+      this.focusedHatch = false;
+      this.placePrompt(this.animalPromptEl,
+        new BABYLON.Vector3(nearestCage.basePos.x, 1.6, nearestCage.basePos.z),
+        `PRESS E — FREE ${nearestCage.def.name}`);
+      if (this.hatchPromptEl) this.hatchPromptEl.style.display = "none";
+    } else if (hatchInRange && this.hatchCenter) {
+      this.focusedAnimal = null;
+      this.focusedHatch = true;
+      this.placePrompt(this.hatchPromptEl,
+        new BABYLON.Vector3(this.hatchCenter.x, 1.0, this.hatchCenter.z),
+        "PRESS E TO DESCEND");
+      if (this.animalPromptEl) this.animalPromptEl.style.display = "none";
+    } else {
+      this.focusedAnimal = null;
+      this.focusedHatch = false;
+      if (this.animalPromptEl) this.animalPromptEl.style.display = "none";
+      if (this.hatchPromptEl) this.hatchPromptEl.style.display = "none";
+    }
+  }
+
+  /** Project a world-space anchor to screen coords and position the
+   *  prompt over it. Hides the prompt if the anchor is behind the camera. */
+  private placePrompt(el: HTMLDivElement | null, world: BABYLON.Vector3, text: string): void {
+    if (!el) return;
+    const engine = this.scene.getEngine();
+    const screen = BABYLON.Vector3.Project(
+      world,
+      BABYLON.Matrix.Identity(),
+      this.scene.getTransformMatrix(),
+      this.camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight()),
+    );
+    if (screen.z > 1 || screen.z < 0) {
+      el.style.display = "none";
+      return;
+    }
+    el.textContent = text;
+    el.style.left = `${screen.x}px`;
+    el.style.top = `${screen.y}px`;
+    el.style.display = "block";
   }
 }

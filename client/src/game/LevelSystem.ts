@@ -11,7 +11,7 @@ import { BossVariantId } from "./BossVariants";
  *  bio-crops, and runs errands for the nearby Village of Earth. It does not
  *  appear in the L1→L2→L3 progression chain; it's reached from the new TRAVEL
  *  tab on the upgrade menu and acts as the player's home base. */
-export type WorldLevel = 1 | 2 | 3 | 4 | 5 | 6;
+export type WorldLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 /** Persisted shape used by ProgressSync. */
 export interface LevelSnapshot {
@@ -201,6 +201,30 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     spawnPoint: { x: 0, z: 0 },
     completeSubtitle: "Orbit secured.",
   },
+  7: {
+    level: 7,
+    displayName: "SWARMS LAIR",
+    banner: "LEVEL 7 — SWARMS LAIR",
+    objective: "Descend into the lair. Cut through the swarm. End the General.",
+    // Combat zone, not a side-zone — but ground-fortress chain is suppressed
+    // (the General is spawned by SwarmsLairSystem directly, not by an
+    // EnemyBaseSystem fortress). Difficulty bumped above L3 to read as
+    // "post-campaign challenge".
+    difficultyMultiplier: 2.8,
+    // Sickly red-violet tint that bleeds through the cave ceiling; the
+    // lair itself owns most of its visual identity via SwarmsLairSystem.
+    skyTint: { r: 0.85, g: 0.30, b: 0.55 },
+    bossVariantId: "void",
+    // Off-map fortress center — the lair is an indoor zone with its own
+    // boss spawn flow. Game.tsx gates ground-fortress seeding behind the
+    // new `isLair` check the same way it does for `peaceful` / spacelike.
+    fortressCenter: { x: -9999, z: -9999 },
+    // Spawn near origin so the SwarmsLairSystem's entry tunnel naturally
+    // wraps around the player on warp-in.
+    spawnPoint: { x: 0, z: 0 },
+    completeSubtitle: "The General falls. The Swarm scatters.",
+    timeOfDay: 22.0, // late night — even the surface bleed-through reads dim
+  },
 };
 
 /** Tracks the player's world-level progression and drives transitions when
@@ -383,7 +407,7 @@ export class LevelSystem {
 
   /** All known levels — used by the TRAVEL tab. */
   static getAllLevels(): WorldLevel[] {
-    return [1, 2, 3, 4, 5, 6];
+    return [1, 2, 3, 4, 5, 6, 7];
   }
 
   /** `true` for the Pontiac Secret Lab side-zone (Level 6). Like the
@@ -403,6 +427,18 @@ export class LevelSystem {
     return level === 5;
   }
 
+  /** `true` for the Swarms Lair (Level 7) — an indoor cave combat zone
+   *  reachable from the Pontiac Lab cave hatch or from the TRAVEL tab.
+   *  `SwarmsLairSystem` mounts on this level and hides the outer world
+   *  (city + mountains + foliage + props) the same way the lab and
+   *  sanctuary do. Combat IS active here — but the General boss is
+   *  spawned directly by SwarmsLairSystem instead of an EnemyBaseSystem
+   *  fortress, so the standard ground-fortress chain in Game.tsx is
+   *  gated behind this check. */
+  static isLair(level: WorldLevel): boolean {
+    return level === 7;
+  }
+
   /** Persisted snapshot for ProgressSync. */
   getSnapshot(): LevelSnapshot {
     return { worldLevel: this.currentLevel };
@@ -413,7 +449,8 @@ export class LevelSystem {
   applyLoadedState(snap: Partial<LevelSnapshot> | null | undefined): void {
     let lvl: WorldLevel = 1;
     const raw = snap && typeof snap.worldLevel === "number" ? snap.worldLevel : 1;
-    if (raw >= 6) lvl = 6;
+    if (raw >= 7) lvl = 7;
+    else if (raw === 6) lvl = 6;
     else if (raw === 5) lvl = 5;
     else if (raw === 4) lvl = 4;
     else if (raw === 3) lvl = 3;
@@ -425,11 +462,11 @@ export class LevelSystem {
       this.clearedLevels.clear();
       return;
     }
-    // Levels 4 (sanctuary), 5 (orbital), 6 (Pontiac Lab) are side-content —
-    // don't auto-mark L1/L2/L3 as cleared just because the player saved
-    // there; that would let them skip the campaign on re-entry. Only treat
-    // the main chain (1→2→3) as cleared-on-load.
-    if (lvl === 4 || lvl === 5 || lvl === 6) {
+    // Levels 4 (sanctuary), 5 (orbital), 6 (Pontiac Lab), 7 (Swarms Lair)
+    // are side-content — don't auto-mark L1/L2/L3 as cleared just because
+    // the player saved there; that would let them skip the campaign on
+    // re-entry. Only treat the main chain (1→2→3) as cleared-on-load.
+    if (lvl === 4 || lvl === 5 || lvl === 6 || lvl === 7) {
       this.advanceTo(lvl);
       return;
     }

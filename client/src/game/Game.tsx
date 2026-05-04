@@ -60,6 +60,8 @@ import { LevelSystem, WorldLevel } from "./LevelSystem";
 import { SanctuarySystem } from "./SanctuarySystem";
 import { PontiacLabSystem } from "./PontiacLabSystem";
 import { SpaceLevelSystem } from "./SpaceLevelSystem";
+import { SwarmsLairSystem } from "./SwarmsLairSystem";
+import { RESCUE_DEFS } from "./RescueSystem";
 import { loadProgress, saveProgress, ProgressSnapshot } from "./ProgressSync";
 import { EventBus, GameEvents } from "./EventBus";
 import { DamageType } from "./DamageSystem";
@@ -160,6 +162,16 @@ export const Game: React.FC = () => {
   const sanctuarySystemRef = useRef<SanctuarySystem | null>(null);
   const pontiacLabSystemRef = useRef<PontiacLabSystem | null>(null);
   const spaceLevelSystemRef = useRef<SpaceLevelSystem | null>(null);
+  const swarmsLairSystemRef = useRef<SwarmsLairSystem | null>(null);
+  // Long-lived progress mirrors for the Pontiac Lab → Swarms Lair chain.
+  // PontiacLabSystem is rebuilt on every L6 entry, so the freed-animal id
+  // set must outlive it here in Game.tsx (read on next mount, written on
+  // ANIMAL_FREED). swarmsGeneralDefeated + legendaryGranted similarly need
+  // to persist across LEVEL_STARTED swaps so the grant check can fire from
+  // either condition's listener regardless of which fired last.
+  const freedLabAnimalIdsRef = useRef<Set<string>>(new Set());
+  const swarmsGeneralDefeatedRef = useRef<boolean>(false);
+  const legendaryCompanionGrantedRef = useRef<boolean>(false);
   // Mirror modal-open React state into refs so systems wired during the
   // single mount-time `initializeGame` (which captures stale state) can poll
   // the live values from their per-frame closures.
@@ -232,6 +244,12 @@ export const Game: React.FC = () => {
   // or a paid-for helper-weapon upgrade triggers an immediate forced save —
   // even if the 2s save throttle would normally skip it.
   const forceSaveRef = useRef<(() => void) | null>(null);
+  // Forward-refs so EventBus listeners wired inside the single mount-time
+  // `initializeGame` (which closes over earlier scope) can call helpers
+  // that are defined LATER in React-scope (handleFastTravel) or built
+  // alongside doSaveProgress (tryGrantLegendaryCompanion).
+  const handleFastTravelRef = useRef<((level: number) => void) | null>(null);
+  const tryGrantLegendaryCompanionRef = useRef<(() => void) | null>(null);
 
   const [gamePhase, setGamePhase] = useState<GamePhase>("auth");
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -1132,10 +1150,46 @@ export const Game: React.FC = () => {
                 ],
                 lodCull,
               },
+              // Pre-freed roster — PontiacLabSystem skips building cages
+              // whose ids are in this set, so re-entries after a prior
+              // playthrough don't respawn animals the player already freed.
+              freedLabAnimalIdsRef.current,
             );
           } else if (!isLab && pontiacLabSystemRef.current) {
             try { pontiacLabSystemRef.current.dispose(); } catch {}
             pontiacLabSystemRef.current = null;
+          }
+
+          // Mount/dispose the Swarms Lair side-zone (Level 7) — a self-
+          // contained underground combat arena reachable from the Pontiac
+          // Lab's cave hatch (or directly from TRAVEL once the player has
+          // it on their map). Same handles bag as the lab + sanctuary.
+          const isLair = typeof payload?.level === "number"
+            && LevelSystem.isLair(payload.level as WorldLevel);
+          if (isLair && !swarmsLairSystemRef.current) {
+            swarmsLairSystemRef.current = new SwarmsLairSystem(
+              scene,
+              enemySystem,
+              () => player.getPosition(),
+              {
+                city: cityGenerator,
+                worldVisibles: [
+                  mountainRingRef.current,
+                  alienFoliageRef.current,
+                  earthFoliageRef.current,
+                  propSystemRef.current,
+                ],
+                lodCull,
+              },
+              // Persisted defeat flag — when true the lair skips the
+              // General spawn AND the kill-listener so the boss doesn't
+              // resurrect on revisit and the legendary grant doesn't
+              // re-fire after a stale captain death in the arena.
+              swarmsGeneralDefeatedRef.current,
+            );
+          } else if (!isLair && swarmsLairSystemRef.current) {
+            try { swarmsLairSystemRef.current.dispose(); } catch {}
+            swarmsLairSystemRef.current = null;
           }
 
           // Mount/dispose the orbital side-zone (Level 5) on the same edge
@@ -1177,9 +1231,12 @@ export const Game: React.FC = () => {
           }
 
           // Combat-only progression: bump waves + seed the next fortress.
-          // Skipped while peaceful (sanctuary) or spacelike (orbital combat
-          // is owned by AerialEnemySystem, no ground fortresses).
-          if (!isPeaceful && !isSpacelike && payload?.level >= 2) {
+          // Skipped while peaceful (sanctuary), spacelike (orbital combat
+          // is owned by AerialEnemySystem, no ground fortresses), or in
+          // the Swarms Lair (its own self-contained arena — boss + minions
+          // are spawned by SwarmsLairSystem itself, no city fortress to
+          // seed).
+          if (!isPeaceful && !isSpacelike && !isLair && payload?.level >= 2) {
             const baseWave = enemySystem.getWaveNumber() + 2;
             const targetWave = payload.level === 3 ? Math.max(baseWave, 9) : Math.max(baseWave, 5);
             enemySystem.jumpToWave(targetWave);
@@ -1206,11 +1263,48 @@ export const Game: React.FC = () => {
         // SYNTHETIC_RESCUED → toast + immediate forced save so the rescued id
         // is persisted before the player can die or close the tab. The
         // RescueSystem itself opens the centered story bubble; we just
-        // mirror a short HUD toast and flush the save.
+        // mirror a short HUD toast, flush the save, and re-check the
+        // legendary-companion grant (rescuing the final synthetic could
+        // be the trigger that unlocks it).
         bus.on(GameEvents.SYNTHETIC_RESCUED, (data: any) => {
           const name = (data && typeof data.name === "string") ? data.name : "SYNTHETIC";
           showMessage(`${name} RESCUED`, 2500);
           if (forceSaveRef.current) forceSaveRef.current();
+          tryGrantLegendaryCompanionRef.current?.();
+        });
+
+        // ANIMAL_FREED → toast + persist the freed id + force-save +
+        // re-check the legendary-companion grant. PontiacLabSystem fires
+        // this once per E-press inside an animal cage (it does the visual
+        // shatter + linger fade itself); we own the persistent set here.
+        bus.on(GameEvents.ANIMAL_FREED, (data: any) => {
+          const id = data?.id;
+          const name = (data && typeof data.name === "string") ? data.name : "ANIMAL";
+          if (typeof id === "string" && id.length > 0) {
+            freedLabAnimalIdsRef.current.add(id);
+          }
+          showMessage(`${name} FREED`, 2500);
+          if (forceSaveRef.current) forceSaveRef.current();
+          tryGrantLegendaryCompanionRef.current?.();
+        });
+
+        // LAB_CAVE_ENTERED → fast-travel to the Swarms Lair (Level 7).
+        // Fired by PontiacLabSystem when the player presses E on the
+        // glowing cave hatch in the lab floor.
+        bus.on(GameEvents.LAB_CAVE_ENTERED, () => {
+          if (handleFastTravelRef.current) handleFastTravelRef.current(7);
+        });
+
+        // SWARMS_GENERAL_DEFEATED → flag the defeat in the long-lived
+        // ref, force-save, banner, then re-check the legendary-companion
+        // grant. SwarmsLairSystem handles the kill detection (matched on
+        // isBossCaptain + proximity to the General spawn point).
+        bus.on(GameEvents.SWARMS_GENERAL_DEFEATED, () => {
+          if (swarmsGeneralDefeatedRef.current) return; // idempotent
+          swarmsGeneralDefeatedRef.current = true;
+          showMessage("GENERAL VOIDCROWN — DEFEATED", 4500);
+          if (forceSaveRef.current) forceSaveRef.current();
+          tryGrantLegendaryCompanionRef.current?.();
         });
 
         const enemyHealthBars = new EnemyHealthBarSystem(scene, engine.getCamera());
@@ -1477,6 +1571,16 @@ export const Game: React.FC = () => {
             // Captured-synthetic rescues already played out — re-entering a
             // level never spawns a rescuee whose story moment is finished.
             rescuedSyntheticIds: rescueSystemRef.current?.serialize() ?? [],
+            // Pontiac Lab caged-animal frees — preserved across reloads so
+            // the animal cages don't reappear and the legendary-companion
+            // grant condition stays satisfied.
+            freedLabAnimalIds: Array.from(freedLabAnimalIdsRef.current),
+            // Swarms Lair boss kill + legendary-companion grant flags.
+            // Both are one-way latches; saving them keeps the grant from
+            // being re-issued on next boot (and the boss from being
+            // counted as alive again for the grant gate).
+            swarmsGeneralDefeated: swarmsGeneralDefeatedRef.current,
+            legendaryCompanionGranted: legendaryCompanionGrantedRef.current,
           };
         };
 
@@ -1492,6 +1596,53 @@ export const Game: React.FC = () => {
         // Expose for handleUnlockSpecial (defined in outer React scope) so
         // SPECIALS unlocks can request an immediate forced save.
         forceSaveRef.current = () => { void doSaveProgress(true); };
+
+        // Legendary-companion grant — re-evaluated on every progression
+        // edge that could complete the gate (synthetic rescued, animal
+        // freed, General defeated). Idempotent: the flag-check at the
+        // top short-circuits once granted, so duplicate event fans don't
+        // duplicate the companion. Total caged-synthetic count is read
+        // from RESCUE_DEFS so adding a new level's roster later
+        // automatically tightens the gate (no magic 12 hard-coded).
+        const TOTAL_SYNTHETICS = (() => {
+          let n = 0;
+          // Object.values is the type-safe path here — RESCUE_DEFS uses
+          // numeric keys, so the Object.keys(...) → number cast wouldn't
+          // typecheck even though the runtime would have worked.
+          for (const roster of Object.values(RESCUE_DEFS)) {
+            n += (roster ?? []).length;
+          }
+          return n;
+        })();
+        const TOTAL_LAB_ANIMALS = 4; // PontiacLabSystem.ANIMAL_DEFS roster size
+        tryGrantLegendaryCompanionRef.current = () => {
+          if (legendaryCompanionGrantedRef.current) return;
+          if (!swarmsGeneralDefeatedRef.current) return;
+          if (freedLabAnimalIdsRef.current.size < TOTAL_LAB_ANIMALS) return;
+          const rescuedCount = rescueSystemRef.current?.serialize().length ?? 0;
+          if (rescuedCount < TOTAL_SYNTHETICS) return;
+          // All conditions met — grant the legendary mini-General. The
+          // companion is just another ALLY_PRESETS entry tuned to a tall
+          // biped silhouette, so the standard addCompanion path applies.
+          // We bump maxCompanions if the player is at cap so the grant
+          // never silently fails on a full roster.
+          const needed = companionSystem.getCompanionCount() + 1;
+          if (companionSystem.getMaxCompanions() < needed) {
+            companionSystem.setMaxCompanions(needed);
+          }
+          const ok = companionSystem.addCompanion(
+            "MiniGeneralVoidcrown",
+            player.getPosition(),
+            { allowDuplicate: true },
+          );
+          if (!ok) return; // roster still full for some other reason; try again on next event
+          legendaryCompanionGrantedRef.current = true;
+          showMessage("LEGENDARY COMPANION — MINI-GENERAL JOINS YOU", 5000);
+          // Match the EventBus contract: payload is `{ presetName }` so
+          // listeners can route on which legendary just landed.
+          bus.emit(GameEvents.LEGENDARY_COMPANION_GRANTED, { presetName: "MiniGeneralVoidcrown" });
+          if (forceSaveRef.current) forceSaveRef.current();
+        };
 
         // Start the periodic autosave only after the initial load completes
         // (or fails). If we started it eagerly, a 5s timer could fire *before*
@@ -1613,6 +1764,19 @@ export const Game: React.FC = () => {
               // has freed in a prior run.
               if (rescueSystemRef.current) {
                 rescueSystemRef.current.applyLoadedState(snap.rescuedSyntheticIds);
+              }
+              // Restore the Pontiac Lab → Swarms Lair progression flags.
+              // These mirror into Game.tsx-owned refs because the systems
+              // that read them (PontiacLabSystem ctor, the legendary-
+              // grant helper) are constructed lazily on level entry.
+              if (snap.freedLabAnimalIds && snap.freedLabAnimalIds.length > 0) {
+                freedLabAnimalIdsRef.current = new Set(snap.freedLabAnimalIds);
+              }
+              if (snap.swarmsGeneralDefeated) {
+                swarmsGeneralDefeatedRef.current = true;
+              }
+              if (snap.legendaryCompanionGranted) {
+                legendaryCompanionGrantedRef.current = true;
               }
               // Restore world-level progression. For L2, applyLoadedState
               // re-emits LEVEL_STARTED, which our listener uses to swap
@@ -2248,6 +2412,17 @@ export const Game: React.FC = () => {
         weaponsRef.current = null;
         if (enemyHealthBarsRef.current) { try { enemyHealthBarsRef.current.dispose(); } catch {} }
         enemyHealthBarsRef.current = null;
+        // Side-zone systems (sanctuary, lab, space, lair) and the
+        // listener-owning friendly NPCs / rescue / multiplayer trees all
+        // hold EventBus subscriptions + scene refs. Without explicit
+        // dispose here they'd leak listeners across a failed-init retry.
+        if (sanctuarySystemRef.current) { try { sanctuarySystemRef.current.dispose(); } catch {} sanctuarySystemRef.current = null; }
+        if (pontiacLabSystemRef.current) { try { pontiacLabSystemRef.current.dispose(); } catch {} pontiacLabSystemRef.current = null; }
+        if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }
+        if (swarmsLairSystemRef.current) { try { swarmsLairSystemRef.current.dispose(); } catch {} swarmsLairSystemRef.current = null; }
+        if (friendlyNPCsRef.current) { try { friendlyNPCsRef.current.dispose(); } catch {} friendlyNPCsRef.current = null; }
+        if (rescueSystemRef.current) { try { rescueSystemRef.current.dispose(); } catch {} rescueSystemRef.current = null; }
+        if (multiplayerRef.current) { try { multiplayerRef.current.dispose(); } catch {} }
         if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} }
         gamepadRef.current = null;
         enemySystemRef.current = null;
@@ -2308,6 +2483,12 @@ export const Game: React.FC = () => {
         if (versusArenaRef.current) { try { versusArenaRef.current.dispose(); } catch {} versusArenaRef.current = null; }
         versusModeRef.current = { active: false, roomCode: null, isHost: false };
         multiplayerRef.current = null;
+        // Drop closures captured by the failed-init scope (force-save +
+        // legendary-grant both bind disposed systems) and clear the bus
+        // so a retry doesn't fan stale listeners onto fresh systems.
+        forceSaveRef.current = null;
+        tryGrantLegendaryCompanionRef.current = null;
+        EventBus.getInstance().clear();
         initializingRef.current = false;
         const errorMsg = error instanceof Error ? error.message : String(error);
         setMessage(`CRITICAL ERROR: ${errorMsg}`);
@@ -2373,6 +2554,7 @@ export const Game: React.FC = () => {
     if (sanctuarySystemRef.current) { try { sanctuarySystemRef.current.dispose(); } catch {} sanctuarySystemRef.current = null; }
     if (pontiacLabSystemRef.current) { try { pontiacLabSystemRef.current.dispose(); } catch {} pontiacLabSystemRef.current = null; }
     if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }
+    if (swarmsLairSystemRef.current) { try { swarmsLairSystemRef.current.dispose(); } catch {} swarmsLairSystemRef.current = null; }
     if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} gamepadRef.current = null; }
     if (aerialEnemyRef.current) { try { aerialEnemyRef.current.dispose(); } catch {} aerialEnemyRef.current = null; }
     if (smashAttackRef.current) { try { smashAttackRef.current.dispose(); } catch {} smashAttackRef.current = null; }
@@ -2404,7 +2586,10 @@ export const Game: React.FC = () => {
     }
     // Drop the previous run's force-save closure — it captures disposed
     // systems and would crash if a late handler fired during reinit.
+    // Also drop the legendary-grant closure (same reason: it captures
+    // companionSystem + player from the disposed run).
     forceSaveRef.current = null;
+    tryGrantLegendaryCompanionRef.current = null;
     initializingRef.current = false;
     EventBus.getInstance().clear();
     setStats({
@@ -3140,6 +3325,7 @@ export const Game: React.FC = () => {
       if (sanctuarySystemRef.current) { try { sanctuarySystemRef.current.dispose(); } catch {} sanctuarySystemRef.current = null; }
       if (pontiacLabSystemRef.current) { try { pontiacLabSystemRef.current.dispose(); } catch {} pontiacLabSystemRef.current = null; }
       if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }
+      if (swarmsLairSystemRef.current) { try { swarmsLairSystemRef.current.dispose(); } catch {} swarmsLairSystemRef.current = null; }
       if (aerialEnemyRef.current) aerialEnemyRef.current.dispose();
       if (smashAttackRef.current) { try { smashAttackRef.current.dispose(); } catch {} smashAttackRef.current = null; }
       if (gamepadRef.current) gamepadRef.current.dispose();
@@ -3160,12 +3346,13 @@ export const Game: React.FC = () => {
     const ls = levelSystemRef.current;
     const player = playerRef.current;
     if (!ls || !player) return;
-    if (level < 1 || level > 6) return;
+    if (level < 1 || level > 7) return;
     const sp = LevelSystem.getSpawnPointFor(level as WorldLevel);
     // Spacelike levels need a high spawn Y so the player wakes up amid the
     // 25–105 m asteroid band (the orbital fighter is auto-entered there);
-    // ground levels keep the slight 2 m nudge above terrain so they don't
-    // fall through if they don't have flight armor.
+    // ground levels (including the indoor Swarms Lair) keep the slight 2 m
+    // nudge above terrain so they don't fall through if they don't have
+    // flight armor.
     const spawnY = LevelSystem.isSpacelike(level as WorldLevel) ? 60 : 2;
     // CRITICAL ORDER: teleport BEFORE forceStart. `forceStart` synchronously
     // emits LEVEL_STARTED, which mounts SpaceLevelSystem; that system reads
@@ -3180,6 +3367,14 @@ export const Game: React.FC = () => {
     showMessage(`WARPED TO ${LevelSystem.getDisplayNameFor(level as WorldLevel)}`, 2200);
   }, [showMessage]);
 
+  // Bridge handleFastTravel into a ref so EventBus listeners wired
+  // inside the engine init closure (e.g. LAB_CAVE_ENTERED → warp to L7)
+  // can call the React-scope callback without re-binding on every event.
+  useEffect(() => {
+    handleFastTravelRef.current = handleFastTravel;
+    return () => { handleFastTravelRef.current = null; };
+  }, [handleFastTravel]);
+
   // Travel-tab rows — derived from LevelSystem so adding a level-5 later only
   // requires extending LEVEL_DEFS. Currently every destination is unlocked;
   // add a `locked` flag here later if we want to gate by campaign progress.
@@ -3193,6 +3388,8 @@ export const Game: React.FC = () => {
         ? "Orbital Front — starfield combat. Asteroids, evil ships, drone-orbited motherships."
         : lvl === 6
         ? "Pontiac Secret Lab — Dr. You's covert pre-war research wing. Cryo subjects, holo terminals, lore."
+        : lvl === 7
+        ? "Swarms Lair — underground cave arena. Insectoid swarms guard General Voidcrown."
         : lvl === 1
         ? "Star City Front — first-stage Detroit defense. Rescue the captured ally."
         : lvl === 2

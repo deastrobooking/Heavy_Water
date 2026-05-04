@@ -106,6 +106,24 @@ export const GameEvents = {
    *  level, position }. Used to persist the rescued id and play any
    *  optional companion / VFX hooks. */
   SYNTHETIC_RESCUED: "rescue:syntheticRescued",
+  /** Fired by PontiacLabSystem when the player frees a caged lab animal.
+   *  Payload: { id, name, position }. Persisted via
+   *  `ProgressSnapshot.freedLabAnimalIds` and counts toward the
+   *  legendary-companion grant. */
+  ANIMAL_FREED: "lab:animalFreed",
+  /** Fired by PontiacLabSystem when the player presses E on the cave
+   *  hatch in the lab floor. Game.tsx wires this to fast-travel to
+   *  Level 7 (Swarms Lair). No payload. */
+  LAB_CAVE_ENTERED: "lab:caveEntered",
+  /** Fired by SwarmsLairSystem when the General captain is killed inside
+   *  the Swarms Lair. Distinct from `BOSS_FORTRESS_CLEARED` because the
+   *  General is not a fortress boss — it's spawned inline by the lair
+   *  system. Payload: { position }. */
+  SWARMS_GENERAL_DEFEATED: "lair:generalDefeated",
+  /** Fired by Game.tsx after the legendary mini-General humanoid
+   *  companion has been granted (defeat-General + free-all-synths +
+   *  free-all-animals). Payload: { presetName }. */
+  LEGENDARY_COMPANION_GRANTED: "companion:legendaryGranted",
   /** Fired by LevelSystem when a level is finished. */
   LEVEL_COMPLETED: "level:completed",
   /** Fired by LevelSystem when a new level begins (including the initial

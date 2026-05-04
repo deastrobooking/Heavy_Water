@@ -105,4 +105,54 @@ export const HUMANOID_PRESETS: Record<string, HumanoidDefinition> = {
     armorType: "captain",
     visualScale: HUMANOID_VISUAL_SCALE,
   },
+
+  /** GENERAL VOIDCROWN — the boss at the bottom of the Swarms Lair (Level 7).
+   *  Authored ~15% larger than the standard humanoid captain (height 23 vs
+   *  20) so the silhouette reads as "above captain, below titan". Dark
+   *  void/blood palette to match the void boss-variant tint that
+   *  SwarmsLairSystem applies on spawn. Used by SwarmsLairSystem via the
+   *  EnemySystem captain spawn path with a custom-preset hook. */
+  HumanoidGeneralVoidcrown: {
+    height: 23,
+    headScale: 2.7,
+    shoulderWidth: 8.0,
+    chestWidth: 7.5,
+    armLength: 11.5,
+    legLength: 12.5,
+    bodyType: "heavy",
+    colors: {
+      primary: new BABYLON.Color3(0.10, 0.05, 0.18),    // void-black armor
+      secondary: new BABYLON.Color3(0.55, 0.05, 0.20),  // blood-violet trim
+      skin: new BABYLON.Color3(0.30, 0.25, 0.35),       // ashen synthetic skin
+      hair: new BABYLON.Color3(0.85, 0.20, 0.55),       // void-pink crown
+    },
+    hasArmor: true,
+    armorType: "captain",
+    visualScale: HUMANOID_VISUAL_SCALE,
+  },
+
+  /** MINI-GENERAL — the legendary humanoid companion awarded once the
+   *  player defeats General Voidcrown AND has freed every caged synthetic
+   *  + every lab animal. A scaled-down lore-flavored sibling of the
+   *  General (same dark/violet palette, athletic build instead of heavy,
+   *  shorter so it reads as a freed prototype rather than the boss).
+   *  Used by CompanionSystem.addCompanion via a customDescriptor path. */
+  HumanoidMiniGeneral: {
+    height: 16,
+    headScale: 2.2,
+    shoulderWidth: 5.6,
+    chestWidth: 5.4,
+    armLength: 8.5,
+    legLength: 9.5,
+    bodyType: "athletic",
+    colors: {
+      primary: new BABYLON.Color3(0.18, 0.10, 0.26),    // muted void-armor
+      secondary: new BABYLON.Color3(0.85, 0.20, 0.50),  // brighter trim — "freed prototype"
+      skin: new BABYLON.Color3(0.55, 0.50, 0.62),       // ashen
+      hair: new BABYLON.Color3(0.95, 0.35, 0.70),       // hot pink crown stripe
+    },
+    hasArmor: true,
+    armorType: "humanoid",
+    visualScale: HUMANOID_VISUAL_SCALE,
+  },
 };

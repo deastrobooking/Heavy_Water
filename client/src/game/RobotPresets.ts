@@ -299,6 +299,41 @@ export const ALLY_PRESETS: Record<string, RobotDescriptor> = {
       },
     },
   },
+  // Legendary endgame ally — a humanoid mini-General companion granted
+  // ONLY after the player both defeats General Voidcrown in the Swarms
+  // Lair (Level 7) AND frees every caged synthetic + every caged lab
+  // animal. Dark void/blood palette mirrors the boss; smaller scale +
+  // horned crown silhouette so the player reads it as "the General's
+  // little brother — now on our side". Routed through the same robot
+  // factory as every other companion (no humanoid plumbing needed) but
+  // tuned to a tall biped silhouette via narrow torso + long limbs.
+  MiniGeneralVoidcrown: {
+    name: "MiniGeneralVoidcrown",
+    faction: "ally",
+    style: {
+      archetype: "ally",
+      scale: 1.15,
+      torsoWidth: 1.15, torsoHeight: 1.7, torsoDepth: 0.7,
+      headSize: 0.55, headShape: "sphere",
+      armLength: 1.35, armThickness: 0.26, armStyle: "tapered",
+      legLength: 1.5, legThickness: 0.32, legStyle: "digitigrade",
+      shoulderPadSize: 0.75, hipPadSize: 0.65,
+      hasWings: false, wingSpan: 1.5, wingAngle: 0.3,
+      hasCannons: true, cannonSize: 0.55,
+      hasBackpack: true, backpackSize: 0.65,
+      hasVisor: true, visorStyle: "full",
+      hasHorns: true, hornLength: 0.7,
+      hasTail: false, tailLength: 1.2, tailSegments: 3,
+      hasAntennae: false, antennaLength: 0.4,
+      hasShield: true, shieldSize: 1.2,
+      extraPlating: 2, asymmetry: 0.05,
+      colors: {
+        primary:   new BABYLON.Color3(0.10, 0.04, 0.10),
+        secondary: new BABYLON.Color3(0.55, 0.05, 0.10),
+        emissive:  new BABYLON.Color3(0.95, 0.10, 0.35),
+      },
+    },
+  },
   // Premium endgame unlock — large winged hybrid that rides the player's
   // orbit. Heavy on plating, wings + tail + horns for that "robot dragon"
   // silhouette. Spawned through the SPECIALS upgrade tab.

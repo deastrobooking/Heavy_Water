@@ -87,7 +87,7 @@ export interface ProgressSnapshot {
    *  the player to the same level with matching sky tint, captain variant,
    *  and fortress placement. Older saves wrote only `1 | 2` — those still
    *  load (LevelSystem clamps unknown values to 1). */
-  worldLevel?: 1 | 2 | 3 | 4 | 5 | 6;
+  worldLevel?: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   /** Hidden-temple ids the player has already raided across all levels.
    *  Each id is namespaced by level (e.g. "L1_temple_ne") so re-entering
    *  an earlier level keeps that level's loot history intact. Optional
@@ -103,6 +103,20 @@ export interface ProgressSnapshot {
    *  respawns a rescuee whose story moment has already played. Optional
    *  for backward compat with pre-rescue saves. */
   rescuedSyntheticIds?: string[];
+  /** Ids of caged lab animals the player has already freed inside the
+   *  Pontiac Secret Lab. Counts toward the legendary-companion grant
+   *  alongside `rescuedSyntheticIds` and `swarmsGeneralDefeated`.
+   *  Optional for backward compat. */
+  freedLabAnimalIds?: string[];
+  /** True once the player has slain the General Voidcrown at the bottom
+   *  of the Swarms Lair (Level 7). Persists across runs so re-loading
+   *  doesn't reset the legendary-companion grant condition. */
+  swarmsGeneralDefeated?: boolean;
+  /** True once the player has been awarded the legendary mini-General
+   *  humanoid companion. Guards `tryGrantLegendaryCompanion` from
+   *  re-issuing the same companion if all conditions are still met on
+   *  load. Optional for backward compat. */
+  legendaryCompanionGranted?: boolean;
 }
 
 export async function loadProgress(): Promise<ProgressSnapshot | null> {
