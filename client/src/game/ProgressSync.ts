@@ -117,6 +117,41 @@ export interface ProgressSnapshot {
    *  re-issuing the same companion if all conditions are still met on
    *  load. Optional for backward compat. */
   legendaryCompanionGranted?: boolean;
+  /** Ids of one-time `ArmorCapsuleSystem` upgrades the player has
+   *  already purchased (`flight_armor`, `speed_boost`, `titan_defense`,
+   *  `fire_infusion`, `electric_infusion`, `quantum_armor`). Without
+   *  this the shop re-offered them on every reload and the player
+   *  could be charged repeatedly — most painfully for the 5000-credit
+   *  Quantum Exo-Suit. Optional for backward compat. */
+  appliedCapsuleUpgradeIds?: string[];
+  /** Per-kind base-structure upgrade levels (currently `lab` and
+   *  `garden`). Each is a number in `[1, MAX_BASE_LEVEL]`. The level
+   *  governs companion cap (lab) and garden capture cap + bonus —
+   *  without persisting them, a player who spent gears/scrap/energy
+   *  cores upgrading would silently watch their structures reset to
+   *  level 1 on every reload. Optional for backward compat. */
+  baseStructureLevels?: { lab?: number; garden?: number };
+  /** Full equipped-armor loadout (every slot) + the active elemental
+   *  attunement. Captures BOTH capsule-bought pieces (Aero-Flight
+   *  Chestplate, Kinetic Boots, Titan Chestplate, Quantum Exo-Suit)
+   *  and any rare/loot armor the player picked up in the world.
+   *  Without this the equipped armor map silently emptied on every
+   *  reload, dropping defense / health / stamina bonuses + the
+   *  elemental aura back to zero. Optional for backward compat. */
+  equippedArmor?: {
+    pieces: Array<{
+      id: string;
+      name: string;
+      type: "helmet" | "chest" | "legs" | "boots";
+      element: string | null;
+      defense: number;
+      healthBonus: number;
+      staminaBonus: number;
+      level: number;
+      rarity: number;
+    }>;
+    element: string | null;
+  };
 }
 
 export async function loadProgress(): Promise<ProgressSnapshot | null> {

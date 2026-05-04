@@ -434,6 +434,41 @@ export class ArmorCapsuleSystem {
     return this.hasFlightArmor;
   }
 
+  /**
+   * Snapshot which capsule upgrades have been applied. Persisted via
+   * `ProgressSync` so the shop UI doesn't re-offer (and re-charge for)
+   * upgrades the player already bought — the 5000-credit Quantum
+   * Exo-Suit being the most painful repeat purchase pre-fix.
+   *
+   * We persist *only* the id list — the equipped armor + element
+   * side-effects round-trip through `ArmorSystem.serialize()`, and
+   * `hasFlightArmor` round-trips through `PlayerController`. Keeping
+   * those concerns split avoids double-restore conflicts on load.
+   */
+  serialize(): string[] {
+    return this.upgrades.filter(u => u.applied).map(u => u.id);
+  }
+
+  /**
+   * Restore the `applied` flag on each previously-purchased upgrade.
+   * Pure UI/shop bookkeeping — does NOT replay equipArmor / setElement
+   * (those are restored by ArmorSystem) and does NOT re-fire
+   * `onUpgradeApplied` (that would spam UI messages on every load).
+   * The internal `hasFlightArmor` mirror is also re-flipped so callers
+   * that ask the capsule directly stay consistent with the persisted
+   * player flag.
+   */
+  applyLoadedState(appliedIds: string[] | undefined): void {
+    if (!appliedIds || appliedIds.length === 0) return;
+    const wanted = new Set(appliedIds);
+    for (const u of this.upgrades) {
+      if (wanted.has(u.id)) {
+        u.applied = true;
+        if (u.effects.flightCapability) this.hasFlightArmor = true;
+      }
+    }
+  }
+
   isOpen(): boolean {
     return this.isUIOpen;
   }

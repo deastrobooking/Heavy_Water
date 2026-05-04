@@ -11,16 +11,40 @@ Roughly:
 | Field | Owned by |
 |---|---|
 | `stats` (level, credits, XP, …) | `PlayerController` / various |
-| `weaponLevels` | `CombatSystem`, `MeleeArsenalSystem` |
-| `inventoryCounts` | `InventorySystem` |
+| `playerUpgrades` (per-upgrade levels) | `PlayerController` |
+| `weaponLevels` | `WeaponsSystem` |
+| `beamSabreLevel`, sabre tier flags | `BeamSabreSystem` |
+| `elementalLevels` | `ElementalSpecialsSystem` |
+| `specialsOwned` (sabre tiers, melee arsenal own/combo/special, autoLoot, robo-dragon, autoTarget, supermanFlight, gold sabre) | `BeamSabreSystem`, `MeleeArsenalSystem`, `WeaponsSystem`, `PickupSystem`, `PlayerController` |
+| `appliedCapsuleUpgradeIds` | `ArmorCapsuleSystem` |
+| `equippedArmor` (every slot + active element) | `ArmorSystem` |
+| `baseStructureLevels` (per-kind lab/garden tier) | `BaseSystem` |
+| `inventoryCounts` (items + crafting materials) | `InventorySystem` |
 | `companions[]` + `maxCompanions` | `CompanionSystem` |
-| `capturedCreatures[]` | `BioCreatureSystem` |
-| `base` (structures + prefabs) | `BaseSystem`, `PrefabSystem` |
+| `capturedCreatures[]`, `bioDexCaughtIds[]` | `BioCreatureSystem` |
 | `jewelMounts` | `JewelSystem` |
-| `clearedLevels`, `currentLevel` | `LevelSystem` |
+| `worldLevel`, `lootedTempleIds[]` | `LevelSystem`, `MountainRingSystem` |
 | Per-zone milestones (`swarmsGeneralDefeated`, `freedLabAnimalIds`, `rescuedSyntheticIds`, `legendaryCompanionGranted`, …) | side-zone systems |
 | `hasFlightArmor`, `totalKills`, `highestWave` | various |
 | `savedAt` (timestamp) | `ProgressSync` |
+
+> **Persistence audit (May 2026):** A complete audit confirmed every
+> in-game upgrade now round-trips through this snapshot. Three latent
+> bugs were fixed at the same time:
+>
+> - **`ArmorCapsuleSystem.applied`** wasn't being saved, so the shop
+>   re-offered (and could re-charge for) every previously-bought
+>   capsule upgrade — including the 5000-credit Quantum Exo-Suit. Now
+>   persisted via `appliedCapsuleUpgradeIds`.
+> - **`ArmorSystem.equippedArmor`** Map wasn't being saved, so every
+>   armor piece (capsule and loot) plus the active elemental aura
+>   silently reset to nothing on every reload. Now persisted via
+>   `equippedArmor`.
+> - **`BaseSystem` structure levels** weren't being saved, so the
+>   gears/scrap/energy cores spent upgrading the lab and garden were
+>   silently refunded into a tier-1 downgrade on every reload. Now
+>   persisted via `baseStructureLevels`; `BaseSystem.registerStructure`
+>   pre-bumps newly-mounted structures to the saved tier.
 
 ## Save lifecycle
 
@@ -68,6 +92,11 @@ established pattern is:
 3. `forceSaveRef` is bound in `initializeGame` and **must be nulled in
    the init-failure catch** so a retry doesn't call into a disposed
    system.
+
+`handleCapsuleUpgrade` and `handleUnlockSpecial` follow the same
+pattern — any one-time premium purchase calls `forceSaveRef.current?.()`
+on success so a crash within the 30-second autosave window can never
+cost the player a 5000-credit upgrade.
 
 ## Adding a persisted field
 

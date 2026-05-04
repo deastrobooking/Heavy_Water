@@ -173,6 +173,40 @@ export class ArmorSystem {
       element: effect.element,
     };
   }
+
+  /**
+   * Snapshot every equipped piece + the active element so the full
+   * armor loadout (capsule-bought AND looted) round-trips through
+   * `ProgressSync`. Without this, equipped armor + element silently
+   * reset to nothing on every reload — the player loses defense, the
+   * elemental aura, and any rare loot piece they were wearing.
+   */
+  serialize(): { pieces: ArmorPiece[]; element: ElementType | null } {
+    return {
+      pieces: Array.from(this.equippedArmor.values()).map(p => ({ ...p })),
+      element: this.activeElement,
+    };
+  }
+
+  /**
+   * Restore the equipped Map + active element from a saved snapshot.
+   * Idempotent: clears any current state first so loading on top of a
+   * fresh game doesn't double-equip. Emits one INVENTORY_CHANGED at
+   * the end so the HUD/UI re-render once instead of per-piece.
+   */
+  applyLoadedState(state: { pieces?: ArmorPiece[]; element?: ElementType | null } | undefined): void {
+    if (!state) return;
+    this.equippedArmor.clear();
+    this.activeElement = state.element ?? null;
+    if (state.pieces && state.pieces.length > 0) {
+      for (const p of state.pieces) {
+        // Defensive copy + slot-keyed insert — matches `equipArmor`'s
+        // contract so getters (getTotalDefense, etc.) work the same.
+        this.equippedArmor.set(p.type, { ...p, element: this.activeElement });
+      }
+    }
+    this.bus.emit(GameEvents.INVENTORY_CHANGED);
+  }
 }
 
 export const ARMOR_DEFINITIONS: Record<string, ArmorPiece> = {

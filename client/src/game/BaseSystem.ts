@@ -36,6 +36,15 @@ export class BaseSystem {
   private inventory: InventorySystem;
   private structures: BaseStructure[] = [];
   private idCounter: number = 0;
+  /**
+   * Saved per-kind structure level from the previous session. When
+   * a level system later re-registers a structure of a given kind
+   * (e.g. SanctuarySystem.onMount calls `registerStructure("lab", …)`),
+   * `registerStructure` consults this map and starts the new structure
+   * at the saved level instead of 1 — that way the player's spent
+   * gears/scrap/energy cores aren't silently refunded into a downgrade.
+   */
+  private savedLevels: Partial<Record<BaseStructureKind, number>> = {};
 
   constructor(inventory: InventorySystem) {
     this.inventory = inventory;
@@ -45,10 +54,15 @@ export class BaseSystem {
 
   registerStructure(kind: BaseStructureKind, position: BABYLON.Vector3): BaseStructure {
     const id = `base_${kind}_${this.idCounter++}`;
-    const s: BaseStructure = { id, kind, level: 1, position: position.clone() };
+    // Pre-bump newly-registered structures up to the previously-saved
+    // level for this kind so reload-then-mount restores the upgrade
+    // tier (which drives companion cap, garden capture cap, etc.).
+    const savedLevel = this.savedLevels[kind] ?? 1;
+    const initialLevel = Math.min(MAX_BASE_LEVEL, Math.max(1, savedLevel));
+    const s: BaseStructure = { id, kind, level: initialLevel, position: position.clone() };
     this.structures.push(s);
     this.bus.emit(GameEvents.BASE_STRUCTURE_PLACED, { id, kind, position: s.position });
-    console.log(`[BaseSystem] Placed ${kind} at`, position.x.toFixed(1), position.z.toFixed(1));
+    console.log(`[BaseSystem] Placed ${kind} at`, position.x.toFixed(1), position.z.toFixed(1), "lvl", initialLevel);
     return s;
   }
 
@@ -138,6 +152,41 @@ export class BaseSystem {
     s.level += 1;
     this.bus.emit(GameEvents.BASE_STRUCTURE_UPGRADED, { id: s.id, kind: s.kind, level: s.level });
     return true;
+  }
+
+  /**
+   * Snapshot the per-kind max level so structure upgrades survive a
+   * reload. Without this, a player who spent 60+ gears + 60+ scrap +
+   * 6+ energy cores leveling their lab from 1→2→3 would silently
+   * watch it reset to level 1 (and their companion cap fall from 8
+   * back to 3) every time they logged back in.
+   */
+  serialize(): Record<BaseStructureKind, number> {
+    return {
+      lab: this.getStructureLevel("lab"),
+      garden: this.getStructureLevel("garden"),
+    };
+  }
+
+  /**
+   * Stash saved per-kind levels so subsequent `registerStructure`
+   * calls (driven by SanctuarySystem mounting on LEVEL_STARTED) come
+   * up at the restored tier. Also bumps any structures already
+   * registered at construction time. Levels are clamped to
+   * `[1, MAX_BASE_LEVEL]` to defend against malformed save data.
+   */
+  applyLoadedLevels(levels: Partial<Record<BaseStructureKind, number>> | undefined): void {
+    if (!levels) return;
+    for (const k of Object.keys(levels) as BaseStructureKind[]) {
+      const raw = levels[k];
+      if (typeof raw !== "number" || raw < 1) continue;
+      const clamped = Math.min(MAX_BASE_LEVEL, Math.max(1, raw));
+      this.savedLevels[k] = clamped;
+      // Promote any structures of this kind already registered.
+      for (const s of this.structures) {
+        if (s.kind === k && s.level < clamped) s.level = clamped;
+      }
+    }
   }
 
   dispose(): void {

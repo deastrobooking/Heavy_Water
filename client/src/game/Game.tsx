@@ -1581,6 +1581,20 @@ export const Game: React.FC = () => {
             // counted as alive again for the grant gate).
             swarmsGeneralDefeated: swarmsGeneralDefeatedRef.current,
             legendaryCompanionGranted: legendaryCompanionGrantedRef.current,
+            // Armor-capsule one-time purchases — without this the shop
+            // re-offered (and could re-charge for) every previously-
+            // bought capsule upgrade on each reload.
+            appliedCapsuleUpgradeIds: capsuleSystem.serialize(),
+            // Per-kind base-structure level (lab / garden). These cost
+            // gears + scrap + energy cores to upgrade and drive the
+            // companion cap + garden capture cap/bonus, so losing them
+            // on reload silently downgraded the player's whole base.
+            baseStructureLevels: baseSystem.serialize(),
+            // Full equipped-armor loadout (every slot) + active element.
+            // Round-trips both capsule-bought pieces and looted armor
+            // so defense / health / stamina bonuses + the elemental
+            // aura survive a reload.
+            equippedArmor: armorSystem.serialize() as unknown as ProgressSnapshot["equippedArmor"],
           };
         };
 
@@ -1798,6 +1812,37 @@ export const Game: React.FC = () => {
               // across reloads and (per-level) across deaths.
               if (mountainRingRef.current) {
                 mountainRingRef.current.loadLootedTempleIds(snap.lootedTempleIds);
+              }
+              // Restore the equipped-armor loadout BEFORE flipping the
+              // capsule applied flags. ArmorSystem owns the actual
+              // pieces + active element; ArmorCapsuleSystem just bookkeeps
+              // which one-time upgrades have been bought so the shop
+              // doesn't re-offer them. Doing armor first means a
+              // future change to capsule-replay can never clobber loot.
+              if (snap.equippedArmor) {
+                armorSystem.applyLoadedState({
+                  pieces: snap.equippedArmor.pieces as any,
+                  element: snap.equippedArmor.element as any,
+                });
+              }
+              if (snap.appliedCapsuleUpgradeIds && snap.appliedCapsuleUpgradeIds.length > 0) {
+                capsuleSystem.applyLoadedState(snap.appliedCapsuleUpgradeIds);
+              }
+              // Restore per-kind base-structure levels BEFORE any level
+              // system re-emits LEVEL_STARTED — SanctuarySystem.onMount
+              // is what calls `baseSystem.registerStructure(...)`, and
+              // `registerStructure` reads `savedLevels` to pre-bump the
+              // newly-spawned structure to the saved tier. Wiring this
+              // after worldLevel restore would race past that mount.
+              if (snap.baseStructureLevels) {
+                baseSystem.applyLoadedLevels(snap.baseStructureLevels);
+                // Companion cap is derived from lab level — re-sync it
+                // here so the load doesn't briefly show a stale cap
+                // before the next structure-upgrade event recomputes.
+                const labCap = baseSystem.getLabCompanionCap();
+                if (labCap > companionSystem.getMaxCompanions()) {
+                  companionSystem.setMaxCompanions(labCap);
+                }
               }
 
               showMessage(`PROGRESS LOADED — LVL ${snap.stats.level} | ${snap.stats.credits}cr`, 2500);
@@ -2630,6 +2675,10 @@ export const Game: React.FC = () => {
     const result = capsule.applyUpgrade(upgradeId, player.getStats().credits);
     if (result.success && result.upgrade) {
       player.addCredits(-result.upgrade.cost);
+      // Force an immediate save so a crash or rage-quit between buy
+      // and the next 30s autosave can never lose a 5000-credit
+      // purchase like the Quantum Exo-Suit.
+      forceSaveRef.current?.();
     }
     showMessage(result.message, 2000);
   }, [showMessage]);

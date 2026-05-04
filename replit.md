@@ -58,7 +58,7 @@ The game utilizes Babylon.js v8.x for WebGL/WebGPU rendering, focusing on an ani
 
 **Player Systems:**
 - Character customization includes procedural generation, modular body parts, and a HumanoidCharacter system.
-- ProgressSync.ts handles player progress, stats, inventory, and upgrades with auto-save.
+- ProgressSync.ts handles player progress, stats, inventory, and upgrades with auto-save. Every in-game upgrade round-trips through the JSONB snapshot — including `playerUpgrades`, `weaponLevels`, `beamSabreLevel`, `elementalLevels`, `specialsOwned` (sabre tiers, melee arsenal own/combo/special, autoLoot, robo-dragon, autoTarget, superman flight, gold sabre), `appliedCapsuleUpgradeIds` (armor-capsule one-time purchases), `equippedArmor` (every slot + active elemental aura), `baseStructureLevels` (per-kind lab/garden tier), `companions[]`, `maxCompanions`, `jewelMounts`, `bioDexCaughtIds[]`, and per-zone milestones. Capsule purchases force-save immediately so a crash inside the 30s autosave window can never lose a 5000-credit upgrade.
 - A ShopSystem manages in-game commerce.
 - CompanionSystem manages digital companions.
 - MapSystem provides a real-time minimap.
