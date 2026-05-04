@@ -176,6 +176,12 @@ export const Game: React.FC = () => {
   // single mount-time `initializeGame` (which captures stale state) can poll
   // the live values from their per-frame closures.
   const upgradeMenuOpenRef = useRef(false);
+  // Mirrors `shopOpen` so the gamepad menu-mode provider (which runs
+  // every frame and can't depend on React state) can OR shop modals
+  // alongside upgrade / garden / dialogue. Without this, the
+  // controller's D-Pad / A / B do nothing inside the shop dialog and
+  // the player can't pick items like nano fiber off the shelf.
+  const shopOpenRef = useRef(false);
   const labOpenRef = useRef(false);
   const gardenOpenRef = useRef(false);
   const gamepadRef = useRef<GamepadInput | null>(null);
@@ -1374,12 +1380,19 @@ export const Game: React.FC = () => {
         // Triggers re-route based on context: while driving, RT becomes
         // throttle and LT becomes reverse/brake; on foot they fire and slash.
         gamepad.setContextProvider(() => (vehicleRef.current?.getActive() ? "vehicle" : "foot"));
-        // While the upgrade menu (Tab) is open, the gamepad enters pure
-        // navigation mode — D-Pad cycles tabs/rows, A activates the
-        // selected row, B closes — and ALL gameplay bindings are
+        // Whenever ANY pause-style modal is open, the gamepad enters
+        // pure navigation mode — D-Pad cycles tabs/rows, A activates
+        // the selected row, B closes — and ALL gameplay bindings are
         // suppressed so the player can't shoot or look-around through
-        // the menu.
-        gamepad.setMenuOpenProvider(() => upgradeMenuOpenRef.current);
+        // the menu. We OR every modal that has gamepad-aware UI so
+        // the shop, garden, NPC dialogue, and upgrade bay all share
+        // the same controller treatment.
+        gamepad.setMenuOpenProvider(() =>
+          upgradeMenuOpenRef.current
+            || shopOpenRef.current
+            || gardenOpenRef.current
+            || (friendlyNPCsRef.current?.isDialogueOpen() ?? false),
+        );
         gamepadRef.current = gamepad;
 
         const chestSystem = new ChestSystem(scene);
@@ -3291,6 +3304,7 @@ export const Game: React.FC = () => {
   // Keep modal-open refs in sync with their React state so non-React systems
   // (e.g. FriendlyNPCSystem) can poll the live values without re-binding.
   useEffect(() => { upgradeMenuOpenRef.current = upgradeMenuOpen; }, [upgradeMenuOpen]);
+  useEffect(() => { shopOpenRef.current = shopOpen; }, [shopOpen]);
   useEffect(() => { labOpenRef.current = labOpen; }, [labOpen]);
   useEffect(() => { gardenOpenRef.current = gardenOpen; }, [gardenOpen]);
 

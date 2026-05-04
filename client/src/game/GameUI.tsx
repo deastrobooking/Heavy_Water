@@ -244,6 +244,73 @@ export const GameUI: React.FC<GameUIProps> = ({
 }) => {
   const [joinCode, setJoinCode] = React.useState("");
   const [chatInput, setChatInput] = React.useState("");
+
+  // ----- Shop navigation (keyboard + gamepad) ------------------------
+  // The shop dialog used to be mouse-only, which made it unreachable
+  // for controller players (no on-screen cursor) and meant they
+  // literally couldn't pick up materials like nano fiber off the
+  // shelf. Mirrors the UpgradeMenu pattern: per-tab cursor index,
+  // ring highlight, scrollIntoView on cursor move, and a single
+  // navigation dispatcher that handles both keyboard (Arrows + Enter
+  // + Escape) and gamepad (`gamepad-menu` CustomEvents from
+  // GamepadInput's pure-nav menu mode).
+  const [shopSelectedIdx, setShopSelectedIdx] = React.useState(0);
+  const shopRowRefs = React.useRef<Map<number, HTMLDivElement | null>>(new Map());
+  // Reset cursor whenever the shop opens or the active shop / item
+  // count changes so we never point past the end of a freshly-loaded
+  // shelf. Clamping below also defends against late prop changes.
+  const shopItemCount = activeShop?.items.length ?? 0;
+  React.useEffect(() => {
+    if (shopOpen) setShopSelectedIdx(0);
+  }, [shopOpen, activeShop?.id]);
+  const shopCurIdx = Math.min(shopSelectedIdx, Math.max(0, shopItemCount - 1));
+  React.useEffect(() => {
+    if (!shopOpen || !activeShop) return;
+    const nav = (action: "up" | "down" | "left" | "right" | "activate" | "close") => {
+      if (action === "close") return; // shop close is owned by ShopSystem (E in world); B doesn't force-close here
+      if (action === "up" || action === "down") {
+        setShopSelectedIdx(prev => {
+          const max = Math.max(0, shopItemCount - 1);
+          const cur = Math.min(prev, max);
+          return Math.max(0, Math.min(max, cur + (action === "down" ? 1 : -1)));
+        });
+        return;
+      }
+      if (action === "activate") {
+        const item = activeShop.items[shopCurIdx];
+        if (!item || item.stock <= 0) return;
+        if (stats.credits < item.buyPrice) return;
+        onShopBuy?.(activeShop.id + ":" + shopCurIdx);
+      }
+    };
+    const padHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { action?: string } | null;
+      if (!detail?.action) return;
+      nav(detail.action as Parameters<typeof nav>[0]);
+    };
+    const keyHandler = (e: KeyboardEvent) => {
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA")) return;
+      if (e.repeat) return;
+      if (e.code === "ArrowUp")        { e.preventDefault(); nav("up"); }
+      else if (e.code === "ArrowDown") { e.preventDefault(); nav("down"); }
+      else if (e.code === "Enter")     { e.preventDefault(); nav("activate"); }
+    };
+    window.addEventListener("gamepad-menu", padHandler);
+    window.addEventListener("keydown", keyHandler);
+    return () => {
+      window.removeEventListener("gamepad-menu", padHandler);
+      window.removeEventListener("keydown", keyHandler);
+    };
+  }, [shopOpen, activeShop, shopItemCount, shopCurIdx, stats.credits, onShopBuy]);
+  React.useEffect(() => {
+    if (!shopOpen) return;
+    const el = shopRowRefs.current.get(shopCurIdx);
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [shopOpen, shopCurIdx]);
+
   const anyModalOpen =
     upgradeMenuOpen ||
     labOpen ||
@@ -922,34 +989,44 @@ export const GameUI: React.FC<GameUIProps> = ({
         <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-auto">
           <div className="bg-black/95 border-2 border-emerald-400 rounded-xl p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto">
             <div className="text-emerald-400 text-lg font-bold mb-2 text-center">{activeShop.name}</div>
-            <div className="text-gray-400 text-xs mb-4 text-center">Credits: {stats.credits}</div>
+            <div className="text-gray-400 text-xs mb-1 text-center">Credits: {stats.credits}</div>
+            <div className="text-gray-500 text-[10px] mb-3 text-center">[↑/↓] or D-Pad · [Enter] / [A] to buy · [E] to leave</div>
             <div className="space-y-2">
-              {activeShop.items.map((si: ShopItem, idx: number) => (
-                <div
-                  key={si.item.id + idx}
-                  className={`border rounded-lg p-2 cursor-pointer transition-all hover:bg-gray-800 ${
-                    si.stock <= 0
-                      ? "border-gray-700 opacity-40"
-                      : stats.credits >= si.buyPrice
-                      ? "border-emerald-600 hover:border-emerald-400"
-                      : "border-gray-700 opacity-60"
-                  }`}
-                  onClick={() => si.stock > 0 && onShopBuy?.(activeShop.id + ":" + idx)}
-                >
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <span className="text-white text-xs">{si.item.name}</span>
-                      {si.stock <= 0 && <span className="text-red-400 text-xs ml-2">SOLD OUT</span>}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-gray-500 text-xs">x{si.stock}</span>
-                      <span className={`text-xs ${stats.credits >= si.buyPrice ? "text-yellow-400" : "text-red-400"}`}>
-                        {si.buyPrice} CR
-                      </span>
+              {activeShop.items.map((si: ShopItem, idx: number) => {
+                const selected = idx === shopCurIdx;
+                const canBuy = si.stock > 0 && stats.credits >= si.buyPrice;
+                return (
+                  <div
+                    key={si.item.id + idx}
+                    ref={(el) => {
+                      if (el) shopRowRefs.current.set(idx, el);
+                      else shopRowRefs.current.delete(idx);
+                    }}
+                    className={`border rounded-lg p-2 cursor-pointer transition-all hover:bg-gray-800 ${
+                      si.stock <= 0
+                        ? "border-gray-700 opacity-40"
+                        : stats.credits >= si.buyPrice
+                        ? "border-emerald-600 hover:border-emerald-400"
+                        : "border-gray-700 opacity-60"
+                    } ${selected ? "ring-2 ring-amber-400 ring-offset-1 ring-offset-zinc-900" : ""}`}
+                    onClick={() => canBuy && onShopBuy?.(activeShop.id + ":" + idx)}
+                    onMouseEnter={() => setShopSelectedIdx(idx)}
+                  >
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <span className="text-white text-xs">{si.item.name}</span>
+                        {si.stock <= 0 && <span className="text-red-400 text-xs ml-2">SOLD OUT</span>}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-gray-500 text-xs">x{si.stock}</span>
+                        <span className={`text-xs ${stats.credits >= si.buyPrice ? "text-yellow-400" : "text-red-400"}`}>
+                          {si.buyPrice} CR
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <div className="text-gray-500 text-xs mt-4 text-center">Press E or ESC to close</div>
           </div>

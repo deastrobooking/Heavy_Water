@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { CapturedCreature } from "./BioCreatureSystem";
 import {
   BIO_SPECIES, ALL_TYPES, TYPE_HEX, getSpeciesById,
@@ -45,6 +45,13 @@ export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
   upgradeCost, canUpgradeGarden, onDeploy, onUpgradeGarden, onClose,
 }) => {
   const [tab, setTab] = useState<Tab>("roster");
+  // Per-roster-row cursor for keyboard + gamepad. Only the ROSTER tab
+  // has actionable rows (DEPLOY); the DEX tab is informational so we
+  // don't bother building a focus list there. The cursor resets
+  // whenever the player switches into the roster tab so the highlight
+  // never strands them past the end of a shorter list.
+  const [rosterIdx, setRosterIdx] = useState(0);
+  const rosterRowRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
 
   // Persistent "ever caught" species ids — also fold the live roster in
   // so any captures from this session are reflected even before the next
@@ -61,6 +68,90 @@ export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
     for (const c of captured) if (getSpeciesById(c.speciesId)) set.add(c.speciesId);
     return set;
   }, [dexCaughtIds, captured]);
+
+  // Stable left-to-right tab order so D-Pad Left / Right can step
+  // through them. The dynamic part is the elemental list, which can
+  // grow if BIO_SPECIES adds new types — `ALL_TYPES` is the single
+  // source of truth so this stays in lockstep with the tab strip.
+  const tabOrder = useMemo<Tab[]>(() => ["roster", "all", ...ALL_TYPES] as Tab[], []);
+
+  // Clamp once the roster shrinks (DEPLOY removes a creature) so the
+  // ring never highlights an empty row.
+  const rosterCount = captured.length;
+  const rosterCurIdx = Math.min(rosterIdx, Math.max(0, rosterCount - 1));
+
+  // Single nav dispatcher shared by gamepad CustomEvents + keyboard
+  // arrows so both controllers and keyboards drive the menu identically.
+  useEffect(() => {
+    if (!open) return;
+    const nav = (action: "up" | "down" | "left" | "right" | "activate" | "close") => {
+      if (action === "close") { onClose(); return; }
+      if (action === "left" || action === "right") {
+        const idx = tabOrder.indexOf(tab);
+        const safe = idx < 0 ? 0 : idx;
+        const next = (safe + (action === "right" ? 1 : -1) + tabOrder.length) % tabOrder.length;
+        setTab(tabOrder[next]);
+        setRosterIdx(0);
+        return;
+      }
+      if (action === "up" || action === "down") {
+        // Only the roster tab has selectable rows; on dex tabs we fall
+        // through to a no-op so accidental D-Pad presses don't move
+        // an invisible cursor.
+        if (tab !== "roster") return;
+        setRosterIdx(prev => {
+          const max = Math.max(0, rosterCount - 1);
+          const cur = Math.min(prev, max);
+          return Math.max(0, Math.min(max, cur + (action === "down" ? 1 : -1)));
+        });
+        return;
+      }
+      if (action === "activate") {
+        if (tab === "roster") {
+          const c = captured[rosterCurIdx];
+          if (c) onDeploy(c.id);
+          return;
+        }
+        // From any other tab, A activates the upgrade-garden button
+        // when affordable so a controller user can level the garden
+        // without having to navigate back to the roster row.
+        if (canUpgradeGarden && upgradeCost) onUpgradeGarden();
+      }
+    };
+    const padHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { action?: string } | null;
+      if (!detail?.action) return;
+      nav(detail.action as Parameters<typeof nav>[0]);
+    };
+    const keyHandler = (e: KeyboardEvent) => {
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA")) return;
+      if (e.repeat) return;
+      if (e.code === "ArrowUp")         { e.preventDefault(); nav("up"); }
+      else if (e.code === "ArrowDown")  { e.preventDefault(); nav("down"); }
+      else if (e.code === "ArrowLeft")  { e.preventDefault(); nav("left"); }
+      else if (e.code === "ArrowRight") { e.preventDefault(); nav("right"); }
+      else if (e.code === "Enter")      { e.preventDefault(); nav("activate"); }
+      else if (e.code === "Escape")     { e.preventDefault(); nav("close"); }
+    };
+    window.addEventListener("gamepad-menu", padHandler);
+    window.addEventListener("keydown", keyHandler);
+    return () => {
+      window.removeEventListener("gamepad-menu", padHandler);
+      window.removeEventListener("keydown", keyHandler);
+    };
+  }, [open, tab, tabOrder, rosterCount, rosterCurIdx, captured, canUpgradeGarden, upgradeCost, onDeploy, onUpgradeGarden, onClose]);
+
+  // Auto-scroll the focused roster row into view so controller-only
+  // navigation never strands the player past the bottom of the list.
+  const rosterCurId = captured[rosterCurIdx]?.id ?? null;
+  useEffect(() => {
+    if (!open || tab !== "roster" || !rosterCurId) return;
+    const el = rosterRowRefs.current.get(rosterCurId);
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [open, tab, rosterCurId]);
 
   if (!open) return null;
 
@@ -108,12 +199,25 @@ export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
 
         <div className="px-5 py-2 text-zinc-400 text-xs border-b border-zinc-800">
           Press <span className="text-lime-300 font-bold">[H]</span> in the world near a wild bio-creature to throw a capture orb. Captured creatures join your roster and your dex.
+          <span className="ml-2 text-zinc-500">[←/→] or D-Pad swap tabs · [↑/↓] cursor · [Enter] / [A] to deploy or upgrade · [E] / [B] / Esc to close.</span>
         </div>
 
         {/* body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
           {tab === "roster" ? (
-            <RosterView captured={captured} onDeploy={onDeploy} />
+            <RosterView
+              captured={captured}
+              onDeploy={onDeploy}
+              selectedId={rosterCurId}
+              setRowRef={(id, el) => {
+                if (el) rosterRowRefs.current.set(id, el);
+                else rosterRowRefs.current.delete(id);
+              }}
+              onHover={(id) => {
+                const idx = captured.findIndex(c => c.id === id);
+                if (idx >= 0) setRosterIdx(idx);
+              }}
+            />
           ) : (
             <DexView dexCaughtIds={dexCaught} filterType={tab === "all" ? null : tab} />
           )}
@@ -159,7 +263,10 @@ const TypeTab: React.FC<{ active: boolean; color: string; label: string; onClick
 const RosterView: React.FC<{
   captured: CapturedCreature[];
   onDeploy: (id: string) => void;
-}> = ({ captured, onDeploy }) => {
+  selectedId: string | null;
+  setRowRef: (id: string, el: HTMLDivElement | null) => void;
+  onHover: (id: string) => void;
+}> = ({ captured, onDeploy, selectedId, setRowRef, onHover }) => {
   if (captured.length === 0) {
     return <div className="text-center text-zinc-500 py-8 text-sm">Garden roster empty. Find wild bio-creatures and capture them.</div>;
   }
@@ -171,8 +278,14 @@ const RosterView: React.FC<{
         const color = TYPE_HEX[tp];
         const role = sp?.role ?? "Bio-companion";
         const rarity = sp?.rarity ?? "common";
+        const focused = c.id === selectedId;
         return (
-          <div key={c.id} className="bg-zinc-800/80 border border-lime-800 rounded-lg p-3 hover:border-lime-500 transition">
+          <div
+            key={c.id}
+            ref={(el) => setRowRef(c.id, el)}
+            onMouseEnter={() => onHover(c.id)}
+            className={`bg-zinc-800/80 border border-lime-800 rounded-lg p-3 hover:border-lime-500 transition ${focused ? "ring-2 ring-amber-400 ring-offset-1 ring-offset-zinc-900" : ""}`}
+          >
             <div className="flex items-start justify-between">
               <div className="flex-1">
                 <div className="flex items-center gap-3 flex-wrap">

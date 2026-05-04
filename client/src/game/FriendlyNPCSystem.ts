@@ -99,6 +99,12 @@ export class FriendlyNPCSystem {
 
   private observer: BABYLON.Observer<BABYLON.Scene> | null = null;
   private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
+  /** Mirror of `keydownHandler` for the gamepad — listens for the
+   *  same `gamepad-menu` CustomEvents the upgrade menu does so the
+   *  controller's A advances dialogue and B closes it. Keeps E and
+   *  the controller in lock-step instead of forcing players to
+   *  switch input devices mid-conversation. */
+  private gamepadHandler: ((e: Event) => void) | null = null;
 
   /** Currently focused NPC (closest within range) — drives prompt / bubble. */
   private focused: NPCInstance | null = null;
@@ -212,18 +218,17 @@ export class FriendlyNPCSystem {
 
     this.observer = this.scene.onBeforeRenderObservable.add(() => this.tick());
 
-    this.keydownHandler = (e: KeyboardEvent) => {
-      if (e.code !== "KeyE") return;
-      // Defer to other modal owners (shop dialog, etc.) so E doesn't double-fire.
+    // Shared body for both the keyboard-E and the gamepad-A entry
+    // points so the two stay perfectly in sync — opens the bubble if
+    // closed, advances if open, closes after the last line.
+    const advance = () => {
       if (this.shopOpenProvider() || this.inputBlockedProvider()) return;
       if (!this.focused) return;
       if (!this.bubbleOpen) {
-        // Open and show first line.
         this.bubbleOpen = true;
         this.focused.dialogueIndex = 0;
         this.renderBubble();
       } else {
-        // Advance; close after the last line.
         this.focused.dialogueIndex += 1;
         if (this.focused.dialogueIndex >= this.focused.def.dialogue.lines.length) {
           this.closeBubble();
@@ -232,7 +237,32 @@ export class FriendlyNPCSystem {
         }
       }
     };
+
+    this.keydownHandler = (e: KeyboardEvent) => {
+      if (e.code !== "KeyE") return;
+      advance();
+    };
     window.addEventListener("keydown", this.keydownHandler);
+
+    // Controller pathway. GamepadInput dispatches `gamepad-menu` with
+    // `action: "activate" | "close" | "up" | "down" | "left" | "right"`
+    // ONLY when the global menu-mode provider returns true — Game.tsx
+    // ORs `isDialogueOpen()` into that provider so this listener only
+    // ever fires while a bubble owns the screen.
+    this.gamepadHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { action?: string } | null;
+      if (!detail?.action) return;
+      if (detail.action === "activate") advance();
+      else if (detail.action === "close" && this.bubbleOpen) this.closeBubble();
+    };
+    window.addEventListener("gamepad-menu", this.gamepadHandler);
+  }
+
+  /** Public accessor so Game.tsx can treat an open dialogue bubble
+   *  as a modal for menu-mode purposes (controller nav + suppressed
+   *  gameplay bindings). */
+  isDialogueOpen(): boolean {
+    return this.bubbleOpen;
   }
 
   setPlayerPositionProvider(fn: () => BABYLON.Vector3): void {
@@ -500,6 +530,10 @@ export class FriendlyNPCSystem {
     if (this.keydownHandler) {
       window.removeEventListener("keydown", this.keydownHandler);
       this.keydownHandler = null;
+    }
+    if (this.gamepadHandler) {
+      window.removeEventListener("gamepad-menu", this.gamepadHandler);
+      this.gamepadHandler = null;
     }
     for (const npc of this.npcs) {
       try { npc.humanoid.dispose(); } catch {}

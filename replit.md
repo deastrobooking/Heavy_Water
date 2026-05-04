@@ -71,7 +71,7 @@ The game utilizes Babylon.js v8.x for WebGL/WebGPU rendering, focusing on an ani
 **UI/UX:**
 - Redesigned HUD, AuthUI, GameUI, shop interfaces, upgrade interfaces, multiplayer lobby, contextual build hotbar, MainMenu with character customization, and an EnemyHealthBarSystem for HTML overlays.
 - Cloud-save summary card displayed in the main menu for authenticated players.
-- GamepadInput provides seamless controller integration.
+- GamepadInput provides seamless controller integration. Pure-nav menu mode (D-Pad cycles rows/tabs, A activates, B closes) activates whenever ANY pause-style modal is open: the upgrade bay, the shop dialog, the bio garden, AND any open NPC dialogue bubble. Game.tsx feeds all four states (`upgradeMenuOpenRef || shopOpenRef || gardenOpenRef || friendlyNPCs.isDialogueOpen()`) into `gamepad.setMenuOpenProvider`. Each modal owns a matching dual-listener (`keydown` + `gamepad-menu` CustomEvent) so keyboard arrows/Enter and controller D-Pad/A behave identically — Shop and Garden render an amber `ring-2` highlight + auto-`scrollIntoView` on the focused row, and FriendlyNPCSystem shares one `advance()` body between its E-keypress and gamepad-A handlers.
 - EffectsSystem drives visual effects.
 
 ## Developer Documentation
