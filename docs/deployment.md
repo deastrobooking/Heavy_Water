@@ -1,111 +1,119 @@
 # Deployment
 
-Heavy Water deploys to **Replit Autoscale** (per `.replit`), but the
-build is portable to any Node-friendly host (Render, Railway, Fly,
-plain VPS). The build pipeline is the same everywhere.
+This guide covers practical ways to ship Heavy Water more safely and run it better on Replit and beyond.
 
-## Build pipeline
+## Goals
 
-`npm run build` runs [`script/build.ts`](../script/build.ts), which:
+- Faster initial load
+- Fewer runtime crashes
+- Better observability after release
+- Safer rollout of game changes
 
-1. **Builds the client** with Vite into `dist/public/`.
-   Static assets from `client/public/` are copied into `dist/public/`.
-2. **Bundles the server** into a single `dist/index.cjs` with esbuild.
-   Imports are resolved, TypeScript is stripped, and the result is a
-   self-contained CJS file Node can run with `node dist/index.cjs`.
+## Recommended deployment stack
 
-`npm start` runs:
+### 1. Asset delivery
 
-```bash
-NODE_ENV=production node dist/index.cjs
-```
+Use compressed static assets and cache them aggressively.
 
-In production mode `server/index.ts` skips Vite middleware entirely and
-falls through to [`server/static.ts`](../server/static.ts), which
-serves `dist/public/` and falls back to `index.html` for client-side
-routing.
+- Prefer optimized textures, models, and audio
+- Keep large art in `client/public/` only when it must be served directly
+- Compress images before checking them in
+- Avoid shipping unused assets
 
-## Required environment variables
+### 2. Error monitoring
 
-| Variable | Required | Purpose |
-|---|---|---|
-| `DATABASE_URL` | ✅ | Postgres connection string |
-| `SESSION_SECRET` | ✅ | `express-session` signing |
-| `PORT` | recommended | HTTP port (default 5000) |
-| `NODE_ENV` | recommended | must be `production` for the prod build |
+Add **Sentry** for frontend and backend error tracking.
 
-## Database setup
+Use it for:
+- JS runtime errors
+- unhandled promise rejections
+- API failures
+- performance traces on slow scenes or startup
 
-```bash
-npm run db:push       # apply current schema
-```
+Why it helps:
+- Faster crash diagnosis
+- Stack traces from real players
+- Better visibility into device-specific issues
 
-If pushing into an existing populated DB and Drizzle reports a
-destructive change you accept:
+### 3. Product analytics
 
-```bash
-npm run db:push -- --force
-```
+Add **PostHog** for lightweight game analytics.
 
-## Replit Autoscale (the bundled config)
+Track:
+- tutorial completion
+- shop usage
+- upgrade conversions
+- session length
+- drop-off points
 
-`.replit` declares:
+Why it helps:
+- See where players quit
+- Measure balance changes
+- Validate new content
 
-```toml
-[deployment]
-deploymentTarget = "autoscale"
-run = ["node", "./dist/index.cjs"]
-build = ["npm", "run", "build"]
+### 4. Feature flags
 
-[[ports]]
-localPort = 5000
-externalPort = 80
-```
+Use **LaunchDarkly** or a simple database-backed flag system for risky features.
 
-To deploy from the Replit UI: build runs the project, then the run
-command serves it. The Replit dev proxy handles TLS, so the app
-listens on plain HTTP on `PORT`.
+Good flag candidates:
+- new enemy types
+- balance changes
+- UI experiments
+- new progression rewards
 
-## Health checks
+Why it helps:
+- Roll out safely
+- Disable a broken feature without redeploying
 
-There is no explicit `/healthz` route. Autoscale uses a TCP probe on
-`PORT`. If you deploy elsewhere, add a `GET /healthz` returning 200 in
-[`server/auth.ts`](../server/auth.ts) — trivial to add.
+### 5. CDN / edge caching
 
-## WebSocket considerations
+If you move off Replit for production hosting, put static content behind a CDN such as Cloudflare.
 
-The multiplayer endpoint at `/ws` requires the host to support
-WebSocket upgrades end-to-end. This is true on Replit Autoscale, all
-major PaaS, and any nginx in front of Node configured with the standard
-upgrade proxy headers.
+Use it for:
+- textures
+- sound files
+- large bundles
+- cache-control headers
 
-## Scaling notes
+### 6. Performance monitoring
 
-- The HTTP API is **stateless** (sessions are in Postgres via
-  `connect-pg-simple`), so horizontal scaling works.
-- The multiplayer roster is **in-memory per process**. If you scale
-  past one process, rooms won't be visible across instances. Either
-  pin the WS endpoint to a single process or move the roster into Redis.
-- The DB load is light — most writes are infrequent autosaves. A small
-  managed Postgres is plenty.
+Watch for:
+- slow scene initialization
+- expensive post-processing
+- too many active meshes
+- excessive HMR/dev-only code in production builds
 
-## Static assets
+Useful signals:
+- frame time spikes
+- memory growth
+- long task warnings
 
-Everything in `client/public/` ships as-is. Common gotcha: a
-hard-coded path in code that points to a missing file (e.g. a texture
-that wasn't checked into `client/public/textures`). Use the existing
-files (`asphalt`, `grass`, `sand`, `sky`, `wood`) when you can.
+## Replit-specific tips
 
-## Verifying a production build locally
+- Keep production builds lean
+- Remove debug logging before release
+- Avoid loading unnecessary systems on startup
+- Use persistent environment variables for secrets
+- Verify `npm run check` before deployment
 
-```bash
-NODE_ENV=production npm run build
-NODE_ENV=production PORT=5000 node dist/index.cjs
-```
+## Suggested third-party integrations
 
-Open http://localhost:5000 and confirm:
+Best overall set for this game:
 
-- Login works.
-- A round trip to `/api/progress/save` succeeds.
-- Multiplayer connects (open a second window, create + join a room).
-- HMR is **off** (you're hitting bundled JS, not Vite).
+- **Sentry** — crashes and performance
+- **PostHog** — analytics and funnels
+- **Cloudflare** — CDN, caching, basic protection
+- **LaunchDarkly** — feature flags, if you want controlled rollout
+
+## Final release checklist
+
+- `npm run check` passes
+- no console errors in the browser
+- no server errors in logs
+- assets load correctly in production mode
+- controller navigation works in all menus
+- save/load still round-trips cleanly
+
+## Notes
+
+Keep this document updated as deployment practices change.
