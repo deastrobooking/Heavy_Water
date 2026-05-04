@@ -2,6 +2,21 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import type { WeaponUpgradeInfo } from "./WeaponsSystem";
 import type { CompanionUpgradeInfo } from "./CompanionSystem";
 import type { PlayerUpgradeInfo } from "./PlayerController";
+import { JEWEL_DEFS, JEWEL_TIERS, type JewelTier } from "./JewelSystem";
+
+/** Per-weapon Power-Jewel state surfaced into the WEAPONS tab. The menu
+ *  shows the currently-mounted jewel (if any) plus mount buttons for every
+ *  tier the player still has stockpiled in their inventory. */
+export interface WeaponJewelInfo {
+  /** WeaponType ("pistol" | "rifle" | …). Plain string so this module
+   *  doesn't need to import the WeaponsSystem type circularly. */
+  weaponType: string;
+  mounted: JewelTier | null;
+  /** How many of each jewel tier the player owns in their inventory.
+   *  Buttons are disabled when the count is zero (or the same tier is
+   *  already mounted). */
+  available: Record<JewelTier, number>;
+}
 
 export interface CompanionWeaponInfo {
   id: string;
@@ -56,6 +71,12 @@ interface UpgradeMenuProps {
   onUpgradeCompanionWeapon?: (id: string) => void;
   onFastTravel?: (level: number) => void;
   onClose: () => void;
+  /** Per-weapon Power-Jewel state. When omitted the jewel slot UI is
+   *  hidden — keeps backward compat with any caller that hasn't wired
+   *  JewelSystem yet. */
+  weaponJewelInfo?: Record<string, WeaponJewelInfo>;
+  onMountJewel?: (type: string, tier: JewelTier) => void;
+  onUnmountJewel?: (type: string) => void;
 }
 
 const formatStat = (n: number, digits = 1) => n.toFixed(digits);
@@ -93,6 +114,9 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
   onUpgradeCompanionWeapon,
   onFastTravel,
   onClose,
+  weaponJewelInfo,
+  onMountJewel,
+  onUnmountJewel,
 }) => {
   const [tab, setTab] = useState<"player" | "weapons" | "robots" | "specials" | "travel">("player");
   // Per-tab selected-row index for gamepad / keyboard navigation. Each
@@ -323,6 +347,7 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
             const cost = w.cost;
             const canAfford = w.affordable;
             const maxed = w.level >= w.maxLevel;
+            const jewel = weaponJewelInfo?.[w.type];
             return (
               <div ref={setRowRef(`w-${w.type}`)} key={w.type} className={`bg-zinc-800/80 border border-zinc-700 rounded-lg p-3 hover:border-cyan-600 transition${ringClass(`w-${w.type}`)}`}>
                 <div className="flex items-start justify-between">
@@ -357,6 +382,60 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
                     ) : null}
                   </div>
                 </div>
+                {jewel && (
+                  <div className="mt-2 pt-2 border-t border-zinc-700/60">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="text-[10px] text-fuchsia-300 font-bold tracking-wider">JEWEL SLOT:</div>
+                      {jewel.mounted ? (
+                        <>
+                          <div
+                            className="px-2 py-0.5 rounded text-[11px] font-bold border"
+                            style={{
+                              borderColor: JEWEL_DEFS[jewel.mounted].color,
+                              color: JEWEL_DEFS[jewel.mounted].color,
+                              background: "rgba(0,0,0,0.4)",
+                              boxShadow: `0 0 8px ${JEWEL_DEFS[jewel.mounted].color}66`,
+                            }}
+                          >
+                            ◆ {JEWEL_DEFS[jewel.mounted].shortName} +{Math.round(JEWEL_DEFS[jewel.mounted].bonusMul * 100)}% DMG
+                          </div>
+                          <button
+                            onClick={() => onUnmountJewel?.(w.type)}
+                            className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-700 hover:bg-zinc-600 text-zinc-200"
+                          >
+                            UNMOUNT
+                          </button>
+                        </>
+                      ) : (
+                        <div className="text-[11px] text-zinc-500 italic">empty</div>
+                      )}
+                      <div className="ml-auto flex items-center gap-1">
+                        {JEWEL_TIERS.map(tier => {
+                          const def = JEWEL_DEFS[tier];
+                          const count = jewel.available[tier] ?? 0;
+                          const isMounted = jewel.mounted === tier;
+                          const disabled = count <= 0 || isMounted;
+                          return (
+                            <button
+                              key={tier}
+                              disabled={disabled}
+                              onClick={() => onMountJewel?.(w.type, tier)}
+                              title={`${def.name} — +${Math.round(def.bonusMul * 100)}% damage`}
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition ${disabled ? "bg-zinc-900 text-zinc-600 border-zinc-800 cursor-not-allowed" : "hover:brightness-125"}`}
+                              style={!disabled ? {
+                                borderColor: def.color,
+                                color: def.color,
+                                background: "rgba(0,0,0,0.5)",
+                              } : undefined}
+                            >
+                              {def.shortName} ({count})
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}

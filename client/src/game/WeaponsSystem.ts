@@ -112,6 +112,11 @@ export class WeaponsSystem {
   // vehicle bonuses inside fire() / createProjectile().
   private playerDamageMul: number = 1;
   private playerFireRateMul: number = 1;
+  /** Per-weapon damage multiplier from any mounted Power Jewel. Updated by
+   *  JewelSystem via setWeaponJewelMul() whenever the player mounts /
+   *  unmounts a jewel. Stacks multiplicatively with vehicleMode and
+   *  playerDamageMul inside createProjectile(). 1.0 means no jewel. */
+  private weaponJewelMul: Map<WeaponType, number> = new Map();
   private projectiles: Projectile[] = [];
   private lastFireTime: number = 0;
   private isFiring: boolean = false;
@@ -384,6 +389,14 @@ export class WeaponsSystem {
     if (boosts.fireRateMul > 0) this.playerFireRateMul = boosts.fireRateMul;
   }
 
+  /** Set the Power-Jewel damage multiplier for a specific weapon. Owned by
+   *  JewelSystem — called whenever the player mounts / unmounts a jewel and
+   *  on initial save load. mul should be >= 1; values <= 0 are ignored to
+   *  guard against bad inputs. */
+  setWeaponJewelMul(type: WeaponType, mul: number): void {
+    if (mul > 0) this.weaponJewelMul.set(type, mul);
+  }
+
   /** Tool-weapon hooks. When the active weapon's type has a registered
    *  handler, fire() calls the handler instead of spawning a projectile —
    *  this is how the Capture Net routes its primary fire to the
@@ -451,7 +464,11 @@ export class WeaponsSystem {
     // Player Power-Core armor mod multiplies damage on top of the vehicle
     // bonus so a fully-modded player in a vehicle hits hardest.
     const sizeMul = this.vehicleMode ? 1.5 : 1;
-    const dmgMul = (this.vehicleMode ? 1.5 : 1) * this.playerDamageMul;
+    // Power-Jewel mount stacks multiplicatively on top of vehicle + Power
+    // Core boosts so a fully-modded player firing from an orbital fighter
+    // with a flawless jewel mounted hits hardest.
+    const jewelMul = this.weaponJewelMul.get(weapon.type) ?? 1;
+    const dmgMul = (this.vehicleMode ? 1.5 : 1) * this.playerDamageMul * jewelMul;
     const speedMul = this.vehicleMode ? 2.5 : 1;
     const lifetimeMul = this.vehicleMode ? 2.0 : 1;
 

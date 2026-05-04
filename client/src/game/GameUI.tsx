@@ -7,7 +7,8 @@ import { BlockType, BlockDefinition } from "./BuildingSystem";
 import { PrefabSummary } from "./PrefabSystem";
 import { CompanionUpgradeInfo } from "./CompanionSystem";
 import { CapturedCreature } from "./BioCreatureSystem";
-import { UpgradeMenu, type SpecialUpgradeInfo, type CompanionWeaponInfo, type TravelDestinationInfo } from "./UpgradeMenu";
+import { UpgradeMenu, type SpecialUpgradeInfo, type CompanionWeaponInfo, type TravelDestinationInfo, type WeaponJewelInfo } from "./UpgradeMenu";
+import type { JewelTier } from "./JewelSystem";
 import type { PlayerUpgradeInfo } from "./PlayerController";
 import { LabUI, LabBlueprint } from "./LabUI";
 import { GardenCaptureUI } from "./GardenCaptureUI";
@@ -81,6 +82,10 @@ interface GameUIProps {
   onUpgradeWeapon?: (type: string) => void;
   onUpgradeCompanion?: (id: string) => void;
   onUpgradePlayer?: (id: string) => void;
+  /** Per-weapon Power-Jewel state surfaced into UpgradeMenu's WEAPONS tab. */
+  weaponJewelInfo?: Record<string, WeaponJewelInfo>;
+  onMountJewel?: (type: string, tier: JewelTier) => void;
+  onUnmountJewel?: (type: string) => void;
   labOpen?: boolean;
   labLevel?: number;
   labBlueprints?: LabBlueprint[];
@@ -188,6 +193,9 @@ export const GameUI: React.FC<GameUIProps> = ({
   onUpgradeCompanionWeapon,
   onFastTravel,
   onUpgradeMenuClose,
+  weaponJewelInfo,
+  onMountJewel,
+  onUnmountJewel,
   onUpgradeWeapon,
   onUpgradeCompanion,
   onUpgradePlayer,
@@ -827,6 +835,9 @@ export const GameUI: React.FC<GameUIProps> = ({
         onUpgradeCompanionWeapon={(id) => onUpgradeCompanionWeapon?.(id)}
         onFastTravel={(lvl) => onFastTravel?.(lvl)}
         onClose={() => onUpgradeMenuClose?.()}
+        weaponJewelInfo={weaponJewelInfo}
+        onMountJewel={onMountJewel}
+        onUnmountJewel={onUnmountJewel}
       />
 
       <LabUI

@@ -22,6 +22,7 @@ import { MegaBeamCannonSystem } from "./MegaBeamCannonSystem";
 import { ArmorSystem } from "./ArmorSystem";
 import { CraftingSystem } from "./CraftingSystem";
 import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
+import { JewelSystem, JEWEL_DEFS, JEWEL_TIERS, JEWEL_MOUNTABLE_WEAPONS, type JewelTier } from "./JewelSystem";
 import { CRAFTING_MATERIALS } from "./CraftingSystem";
 import { CompanionSystem } from "./CompanionSystem";
 import { ArmorCapsuleSystem, ArmorUpgrade } from "./ArmorCapsuleSystem";
@@ -181,6 +182,7 @@ export const Game: React.FC = () => {
   const armorSystemRef = useRef<ArmorSystem | null>(null);
   const craftingSystemRef = useRef<CraftingSystem | null>(null);
   const inventoryRef = useRef<InventorySystem | null>(null);
+  const jewelRef = useRef<JewelSystem | null>(null);
   const companionRef = useRef<CompanionSystem | null>(null);
   const capsuleRef = useRef<ArmorCapsuleSystem | null>(null);
   const shopRef = useRef<ShopSystem | null>(null);
@@ -612,6 +614,17 @@ export const Game: React.FC = () => {
 
         const inventory = new InventorySystem();
         inventoryRef.current = inventory;
+
+        // Power-Jewel mounts. Constructed here (before WeaponsSystem reads
+        // jewel multipliers in createProjectile) and wired to push every
+        // mount/unmount into WeaponsSystem.weaponJewelMul. notifyAll() seeds
+        // the multiplier map for any mount restored from a save before the
+        // first shot is fired.
+        const jewelSystem = new JewelSystem(inventory);
+        jewelRef.current = jewelSystem;
+        jewelSystem.setOnMountChanged((type, mul) => {
+          weaponsRef.current?.setWeaponJewelMul(type, mul);
+        });
 
         const armorSystem = new ArmorSystem();
         armorSystemRef.current = armorSystem;
@@ -1405,6 +1418,9 @@ export const Game: React.FC = () => {
             // already cleared the first boss fortress.
             worldLevel: levelSystemRef.current?.getSnapshot().worldLevel ?? 1,
             lootedTempleIds: mountainRingRef.current?.getLootedTempleIds() ?? [],
+            // Per-weapon Power-Jewel mounts (omitted entirely when nothing
+            // is mounted to keep older clients unconfused).
+            jewelMounts: jewelSystem.serialize(),
           };
         };
 
@@ -1529,6 +1545,12 @@ export const Game: React.FC = () => {
               // player upgrade levels, so the player's saved damage / fire-rate
               // mods take effect immediately after a reload.
               weapons.setPlayerBoosts(player.getPlayerBoosts());
+              // Restore Power-Jewel mounts AFTER inventoryCounts has been
+              // applied. Mounted jewels are NOT in inventoryCounts (they were
+              // consumed when mounted), so this pass simply rebuilds the
+              // mount map and pushes the per-weapon multiplier into
+              // WeaponsSystem via the onMountChanged callback we wired above.
+              jewelSystem.applyLoadedState(snap.jewelMounts);
               // Restore world-level progression. For L2, applyLoadedState
               // re-emits LEVEL_STARTED, which our listener uses to swap
               // banner/objective, tint the sky, seed the second fortress,
@@ -2468,6 +2490,37 @@ export const Game: React.FC = () => {
     syncResourcesNow();
   }, [showMessage, syncResourcesNow]);
 
+  // Mount a Power Jewel onto a ranged weapon. Consumes one of the matching
+  // jewel from the inventory; if a different tier was already mounted it's
+  // returned to the inventory before the new one is consumed. Force-saves
+  // so the (rare!) jewel can't be lost to the next death.
+  const handleMountJewel = useCallback((type: string, tier: JewelTier) => {
+    if (!jewelRef.current) return;
+    const ok = jewelRef.current.mount(type as any, tier);
+    if (ok) {
+      const def = JEWEL_DEFS[tier];
+      showMessage(`MOUNTED ${def.shortName} JEWEL ON ${type.toUpperCase()} (+${Math.round(def.bonusMul * 100)}% DMG)`, 2000);
+      forceSaveRef.current?.();
+    } else {
+      showMessage("CAN'T MOUNT JEWEL", 1500);
+    }
+    syncResourcesNow();
+  }, [showMessage, syncResourcesNow]);
+
+  // Pop the mounted jewel back into the inventory. Fails silently if the
+  // inventory is full — the jewel stays mounted rather than being deleted.
+  const handleUnmountJewel = useCallback((type: string) => {
+    if (!jewelRef.current) return;
+    const ok = jewelRef.current.unmount(type as any);
+    if (ok) {
+      showMessage(`UNMOUNTED JEWEL FROM ${type.toUpperCase()}`, 1500);
+      forceSaveRef.current?.();
+    } else {
+      showMessage("INVENTORY FULL — CAN'T UNMOUNT", 1500);
+    }
+    syncResourcesNow();
+  }, [showMessage, syncResourcesNow]);
+
   const handleUpgradePlayer = useCallback((id: string) => {
     if (!playerRef.current) return;
     const ok = playerRef.current.upgradePlayerStat(id);
@@ -3084,6 +3137,34 @@ export const Game: React.FC = () => {
     }));
   }, []);
 
+  // Per-weapon Power-Jewel rows for the WEAPONS tab. Re-derives whenever
+  // any inventory count changes (which the WEAPONS tab already triggers
+  // on every weapon-part / resource update). The map is keyed by
+  // WeaponType string so UpgradeMenu can look up entries by `w.type`
+  // without importing the WeaponType union.
+  const weaponJewelInfo = useMemo(() => {
+    const inv = inventoryRef.current;
+    const jewels = jewelRef.current;
+    if (!inv || !jewels) return undefined;
+    const out: Record<string, { weaponType: string; mounted: JewelTier | null; available: Record<JewelTier, number> }> = {};
+    for (const w of JEWEL_MOUNTABLE_WEAPONS) {
+      out[w] = {
+        weaponType: w,
+        mounted: jewels.getMount(w),
+        available: {
+          rough:    inv.getItemCount(JEWEL_DEFS.rough.itemId),
+          cut:      inv.getItemCount(JEWEL_DEFS.cut.itemId),
+          flawless: inv.getItemCount(JEWEL_DEFS.flawless.itemId),
+        },
+      };
+    }
+    return out;
+    // weaponUpgradeInfo refreshes on the same inventory pulse the jewel
+    // counts change on, so depending on it keeps this map fresh without
+    // adding a second listener.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weaponUpgradeInfo, partCounts]);
+
   // Build the SPECIALS rows from the single SPECIALS_DEFS source. Affordability
   // re-evaluates whenever resources or owned-flags change.
   const specialsList = useMemo(() => {
@@ -3207,6 +3288,9 @@ export const Game: React.FC = () => {
           onUpgradeWeapon={handleUpgradeWeapon}
           onUpgradeCompanion={handleUpgradeCompanion}
           onUpgradePlayer={handleUpgradePlayer}
+          weaponJewelInfo={weaponJewelInfo}
+          onMountJewel={handleMountJewel}
+          onUnmountJewel={handleUnmountJewel}
           upgradeMenuSpecials={specialsList}
           upgradeMenuCompanionWeapons={companionWeaponInfo}
           upgradeMenuTravel={travelDestinations}

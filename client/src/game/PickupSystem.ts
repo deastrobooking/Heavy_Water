@@ -2,6 +2,7 @@ import * as BABYLON from "@babylonjs/core";
 import { EventBus, GameEvents } from "./EventBus";
 import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
 import { CRAFTING_MATERIALS } from "./CraftingSystem";
+import { JEWEL_DEFS, type JewelTier } from "./JewelSystem";
 
 export type PickupType =
   | "gear"
@@ -11,12 +12,16 @@ export type PickupType =
   | "circuit_board"
   | "nano_fiber"
   | "bio_essence"
-  | "health_kit";
+  | "health_kit"
+  | "jewel";
 
 export interface PickupSpawnRequest {
   type: PickupType;
   amount: number;
   weaponId?: string;
+  /** Only meaningful when `type === "jewel"`. Selects which Power-Jewel
+   *  item id is granted on collect (and which colour / mesh is rendered). */
+  jewelTier?: JewelTier;
 }
 
 interface ActivePickup {
@@ -26,10 +31,17 @@ interface ActivePickup {
   type: PickupType;
   amount: number;
   weaponId?: string;
+  /** Tier of the dropped jewel (only set when `type === "jewel"`). */
+  jewelTier?: JewelTier;
   bobOffset: number;
   bobBase: number;
   age: number;
   collected: boolean;
+  /** Last time (ms via Date.now) collection was refused due to a full
+   *  inventory. Used to throttle the "INVENTORY FULL" toast so it doesn't
+   *  spam every frame while a jewel orbits the player. Only meaningful
+   *  for jewel pickups today. */
+  lastCollectFailAt?: number;
 }
 
 const PICKUP_COLORS: Record<PickupType, BABYLON.Color3> = {
@@ -41,6 +53,9 @@ const PICKUP_COLORS: Record<PickupType, BABYLON.Color3> = {
   nano_fiber: new BABYLON.Color3(0.95, 0.95, 1.0),
   bio_essence: new BABYLON.Color3(0.6, 1.0, 0.4),
   health_kit: new BABYLON.Color3(1.0, 0.3, 0.4),
+  // Default jewel colour — overridden per-instance by jewelTier in
+  // createPickupMesh() so each tier glows its own hue.
+  jewel: new BABYLON.Color3(1.0, 0.4, 0.85),
 };
 
 const PICKUP_LABELS: Record<PickupType, string> = {
@@ -52,7 +67,20 @@ const PICKUP_LABELS: Record<PickupType, string> = {
   nano_fiber: "NANO FIBER",
   bio_essence: "BIO ESSENCE",
   health_kit: "HEALTH",
+  jewel: "POWER JEWEL",
 };
+
+/** Roll a Power-Jewel drop. Returns null when the drop misses entirely.
+ *  Tier weights are skewed toward the rough variant so the flawless jewel
+ *  remains the headline reward of a boss spire / boss captain. */
+function rollJewelTier(rng: () => number, weights: { rough: number; cut: number; flawless: number }): JewelTier | null {
+  const total = weights.rough + weights.cut + weights.flawless;
+  if (total <= 0) return null;
+  const r = rng() * total;
+  if (r < weights.flawless) return "flawless";
+  if (r < weights.flawless + weights.cut) return "cut";
+  return "rough";
+}
 
 // Drop rates were tuned up: at higher player levels gears and especially
 // energy cores were too rare to keep upgrading helper bots. Every enemy now
@@ -257,6 +285,25 @@ export class PickupSystem {
         drops.push({ type: "health_kit", amount: HEALTH_KIT_AMOUNT });
       }
     }
+    // Power-Jewel rolls. Boss captains (the special spire-guard variant of
+    // a captain) are the headline source; ordinary commanders get a much
+    // smaller chance so jewels still trickle from elite waves. Aerial
+    // battleships also have a moderate chance because they're rare and
+    // expensive to take down.
+    let jewel: JewelTier | null = null;
+    if (data.isBossCaptain) {
+      // Boss captain — guaranteed jewel, weighted toward higher tiers.
+      jewel = rollJewelTier(Math.random, { rough: 60, cut: 30, flawless: 10 });
+    } else if (data.type === "captain" || data.type === "commander") {
+      if (Math.random() < 0.20) {
+        jewel = rollJewelTier(Math.random, { rough: 80, cut: 17, flawless: 3 });
+      }
+    } else if (data.type === "aerial_battleship") {
+      if (Math.random() < 0.35) {
+        jewel = rollJewelTier(Math.random, { rough: 70, cut: 25, flawless: 5 });
+      }
+    }
+    if (jewel) drops.push({ type: "jewel", amount: 1, jewelTier: jewel });
     this.spawn(data.position, drops, 0.8);
   }
 
@@ -272,7 +319,13 @@ export class PickupSystem {
 
   private createPickupMesh(pos: BABYLON.Vector3, req: PickupSpawnRequest): void {
     const id = this.idCounter++;
-    const color = PICKUP_COLORS[req.type] || new BABYLON.Color3(1, 1, 1);
+    let color = PICKUP_COLORS[req.type] || new BABYLON.Color3(1, 1, 1);
+    // Per-tier override: each jewel tier gets its own glow colour so the
+    // player can tell rough / cut / flawless apart from across the field.
+    if (req.type === "jewel" && req.jewelTier) {
+      const hex = JEWEL_DEFS[req.jewelTier].color;
+      color = BABYLON.Color3.FromHexString(hex);
+    }
 
     let mesh: BABYLON.Mesh;
     switch (req.type) {
@@ -299,6 +352,16 @@ export class PickupSystem {
         break;
       case "health_kit":
         mesh = BABYLON.MeshBuilder.CreateBox(`pickup_${id}`, { width: 0.45, height: 0.3, depth: 0.45 }, this.scene);
+        break;
+      case "jewel":
+        // Faceted gem-style mesh — Babylon polyhedron type 1 = octahedron,
+        // type 2 = dodecahedron. Use type 2 for flawless to read as the
+        // "biggest, fanciest" stone, and type 1 for the others.
+        {
+          const polyType = req.jewelTier === "flawless" ? 2 : 1;
+          const size = req.jewelTier === "flawless" ? 0.55 : (req.jewelTier === "cut" ? 0.45 : 0.38);
+          mesh = BABYLON.MeshBuilder.CreatePolyhedron(`pickup_${id}`, { type: polyType, size }, this.scene);
+        }
         break;
       default:
         mesh = BABYLON.MeshBuilder.CreateSphere(`pickup_${id}`, { diameter: 0.4 }, this.scene);
@@ -332,6 +395,7 @@ export class PickupSystem {
       type: req.type,
       amount: req.amount,
       weaponId: req.weaponId,
+      jewelTier: req.jewelTier,
       bobOffset: Math.random() * Math.PI * 2,
       bobBase,
       age: 0,
@@ -370,9 +434,16 @@ export class PickupSystem {
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
       if (dist < PickupSystem.COLLECT_RANGE) {
-        this.collect(p);
-        this.disposePickup(p);
-        this.active.splice(i, 1);
+        if (this.collect(p)) {
+          this.disposePickup(p);
+          this.active.splice(i, 1);
+          continue;
+        }
+        // Collection refused (inventory full + non-droppable item). Leave
+        // the pickup in the world so the player can recover it after
+        // making room. Skip the magnet/bob update for this frame so it
+        // doesn't keep tugging into the player and re-firing the failure
+        // toast every tick.
         continue;
       }
 
@@ -396,9 +467,12 @@ export class PickupSystem {
 
       // Companion-side collection (player path already handled above).
       if (bestSource === "companion" && bestDist < autoCollectR) {
-        this.collect(p);
-        this.disposePickup(p);
-        this.active.splice(i, 1);
+        if (this.collect(p)) {
+          this.disposePickup(p);
+          this.active.splice(i, 1);
+        }
+        // Refused collections (inventory full) just stay put — see
+        // the player branch above for the same rationale.
         continue;
       }
 
@@ -415,7 +489,12 @@ export class PickupSystem {
     }
   }
 
-  private collect(p: ActivePickup): void {
+  /** Try to collect a pickup. Returns `true` when the pickup should be
+   *  disposed (collected fully, or item undeliverable so we drop it on
+   *  the floor anyway), `false` when it should remain in the world for
+   *  another attempt — currently only Power Jewels do this, so a single
+   *  full-inventory event can't vaporize a very-rare drop. */
+  private collect(p: ActivePickup): boolean {
     let itemId: string | null = null;
     let payloadAmount = p.amount;
     let healthHeal = 0;
@@ -439,12 +518,39 @@ export class PickupSystem {
       case "health_kit":
         healthHeal = p.amount;
         break;
+      case "jewel":
+        if (p.jewelTier) itemId = JEWEL_DEFS[p.jewelTier].itemId;
+        // Jewels never stack as a "5 jewels in one mesh" thing — every
+        // jewel mesh that drops represents exactly one unit. Force the
+        // payload to 1 even if a misconfigured spawn requested more.
+        payloadAmount = 1;
+        break;
     }
 
     if (itemId) {
       const def = ITEM_DEFINITIONS[itemId] || CRAFTING_MATERIALS[itemId];
       if (def) {
-        this.inventory.addItem(def, payloadAmount);
+        const remaining = this.inventory.addItem(def, payloadAmount);
+        if (remaining > 0 && p.type === "jewel") {
+          // Inventory full + jewel — refuse the collection so the player
+          // can recover this very-rare drop after freeing a slot. Throttle
+          // the toast to once every 2.5s so it doesn't spam while the
+          // jewel sits inside collect range.
+          const now = Date.now();
+          if (!p.lastCollectFailAt || now - p.lastCollectFailAt > 2500) {
+            this.bus.emit(GameEvents.UI_MESSAGE, {
+              text: `★ POWER JEWEL — INVENTORY FULL! MAKE ROOM TO COLLECT ★`,
+              duration: 2500,
+            });
+            p.lastCollectFailAt = now;
+          }
+          return false;
+        }
+        // Track partial-pickup amount so PICKUP_COLLECTED reports what
+        // actually landed, not what was attempted. (Only matters for
+        // stackable items like gears at the cap; jewels above already
+        // bailed.)
+        if (remaining > 0) payloadAmount -= remaining;
       }
     }
 
@@ -453,14 +559,27 @@ export class PickupSystem {
       color: PICKUP_COLORS[p.type],
     });
 
+    // Big celebratory toast for jewels — the player should never miss one.
+    if (p.type === "jewel" && p.jewelTier) {
+      const def = JEWEL_DEFS[p.jewelTier];
+      this.bus.emit(GameEvents.UI_MESSAGE, {
+        text: `★ ${def.name.toUpperCase()} ACQUIRED — MOUNT IT IN THE WEAPONS TAB ★`,
+        duration: 5000,
+      });
+    }
+
     this.bus.emit(GameEvents.PICKUP_COLLECTED, {
       type: p.type,
       itemId,
       amount: payloadAmount,
       weaponId: p.weaponId,
+      jewelTier: p.jewelTier,
       healAmount: healthHeal,
-      label: PICKUP_LABELS[p.type],
+      label: p.type === "jewel" && p.jewelTier
+        ? `${JEWEL_DEFS[p.jewelTier].shortName} JEWEL`
+        : PICKUP_LABELS[p.type],
     });
+    return true;
   }
 
   private disposePickup(p: ActivePickup): void {

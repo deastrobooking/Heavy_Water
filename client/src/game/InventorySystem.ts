@@ -159,4 +159,13 @@ export const ITEM_DEFINITIONS: Record<string, ItemDefinition> = {
   bio_seed: { id: "bio_seed", name: "Bio Seed", type: ItemType.Material, rarity: ItemRarity.Common, maxStack: 99, value: 6, description: "Engineered Mechanoid seed. Plant on a sanctuary plot to grow a bio-crop." },
   bio_crop: { id: "bio_crop", name: "Bio Crop", type: ItemType.Consumable, rarity: ItemRarity.Uncommon, maxStack: 99, value: 18, description: "Sanctuary harvest. Refines into Animaton Feed; raw, restores a sliver of HP." },
   animaton_feed: { id: "animaton_feed", name: "Animaton Feed", type: ItemType.Consumable, rarity: ItemRarity.Rare, maxStack: 50, value: 60, description: "Refined bio-crop blend. Strengthens a rescued Animaton when fed at the sanctuary stable." },
+
+  // === Power Jewels (very rare weapon mounts) ===
+  // Drop occasionally from enemy-base vaults, boss-fortress spires, and boss
+  // captains. Mounted via the WEAPONS tab of the upgrade menu; each grants a
+  // permanent damage multiplier on the socketed ranged weapon. Kept in sync
+  // with JEWEL_ITEM_DEFINITIONS in JewelSystem.ts.
+  power_jewel_rough:    { id: "power_jewel_rough",    name: "Rough Power Jewel",    type: ItemType.Material, rarity: ItemRarity.Epic,      maxStack: 9, value: 600,  description: "Very rare. Mount on a ranged weapon to add +15% damage.",            stats: { damageMul: 0.15 } },
+  power_jewel_cut:      { id: "power_jewel_cut",      name: "Cut Power Jewel",      type: ItemType.Material, rarity: ItemRarity.Legendary, maxStack: 9, value: 1500, description: "Very rare. Mount on a ranged weapon to add +30% damage.",            stats: { damageMul: 0.30 } },
+  power_jewel_flawless: { id: "power_jewel_flawless", name: "Flawless Power Jewel", type: ItemType.Material, rarity: ItemRarity.Legendary, maxStack: 9, value: 4000, description: "Extraordinarily rare. Mount on a ranged weapon to add +50% damage.", stats: { damageMul: 0.50 } },
 };

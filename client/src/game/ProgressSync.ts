@@ -93,6 +93,11 @@ export interface ProgressSnapshot {
    *  an earlier level keeps that level's loot history intact. Optional
    *  for backward compat with pre-temple saves. */
   lootedTempleIds?: string[];
+  /** Power-Jewel mounts: WeaponType → JewelTier ("rough" | "cut" |
+   *  "flawless"). Stored separately from inventoryCounts because mounted
+   *  jewels are NOT in the inventory — they were consumed when mounted.
+   *  Optional for backward compat with pre-jewel saves. */
+  jewelMounts?: Record<string, string>;
 }
 
 export async function loadProgress(): Promise<ProgressSnapshot | null> {

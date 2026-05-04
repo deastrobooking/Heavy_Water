@@ -46,6 +46,10 @@ The game utilizes Babylon.js v8.x for WebGL/WebGPU rendering, focusing on an ani
 **Customization:**
 - CharacterEditor exposes tabs for Body, Armor, Colors, and Boss Style, along with three armor presets (HUMANOID, TITAN, and DREAD). The Boss Style tab persists enemy appearance overrides.
 
+**Power Jewels:**
+- Very rare weapon-mount drops in three tiers (Rough +15%, Cut +30%, Flawless +50% damage). Drop sources: enemy-base vaults (5% / 1.5% / 0.4%), boss-fortress vaults (guaranteed Rough + 50% Cut + 20% Flawless), boss captains (guaranteed, weighted toward higher tiers), and aerial battleships (35% chance, mostly Rough).
+- Mounted via the WEAPONS tab of the Upgrade Menu — each ranged weapon (pistol, rifle, shotgun, rocket, laser, grenade, tracking missile) has its own jewel slot. Mount/unmount round-trips through the inventory; mounted jewels persist in `ProgressSync.jewelMounts` and re-apply their multiplier on load.
+
 **Player Systems:**
 - Character customization includes procedural generation, modular body parts, and a HumanoidCharacter system.
 - ProgressSync.ts handles player progress, stats, inventory, and upgrades with auto-save.

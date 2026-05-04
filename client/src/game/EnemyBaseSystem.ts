@@ -347,9 +347,27 @@ export class EnemyBaseSystem {
       color: new BABYLON.Color3(1.0, 0.78, 0.25),
       scale: base.isBoss ? 8.0 : 4.0,
     });
+    // Power-Jewel rolls. Regular bases drop them rarely as the headline
+    // surprise; boss spires guarantee at least one rough jewel and have
+    // strong odds at the higher tiers — clearing a fortress should always
+    // leave the player with at least one jewel to mount.
+    const baseLoot = base.isBoss ? this.bossVaultLoot() : [...VAULT_LOOT];
+    if (base.isBoss) {
+      // Always one rough jewel from a boss vault.
+      baseLoot.push({ type: "jewel", amount: 1, jewelTier: "rough" });
+      if (Math.random() < 0.50) baseLoot.push({ type: "jewel", amount: 1, jewelTier: "cut" });
+      if (Math.random() < 0.20) baseLoot.push({ type: "jewel", amount: 1, jewelTier: "flawless" });
+    } else {
+      // Regular base — single roll. Rough is the most likely tier; flawless
+      // is exceedingly rare here.
+      const r = Math.random();
+      if (r < 0.05) baseLoot.push({ type: "jewel", amount: 1, jewelTier: "rough" });
+      else if (r < 0.065) baseLoot.push({ type: "jewel", amount: 1, jewelTier: "cut" });
+      else if (r < 0.069) baseLoot.push({ type: "jewel", amount: 1, jewelTier: "flawless" });
+    }
     this.bus.emit(GameEvents.PICKUP_SPAWNED, {
       position: base.vault.position.clone().add(new BABYLON.Vector3(0, 0.6, 0)),
-      requests: base.isBoss ? this.bossVaultLoot() : VAULT_LOOT,
+      requests: baseLoot,
       spread: base.isBoss ? 4.0 : 2.4,
     });
     this.bus.emit(GameEvents.ENEMY_KILLED, {
