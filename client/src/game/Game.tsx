@@ -1214,6 +1214,12 @@ export const Game: React.FC = () => {
         // Triggers re-route based on context: while driving, RT becomes
         // throttle and LT becomes reverse/brake; on foot they fire and slash.
         gamepad.setContextProvider(() => (vehicleRef.current?.getActive() ? "vehicle" : "foot"));
+        // While the upgrade menu (Tab) is open, the gamepad enters pure
+        // navigation mode — D-Pad cycles tabs/rows, A activates the
+        // selected row, B closes — and ALL gameplay bindings are
+        // suppressed so the player can't shoot or look-around through
+        // the menu.
+        gamepad.setMenuOpenProvider(() => upgradeMenuOpenRef.current);
         gamepadRef.current = gamepad;
 
         const chestSystem = new ChestSystem(scene);

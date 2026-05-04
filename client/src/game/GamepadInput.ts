@@ -79,6 +79,14 @@ export class GamepadInput {
   // which trips the existing combo window and fires the Mega Beam Cannon
   // alongside the regular shot. Cleared on warp-out.
   private spacecraftMode: boolean = false;
+  // While the upgrade menu (or other modal that registers itself as menu)
+  // is open, the gamepad swaps into pure-navigation mode: D-Pad cycles
+  // tabs / rows, A activates the selected row, B closes. ALL gameplay
+  // bindings are suppressed for the duration so the player can't keep
+  // shooting / moving the camera through the menu, and nothing leaks
+  // when the menu opens with a button held.
+  private menuOpenProvider: (() => boolean) | null = null;
+  private prevMenuOpen: boolean = false;
 
   constructor(camera: BABYLON.FreeCamera) {
     this.camera = camera;
@@ -102,6 +110,14 @@ export class GamepadInput {
    *  the weapon (LMB). */
   setContextProvider(fn: () => "foot" | "vehicle"): void {
     this.contextProvider = fn;
+  }
+
+  /** Register a predicate that returns whether a menu / modal is currently
+   *  open. While open, the gamepad enters pure-navigation mode (D-Pad +
+   *  A/B fire `gamepad-menu` CustomEvents on `window`) and suppresses all
+   *  gameplay bindings (sticks, triggers, face buttons, D-Pad keys). */
+  setMenuOpenProvider(fn: () => boolean): void {
+    this.menuOpenProvider = fn;
   }
 
   /** Flip spacecraft trigger overrides on/off. Called by SpaceLevelSystem
@@ -188,6 +204,27 @@ export class GamepadInput {
       return;
     }
     this.isActive = true;
+
+    // Menu-mode swap. On the open transition we lift every held gameplay
+    // key/mouse so nothing stays stuck behind the modal; on the close
+    // transition we snapshot the current button state so a button held
+    // during menu nav doesn't fire as a fresh gameplay press the moment
+    // the menu closes.
+    const menuOpen = this.menuOpenProvider ? this.menuOpenProvider() : false;
+    if (menuOpen !== this.prevMenuOpen) {
+      this.releaseAll();
+      const snap: boolean[] = [];
+      for (let i = 0; i < activePad.buttons.length; i++) {
+        snap[i] = activePad.buttons[i].pressed || activePad.buttons[i].value > 0.5;
+      }
+      this.prevButtons.set(activePad.index, snap);
+      this.prevMenuOpen = menuOpen;
+    }
+    if (menuOpen) {
+      this.handleMenuMode(activePad);
+      this.rafHandle = requestAnimationFrame(this.tick);
+      return;
+    }
 
     const prev = this.prevButtons.get(activePad.index) ?? [];
     const next: boolean[] = [];
@@ -317,6 +354,33 @@ export class GamepadInput {
     }
 
     this.rafHandle = requestAnimationFrame(this.tick);
+  }
+
+  /** Pure-navigation mode: only edge-fire CustomEvents for the 6 nav
+   *  buttons (D-Pad + A + B). All other inputs (sticks, triggers, face
+   *  combo overrides) are suppressed so the menu can't leak gameplay
+   *  side-effects like camera spin or weapon fire. */
+  private handleMenuMode(pad: Gamepad): void {
+    const NAV: Record<number, "activate" | "close" | "up" | "down" | "left" | "right"> = {
+      0: "activate", // A — confirm / press selected button
+      1: "close",    // B — close the menu
+      12: "up",      // D-Pad Up — previous row
+      13: "down",    // D-Pad Down — next row
+      14: "left",    // D-Pad Left — previous tab
+      15: "right",   // D-Pad Right — next tab
+    };
+    const prev = this.prevButtons.get(pad.index) ?? [];
+    const next: boolean[] = [];
+    for (let i = 0; i < pad.buttons.length; i++) {
+      const pressed = pad.buttons[i].pressed || pad.buttons[i].value > 0.5;
+      next[i] = pressed;
+      const wasPressed = prev[i] ?? false;
+      const action = NAV[i];
+      if (action && pressed && !wasPressed) {
+        window.dispatchEvent(new CustomEvent("gamepad-menu", { detail: { action } }));
+      }
+    }
+    this.prevButtons.set(pad.index, next);
   }
 
   private releaseLT(ctx: "foot" | "vehicle"): void {

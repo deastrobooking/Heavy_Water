@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import type { WeaponUpgradeInfo } from "./WeaponsSystem";
 import type { CompanionUpgradeInfo } from "./CompanionSystem";
 import type { PlayerUpgradeInfo } from "./PlayerController";
@@ -95,7 +95,154 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
   onClose,
 }) => {
   const [tab, setTab] = useState<"player" | "weapons" | "robots" | "specials" | "travel">("player");
+  // Per-tab selected-row index for gamepad / keyboard navigation. Each
+  // tab keeps its own cursor so jumping between tabs doesn't lose the
+  // player's place.
+  const [selectedIdx, setSelectedIdx] = useState<Record<string, number>>({
+    player: 0, weapons: 0, robots: 0, specials: 0, travel: 0,
+  });
+  // Refs for every selectable row, keyed by stable row id, so the active
+  // row can be auto-scrolled into view on cursor change.
+  const rowRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+
+  // Build a stable, ordered list of {key, activate, canActivate} for the
+  // current tab. The `key` matches the React `key` (and the dataset
+  // attribute) on each rendered row so selection highlight + ref lookup
+  // line up. canActivate gates the A-button confirm so disabled rows
+  // (maxed / unaffordable / locked / current zone) don't trip handlers.
+  const rows = useMemo(() => {
+    const out: { key: string; activate: () => void; canActivate: boolean }[] = [];
+    if (tab === "player") {
+      for (const p of playerUpgrades) {
+        out.push({
+          key: `p-${p.id}`,
+          activate: () => onUpgradePlayer?.(p.id),
+          canActivate: !p.maxed && p.affordable,
+        });
+      }
+    } else if (tab === "weapons") {
+      for (const w of weapons) {
+        out.push({
+          key: `w-${w.type}`,
+          activate: () => onUpgradeWeapon(w.type),
+          canActivate: w.level < w.maxLevel && w.affordable,
+        });
+      }
+    } else if (tab === "robots") {
+      for (const cw of companionWeapons) {
+        out.push({
+          key: `cw-${cw.id}`,
+          activate: () => onUpgradeCompanionWeapon?.(cw.id),
+          canActivate: cw.weaponLevel < cw.maxLevel && cw.affordable,
+        });
+      }
+      for (const c of companions) {
+        out.push({
+          key: `c-${c.id}`,
+          activate: () => onUpgradeCompanion(c.id),
+          canActivate: c.level < c.maxLevel && c.affordable,
+        });
+      }
+    } else if (tab === "specials") {
+      for (const s of specials) {
+        out.push({
+          key: `s-${s.id}`,
+          activate: () => onUnlockSpecial?.(s.id),
+          canActivate: !s.owned && s.affordable,
+        });
+      }
+    } else {
+      for (const d of travelDestinations) {
+        out.push({
+          key: `t-${d.level}`,
+          activate: () => onFastTravel?.(d.level),
+          canActivate: !d.locked && d.level !== currentLevel,
+        });
+      }
+    }
+    return out;
+  }, [tab, playerUpgrades, weapons, companions, companionWeapons, specials, travelDestinations, currentLevel, onUpgradePlayer, onUpgradeWeapon, onUpgradeCompanion, onUpgradeCompanionWeapon, onUnlockSpecial, onFastTravel]);
+
+  const TAB_ORDER = ["player", "weapons", "robots", "specials", "travel"] as const;
+  const curIdx = Math.min(selectedIdx[tab] ?? 0, Math.max(0, rows.length - 1));
+  const selectedKey = rows[curIdx]?.key ?? null;
+
+  // Single navigation dispatch shared by gamepad CustomEvents AND
+  // keyboard arrows / Enter so both controllers and keyboards can drive
+  // the menu identically.
+  useEffect(() => {
+    if (!open) return;
+    const nav = (action: "up" | "down" | "left" | "right" | "activate" | "close") => {
+      if (action === "close") { onClose(); return; }
+      if (action === "left" || action === "right") {
+        const idx = TAB_ORDER.indexOf(tab);
+        const nextIdx = (idx + (action === "right" ? 1 : -1) + TAB_ORDER.length) % TAB_ORDER.length;
+        setTab(TAB_ORDER[nextIdx]);
+        return;
+      }
+      if (action === "up" || action === "down") {
+        setSelectedIdx(prev => {
+          const max = Math.max(0, rows.length - 1);
+          // Clamp the stored index to the current tab's row count BEFORE
+          // applying the delta. Otherwise switching to a tab with fewer
+          // rows than the stored index would silently swallow the first
+          // Up press (architect MEDIUM finding).
+          const cur = Math.min(prev[tab] ?? 0, max);
+          const nextSel = Math.max(0, Math.min(max, cur + (action === "down" ? 1 : -1)));
+          return { ...prev, [tab]: nextSel };
+        });
+        return;
+      }
+      if (action === "activate") {
+        const r = rows[curIdx];
+        if (r && r.canActivate) r.activate();
+      }
+    };
+    const padHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { action?: string } | null;
+      if (!detail?.action) return;
+      nav(detail.action as Parameters<typeof nav>[0]);
+    };
+    const keyHandler = (e: KeyboardEvent) => {
+      // Don't steal arrow keys from any focused text input (none today,
+      // but defensive — a future search box would still work).
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA")) return;
+      // Ignore OS auto-repeat: the menu uses a single discrete press per
+      // step so the cursor doesn't sprint when a key is held. Gamepad
+      // edge-detection in handleMenuMode already gives discrete presses.
+      if (e.repeat) return;
+      if (e.code === "ArrowUp")        { e.preventDefault(); nav("up"); }
+      else if (e.code === "ArrowDown") { e.preventDefault(); nav("down"); }
+      else if (e.code === "ArrowLeft") { e.preventDefault(); nav("left"); }
+      else if (e.code === "ArrowRight"){ e.preventDefault(); nav("right"); }
+      else if (e.code === "Enter")     { e.preventDefault(); nav("activate"); }
+    };
+    window.addEventListener("gamepad-menu", padHandler);
+    window.addEventListener("keydown", keyHandler);
+    return () => {
+      window.removeEventListener("gamepad-menu", padHandler);
+      window.removeEventListener("keydown", keyHandler);
+    };
+  }, [open, tab, rows, curIdx, onClose]);
+
+  // Auto-scroll the selected row into view whenever the cursor moves so
+  // controller-only navigation never strands the player off-screen.
+  useEffect(() => {
+    if (!open || !selectedKey) return;
+    const el = rowRefs.current.get(selectedKey);
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [open, selectedKey]);
+
   if (!open) return null;
+  const ringClass = (key: string) =>
+    selectedKey === key ? " ring-2 ring-amber-400 ring-offset-1 ring-offset-zinc-900" : "";
+  const setRowRef = (key: string) => (el: HTMLDivElement | null) => {
+    if (el) rowRefs.current.set(key, el);
+    else rowRefs.current.delete(key);
+  };
 
   return (
     <div
@@ -132,7 +279,7 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
           ) : playerUpgrades.map(p => {
             const canAfford = p.affordable;
             return (
-              <div key={p.id} className="bg-zinc-800/80 border border-zinc-700 rounded-lg p-3 hover:border-yellow-500 transition">
+              <div ref={setRowRef(`p-${p.id}`)} key={p.id} className={`bg-zinc-800/80 border border-zinc-700 rounded-lg p-3 hover:border-yellow-500 transition${ringClass(`p-${p.id}`)}`}>
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-3">
@@ -177,7 +324,7 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
             const canAfford = w.affordable;
             const maxed = w.level >= w.maxLevel;
             return (
-              <div key={w.type} className="bg-zinc-800/80 border border-zinc-700 rounded-lg p-3 hover:border-cyan-600 transition">
+              <div ref={setRowRef(`w-${w.type}`)} key={w.type} className={`bg-zinc-800/80 border border-zinc-700 rounded-lg p-3 hover:border-cyan-600 transition${ringClass(`w-${w.type}`)}`}>
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-3">
@@ -221,7 +368,7 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
                 {companionWeapons.map(cw => {
                   const isMax = cw.weaponLevel >= cw.maxLevel;
                   return (
-                    <div key={cw.id} className="flex items-center justify-between bg-zinc-900/70 rounded px-2 py-1.5 text-[11px]">
+                    <div ref={setRowRef(`cw-${cw.id}`)} key={cw.id} className={`flex items-center justify-between bg-zinc-900/70 rounded px-2 py-1.5 text-[11px]${ringClass(`cw-${cw.id}`)}`}>
                       <div className="flex items-center gap-2">
                         <div className="text-zinc-200 font-bold">{cw.name}</div>
                         <div className="text-fuchsia-400 font-mono">WPN T{cw.weaponLevel}/{cw.maxLevel}</div>
@@ -254,7 +401,7 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
             const maxed = c.level >= c.maxLevel;
             const cost = c.cost;
             return (
-              <div key={c.id} className="bg-zinc-800/80 border border-zinc-700 rounded-lg p-3 hover:border-fuchsia-600 transition">
+              <div ref={setRowRef(`c-${c.id}`)} key={c.id} className={`bg-zinc-800/80 border border-zinc-700 rounded-lg p-3 hover:border-fuchsia-600 transition${ringClass(`c-${c.id}`)}`}>
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-3">
@@ -301,7 +448,7 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
               credits: playerCredits,
             };
             return (
-              <div key={s.id} className={`border rounded-lg p-3 transition ${s.owned ? "bg-emerald-950/40 border-emerald-700" : "bg-zinc-800/80 border-zinc-700 hover:border-purple-500"}`}>
+              <div ref={setRowRef(`s-${s.id}`)} key={s.id} className={`border rounded-lg p-3 transition ${s.owned ? "bg-emerald-950/40 border-emerald-700" : "bg-zinc-800/80 border-zinc-700 hover:border-purple-500"}${ringClass(`s-${s.id}`)}`}>
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-3">
@@ -352,8 +499,9 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
                 const disabled = d.locked || isCurrent;
                 return (
                   <div
+                    ref={setRowRef(`t-${d.level}`)}
                     key={d.level}
-                    className={`border rounded-lg p-3 transition ${isCurrent ? "bg-cyan-950/40 border-cyan-500" : d.locked ? "bg-zinc-900/60 border-zinc-800" : "bg-zinc-800/80 border-zinc-700 hover:border-cyan-500"}`}
+                    className={`border rounded-lg p-3 transition ${isCurrent ? "bg-cyan-950/40 border-cyan-500" : d.locked ? "bg-zinc-900/60 border-zinc-800" : "bg-zinc-800/80 border-zinc-700 hover:border-cyan-500"}${ringClass(`t-${d.level}`)}`}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
@@ -388,8 +536,8 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
         </div>
 
         <div className="px-5 py-2 border-t border-zinc-700 text-zinc-500 text-[11px] flex justify-between">
-          <span>Kill enemies for gears + weapon parts. Approach Lab to build new robots.</span>
-          <span>TAB / ESC to close</span>
+          <span>D-Pad / ← → cycle tabs · ↑ ↓ pick row · A / Enter confirm</span>
+          <span>B / TAB / ESC to close</span>
         </div>
       </div>
     </div>
