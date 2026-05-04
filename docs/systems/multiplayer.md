@@ -41,13 +41,38 @@ leave_room (or socket close) → server removes, broadcasts; if empty, deletes r
 The `gameSessions` table is mostly for listing rooms in the lobby UI;
 the in-flight roster is in-memory.
 
-## Versus mode specifics
+## Versus mode (PvP arena)
 
-The PvP map is deterministic — the seeded layout is built client-side
-in `MultiplayerSystem` from a seed shared via `join_room`. Players
-spawn at fixed points keyed by player index. Open-world meshes (city,
-mountains, foliage, enemy spawner) are suppressed while in a versus
-room.
+`coop` rooms drop into the full open-world city; `versus` rooms drop
+into a compact PvP arena owned by
+[`VersusArena.ts`](../../client/src/game/VersusArena.ts).
+
+Key facts:
+
+- **320×320** walled square, perimeter forcefield. Small enough to find
+  opponents in seconds, big enough for jet-pack maneuvers.
+- ~28 packed cube buildings of varied heights for parkour cover.
+- 4 corner spires with rooftop sightlines.
+- Central neon plaza with a 16-spawn ring.
+- Ground is a single floor platform at `y = 0` so `getFloorYAt()` is
+  trivial across the whole map.
+
+Mounted by `Game.tsx` when `gameMode === "versus"` **instead of** the
+full city. While in versus mode the open-world `CityGenerator`,
+`EnemySystem`, foliage, mountains, and props are skipped entirely. The
+same `MultiplayerSystem` socket carries player updates and damage the
+same way coop does — only the world geometry changes.
+
+The deterministic layout is built client-side from a seed derived from
+the room code (no `seed` field on the wire). Players spawn at fixed
+points keyed by player index.
+
+[`VersusLobby.tsx`](../../client/src/game/VersusLobby.tsx) is
+intentionally **server-silent**: it just collects "host new" or "join
+code XYZ" intent and hands it to `Game.tsx`, which performs the real
+`create_room` / `join_room` over its single gameplay WebSocket. This
+avoids races between a lobby socket closing and a gameplay socket
+re-joining.
 
 ## Why `noServer: true`
 

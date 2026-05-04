@@ -35,11 +35,32 @@ configured in `BabylonEngine.ts`.
 
 - **Cell-shaded materials** — reuse the materials built in
   `BabylonEngine` / `CombatSystem` / `RobotFactory` / `HumanoidCharacter`.
-  Don't roll your own without good reason.
+  Don't roll your own without good reason. The character/armor pipeline
+  has its own dedicated factory — see
+  [`character-and-armor.md`](character-and-armor.md) for
+  `ArmorMaterialFactory`'s six canonical keys (`metal`, `black`,
+  `ceramic`, `gold`, `neon`, `trim`).
 - **Emissive surfaces** (jewels, neon, weapon trails) bias their colour
   high on the green/cyan channels so they bloom strongly.
 - **Tints** — many materials accept a runtime `Color3` tint multiplier
   so per-level `cityTheme` can recolor without rebuilding meshes.
+
+## Per-style material caching
+
+The two big mesh factories each maintain their own caches:
+
+- **`RobotFactory`** caches by `(matKey, color.rgb)` so a wave of 200
+  robots reuses ~3 materials per faction. Cache lives on the factory
+  instance — disposed with it.
+- **`VehicleFactory`** caches by **scene** (a `WeakMap<Scene, Map<key,
+  Material>>`). The scene-keyed indirection exists because a previous
+  global cache survived scene disposal and handed out dead-scene
+  materials on the next vehicle build, rendering the new mesh fully
+  transparent. See [`vehicles.md`](vehicles.md#material-caching).
+- **`ArmorMaterialFactory`** caches per-instance keyed by the requested
+  variant. The instance also takes a `salt` so two factions can ask
+  for `metal()` and get visually identical but separately-disposable
+  materials.
 
 ## Sky
 

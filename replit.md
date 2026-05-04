@@ -75,7 +75,7 @@ The game utilizes Babylon.js v8.x for WebGL/WebGPU rendering, focusing on an ani
 - EffectsSystem drives visual effects.
 
 ## Developer Documentation
-- Canonical developer hub: [`docs/`](docs/) — 35 markdown files (~3050 lines) covering getting-started, architecture, repository structure, 9 how-to guides (add a level / side-zone / enemy / weapon / companion / event / API route / DB change / debug HMR), 13 system references (rendering, EventBus, levels, combat, enemies, weapons, companions, inventory, base building, progression, multiplayer, world-gen, UI), 6 quick-reference tables (events, world levels, HTTP API, WS protocol, DB schema, controls), plus deployment / troubleshooting / contributing.
+- Canonical developer hub: [`docs/`](docs/) — 39 markdown files (~3700 lines) covering getting-started, architecture, repository structure, 9 how-to guides (add a level / side-zone / enemy / weapon / companion / event / API route / DB change / debug HMR), 17 system references (rendering, character/armor, vehicles, EventBus, levels, combat, enemies, weapons, companions, inventory, NPCs/rescue, audio/music, base building, progression, multiplayer/versus, world-gen, UI), 6 quick-reference tables (events, world levels, HTTP API, WS protocol, DB schema, controls), plus deployment / troubleshooting / contributing.
 - Existing `README.md`, `GAMEPLAY_GUIDE.md`, and `Docs/DEVELOPERS_GUIDE.md` are intentionally kept and linked from `docs/README.md` — they remain valid for player-facing and historical long-form material.
 - Convention: when you add a major system, update both `replit.md` (this file) **and** the matching `docs/systems/*.md` reference in the same PR.
 

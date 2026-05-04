@@ -65,6 +65,60 @@ See `LEVEL_DEFS` in `LevelSystem.ts`. Every level supplies:
 Side-zone systems read these on construction so revisits don't respawn
 already-defeated bosses or already-rescued NPCs.
 
+## Level serialization (LevelSerializer)
+
+`LevelSerializer` round-trips a base-built / editor-built layout to a
+single JSON file. It only covers the **player-placed** content — base
+buildings (`BuildingSystem`) and structures (`PrefabSystem`) — not
+city geometry, foliage, or NPCs.
+
+### Format
+
+```jsonc
+{
+  "version": 1,                       // bump if the shape changes
+  "name": "Detroit Build",
+  "saved": 1730000000000,             // epoch ms
+  "blocks":  [SerializedBlock,  …],   // from BuildingSystem.exportPlaced()
+  "prefabs": [SerializedPrefab, …]    // from PrefabSystem.exportPlaced()
+}
+```
+
+Each `SerializedBlock` is `{ type: BlockType, pos: [x, y, z], rot: number }`
+and each `SerializedPrefab` is `{ defId: string, pos: [x, y, z], rot: number }`.
+
+### API surface
+
+```ts
+serializer.serialize(name?)        // → SerializedLevel
+serializer.toJson(name?)           // → pretty JSON string
+serializer.download(filename?)     // → triggers a browser download (auto-named by epoch)
+serializer.restore(data)           // → clears + re-applies; throws on bad version
+serializer.loadFromFile(File)      // → reads a user-selected file
+```
+
+### Restore semantics
+
+- Validates `version === 1`. Anything else throws — bump the version
+  and write a migrator before changing the shape.
+- Clears `BuildingSystem` and `PrefabSystem` first (`clearAll()` on
+  each), so restore is destructive.
+- Per-entry validation is loose-and-skippy: malformed entries are
+  logged and skipped, not fatal. The final summary `{ blocks, prefabs }`
+  is the count of entries that successfully placed.
+- Emits a `UI_MESSAGE` toast on save and load.
+
+### Adding a new persisted layer
+
+If you add a new player-placed system that should round-trip:
+
+1. Give it `exportPlaced()` and `clearAll()` methods analogous to
+   `BuildingSystem`'s.
+2. Add the new array to `SerializedLevel`.
+3. **Bump `version` to 2** and add a migration that defaults the new
+   field to `[]` when loading a v1 save.
+4. Update this section.
+
 ## Wiring rules (Game.tsx)
 
 Every side-zone system must be disposed at **all three** shutdown sites:

@@ -46,6 +46,8 @@ One file per major in-game system. Each explains the responsibilities,
 public surface, key collaborators, and where to look for "what runs when".
 
 - [Rendering & cell-shading](systems/rendering-and-cell-shading.md)
+- [Characters, robots, and armor](systems/character-and-armor.md)
+- [Vehicles](systems/vehicles.md)
 - [EventBus & StateMachine](systems/event-bus-and-state-machine.md)
 - [Levels & zones](systems/levels-and-zones.md)
 - [Combat & damage](systems/combat-and-damage.md)
@@ -53,6 +55,8 @@ public surface, key collaborators, and where to look for "what runs when".
 - [Weapons arsenal](systems/weapons-arsenal.md)
 - [Companions & bio-creatures](systems/companions-and-bio-creatures.md)
 - [Inventory, crafting, loot](systems/inventory-crafting-loot.md)
+- [Friendly NPCs & rescue](systems/npcs-and-rescue.md)
+- [Audio & music](systems/audio-and-music.md)
 - [Base building & prefabs](systems/base-building-and-prefabs.md)
 - [Progression & saves](systems/progression-and-saves.md)
 - [Multiplayer](systems/multiplayer.md)
