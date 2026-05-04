@@ -22,7 +22,7 @@ import { MegaBeamCannonSystem } from "./MegaBeamCannonSystem";
 import { ArmorSystem } from "./ArmorSystem";
 import { CraftingSystem } from "./CraftingSystem";
 import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
-import { JewelSystem, JEWEL_DEFS, JEWEL_TIERS, JEWEL_MOUNTABLE_WEAPONS, type JewelTier } from "./JewelSystem";
+import { JewelSystem, JEWEL_DEFS, JEWEL_MOUNTABLE_WEAPONS, type JewelTier } from "./JewelSystem";
 import { CRAFTING_MATERIALS } from "./CraftingSystem";
 import { CompanionSystem } from "./CompanionSystem";
 import { ArmorCapsuleSystem, ArmorUpgrade } from "./ArmorCapsuleSystem";

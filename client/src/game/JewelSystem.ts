@@ -21,13 +21,6 @@ export const JEWEL_DEFS: Record<JewelTier, JewelDef> = {
 
 export const JEWEL_TIERS: JewelTier[] = ["rough", "cut", "flawless"];
 
-export function jewelDefByItemId(itemId: string): JewelDef | null {
-  for (const t of JEWEL_TIERS) {
-    if (JEWEL_DEFS[t].itemId === itemId) return JEWEL_DEFS[t];
-  }
-  return null;
-}
-
 /** Ranged weapon types that can mount a jewel. The melee-arsenal weapons
  *  (sabre, glaive, daggers, axe, whip) get their damage from the SPECIALS
  *  tab progression — jewels only buff projectile weapons. */
@@ -181,9 +174,3 @@ export class JewelSystem {
     this.bus.emit(GameEvents.INVENTORY_CHANGED);
   }
 }
-
-/** Per-tier inventory item ids (re-exported for convenience). The
- *  authoritative ItemDefinition lives in `ITEM_DEFINITIONS` so adding,
- *  retrieving, and stacking jewels goes through the same code path as any
- *  other inventory item. */
-export const JEWEL_ITEM_IDS = JEWEL_TIERS.map(t => JEWEL_DEFS[t].itemId);
