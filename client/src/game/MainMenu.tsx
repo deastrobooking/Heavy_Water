@@ -89,11 +89,19 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize, saveSu
         if (showVersus) { setShowVersus(false); return; }
         return;
       }
+      // Block background nav while a sub-dialog (Guide / Versus) owns
+      // the foreground — otherwise D-Pad / arrows would silently move
+      // the underlying menu cursor and Enter could activate START
+      // beneath the open modal.
+      if (showGuide || showVersus) return;
       if (action === "up" || action === "down") {
+        // Wrap-around so a controller can ring through the row in
+        // either direction without hitting a hard end-stop.
         setSelectedIdx((prev) => {
-          const max = Math.max(0, buttons.length - 1);
-          const next = Math.max(0, Math.min(max, prev + (action === "down" ? 1 : -1)));
-          return next;
+          const len = buttons.length;
+          if (len === 0) return 0;
+          const delta = action === "down" ? 1 : -1;
+          return ((prev + delta) % len + len) % len;
         });
         return;
       }
@@ -103,11 +111,13 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize, saveSu
       const tgt = e.target as HTMLElement | null;
       if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA")) return;
       if (e.repeat) return;
-      if (e.code === "ArrowUp") { e.preventDefault(); nav("up"); }
-      else if (e.code === "ArrowDown") { e.preventDefault(); nav("down"); }
-      else if (e.code === "Enter") { e.preventDefault(); nav("activate"); }
+      // Left/Right behave like Up/Down so the four buttons sit on a
+      // single linear ring whether the player thinks of them as a
+      // horizontal or vertical strip.
+      if (e.code === "ArrowUp" || e.code === "ArrowLeft") { e.preventDefault(); nav("up"); }
+      else if (e.code === "ArrowDown" || e.code === "ArrowRight") { e.preventDefault(); nav("down"); }
+      else if (e.code === "Enter" || e.code === "Space") { e.preventDefault(); nav("activate"); }
       else if (e.code === "Escape" || e.code === "Backspace") { e.preventDefault(); nav("close"); }
-      else if (e.code === "KeyB") { e.preventDefault(); nav("close"); }
     };
     const padHandler = (e: Event) => {
       const detail = (e as CustomEvent).detail as { action?: string } | null;

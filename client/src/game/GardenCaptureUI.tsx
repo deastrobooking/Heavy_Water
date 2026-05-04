@@ -51,7 +51,14 @@ export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
   // whenever the player switches into the roster tab so the highlight
   // never strands them past the end of a shorter list.
   const [rosterIdx, setRosterIdx] = useState(0);
+  // Tracks whether the bottom UPGRADE GARDEN button currently owns the
+  // controller/keyboard cursor. Pressing Down past the last roster row
+  // (or Down on any non-roster tab) moves focus here so a controller
+  // user can always reach the upgrade button without a mouse. Pressing
+  // Up from here returns to the roster's last row (or the tab strip).
+  const [upgradeFocused, setUpgradeFocused] = useState(false);
   const rosterRowRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+  const upgradeBtnRef = useRef<HTMLButtonElement | null>(null);
 
   // Persistent "ever caught" species ids — also fold the live roster in
   // so any captures from this session are reflected even before the next
@@ -73,7 +80,7 @@ export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
   // through them. The dynamic part is the elemental list, which can
   // grow if BIO_SPECIES adds new types — `ALL_TYPES` is the single
   // source of truth so this stays in lockstep with the tab strip.
-  const tabOrder = useMemo<Tab[]>(() => ["roster", "all", ...ALL_TYPES, "roster"] as Tab[], []);
+  const tabOrder = useMemo<Tab[]>(() => ["roster", "all", ...ALL_TYPES] as Tab[], []);
 
   // Clamp once the roster shrinks (DEPLOY removes a creature) so the
   // ring never highlights an empty row.
@@ -87,35 +94,63 @@ export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
     const nav = (action: "up" | "down" | "left" | "right" | "activate" | "close") => {
       if (action === "close") { onClose(); return; }
       if (action === "left" || action === "right") {
+        // Left/Right always cycles tabs. If the upgrade button currently
+        // owns focus, hand focus back to the tab strip so the highlight
+        // tracks the active tab again.
         const idx = tabOrder.indexOf(tab);
         const safe = idx < 0 ? 0 : idx;
         const next = (safe + (action === "right" ? 1 : -1) + tabOrder.length) % tabOrder.length;
         const nextTab = tabOrder[next];
         setTab(nextTab);
         if (nextTab !== "roster") setRosterIdx(0);
+        setUpgradeFocused(false);
         return;
       }
       if (action === "up" || action === "down") {
-        if (tab !== "roster") {
-          if (action === "down") setTab("roster");
+        if (upgradeFocused) {
+          // From the upgrade button: Up returns focus into the body
+          // (roster's last row, or just the active tab body for dex tabs).
+          if (action === "up") {
+            setUpgradeFocused(false);
+            if (tab === "roster" && rosterCount > 0) {
+              setRosterIdx(rosterCount - 1);
+            }
+          }
           return;
         }
-        setRosterIdx(prev => {
-          const max = Math.max(0, rosterCount - 1);
-          const cur = Math.min(prev, max);
-          return Math.max(0, Math.min(max, cur + (action === "down" ? 1 : -1)));
-        });
+        if (tab !== "roster") {
+          // Dex tabs have no row cursor; Down jumps to the upgrade button
+          // so it's always reachable from a non-roster tab.
+          if (action === "down") setUpgradeFocused(true);
+          return;
+        }
+        // Roster tab: walk the cursor; falling off the bottom focuses
+        // the upgrade button. Falling off the top is clamped at row 0.
+        const max = Math.max(0, rosterCount - 1);
+        const cur = Math.min(rosterIdx, max);
+        if (action === "down") {
+          if (rosterCount === 0 || cur >= max) {
+            setUpgradeFocused(true);
+          } else {
+            setRosterIdx(cur + 1);
+          }
+        } else {
+          setRosterIdx(Math.max(0, cur - 1));
+        }
         return;
       }
       if (action === "activate") {
+        if (upgradeFocused) {
+          if (canUpgradeGarden && upgradeCost) onUpgradeGarden();
+          return;
+        }
         if (tab === "roster") {
           const c = captured[rosterCurIdx];
           if (c) onDeploy(c.id);
           return;
         }
-        // From any other tab, A activates the upgrade-garden button
-        // when affordable so a controller user can level the garden
-        // without having to navigate back to the roster row.
+        // From any non-roster tab without explicit upgrade focus, A still
+        // activates the upgrade-garden button when affordable.
         if (canUpgradeGarden && upgradeCost) onUpgradeGarden();
       }
     };
@@ -141,7 +176,25 @@ export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
       window.removeEventListener("gamepad-menu", padHandler);
       window.removeEventListener("keydown", keyHandler);
     };
-  }, [open, tab, tabOrder, rosterCount, rosterCurIdx, captured, canUpgradeGarden, upgradeCost, onDeploy, onUpgradeGarden, onClose]);
+  }, [open, tab, tabOrder, rosterCount, rosterCurIdx, rosterIdx, upgradeFocused, captured, canUpgradeGarden, upgradeCost, onDeploy, onUpgradeGarden, onClose]);
+
+  // Reset upgrade focus whenever the dialog re-opens so a fresh open
+  // always starts with the roster cursor (matches the existing roster
+  // index reset behavior).
+  useEffect(() => {
+    if (open) setUpgradeFocused(false);
+  }, [open]);
+
+  // Keep the upgrade button visible when it owns focus (it sits in a
+  // sticky footer today, so this is only defense-in-depth, but it
+  // mirrors the roster auto-scroll for consistency).
+  useEffect(() => {
+    if (!open || !upgradeFocused) return;
+    const el = upgradeBtnRef.current;
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [open, upgradeFocused]);
 
   // Auto-scroll the focused roster row into view so controller-only
   // navigation never strands the player past the bottom of the list.
@@ -200,7 +253,7 @@ export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
 
         <div className="px-5 py-2 text-zinc-400 text-xs border-b border-zinc-800">
           Press <span className="text-lime-300 font-bold">[H]</span> in the world near a wild bio-creature to throw a capture orb. Captured creatures join your roster and your dex.
-          <span className="ml-2 text-zinc-500">[←/→] or D-Pad swap tabs · [↑/↓] cursor · [Enter] / [A] to deploy or upgrade · [E] / [B] / Esc to close.</span>
+          <span className="ml-2 text-zinc-500">[←/→] swap tabs · [↑/↓] cursor (down past the last row reaches UPGRADE) · [Enter] / [A] deploy or upgrade · [E] / [B] / Esc close.</span>
         </div>
 
         {/* body */}
@@ -229,9 +282,12 @@ export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
           <div className="text-zinc-500 text-[11px]">Press [E] or ESC to leave the Garden.</div>
           {upgradeCost ? (
             <button
+              ref={upgradeBtnRef}
               disabled={!canUpgradeGarden}
               onClick={onUpgradeGarden}
-              className={`px-4 py-2 rounded text-xs font-bold tracking-wider ${canUpgradeGarden ? "bg-amber-500 hover:bg-amber-400 text-black" : "bg-zinc-700 text-zinc-500"}`}
+              onMouseEnter={() => setUpgradeFocused(true)}
+              onMouseLeave={() => setUpgradeFocused(false)}
+              className={`px-4 py-2 rounded text-xs font-bold tracking-wider ${canUpgradeGarden ? "bg-amber-500 hover:bg-amber-400 text-black" : "bg-zinc-700 text-zinc-500"}${upgradeFocused ? " ring-2 ring-amber-300 ring-offset-1 ring-offset-zinc-900" : ""}`}
             >
               UPGRADE GARDEN → LVL {level + 1} ({upgradeCost.gears}g {upgradeCost.nano}nf {upgradeCost.cores}c)
             </button>

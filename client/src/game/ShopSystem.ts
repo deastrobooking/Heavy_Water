@@ -170,8 +170,15 @@ export class ShopSystem {
     this.inventory.addItem(creditsDef, amount);
   }
 
+  // Bound handler refs so dispose() can remove the exact same function
+  // references it registered. Without this, every Game restart leaves
+  // a stale closure attached to window and the next B press fans out
+  // across N copies of the (idempotent but noisy) closeShop().
+  private onKeyDown: ((e: KeyboardEvent) => void) | null = null;
+  private onGamepadMenu: ((e: Event) => void) | null = null;
+
   private setupControls(): void {
-    window.addEventListener("keydown", (e) => {
+    this.onKeyDown = (e: KeyboardEvent) => {
       if (e.code === "KeyE") {
         if (this.isShopOpen) {
           this.closeShop();
@@ -182,7 +189,22 @@ export class ShopSystem {
       if (e.code === "Escape" && this.isShopOpen) {
         this.closeShop();
       }
-    });
+    };
+    // Controller pathway: GamepadInput dispatches `gamepad-menu` with
+    // `action: "close"` whenever B is pressed AND a modal is open
+    // (shop, garden, upgrade, etc). The keyboard path above only
+    // handles Escape / KeyE — without this listener the player has no
+    // way to back out of the outpost/shop dialog with a controller.
+    // KeyB is reserved in-game for cycling melee weapons, so we can't
+    // hijack the keyboard B key for this; B-on-the-pad is delivered
+    // exclusively through the menu-mode CustomEvent contract.
+    this.onGamepadMenu = (e: Event) => {
+      if (!this.isShopOpen) return;
+      const detail = (e as CustomEvent).detail as { action?: string } | null;
+      if (detail?.action === "close") this.closeShop();
+    };
+    window.addEventListener("keydown", this.onKeyDown);
+    window.addEventListener("gamepad-menu", this.onGamepadMenu);
   }
 
   createShopBuildings(): void {
@@ -498,5 +520,13 @@ export class ShopSystem {
     this.shops = [];
     this.activeShop = null;
     this.isShopOpen = false;
+    if (this.onKeyDown) {
+      window.removeEventListener("keydown", this.onKeyDown);
+      this.onKeyDown = null;
+    }
+    if (this.onGamepadMenu) {
+      window.removeEventListener("gamepad-menu", this.onGamepadMenu);
+      this.onGamepadMenu = null;
+    }
   }
 }
