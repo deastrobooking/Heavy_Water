@@ -1419,6 +1419,22 @@ export const Game: React.FC = () => {
         vehicleSystem.spawnPreset("RaiderATV", new BABYLON.Vector3(-40, 0.6, -15));
         vehicleSystem.spawnPreset("CometFighter", new BABYLON.Vector3(-55, 2, -15));
 
+        // GHOST RIDE wiring. VehicleSystem doesn't know about the enemy
+        // / aerial / base systems directly — we hand it live getters so
+        // the ghost-ride collision scan always sees the up-to-date alive
+        // lists (including enemies spawned by waves after the ride starts).
+        // damageStructure is routed through enemyBaseRef so it picks up
+        // any in-place rebind on a level swap (the bound `enemyBaseSystem`
+        // local would otherwise stale out).
+        vehicleSystem.setGhostRideTargets({
+          getGroundEnemyMeshes: () => enemySystemRef.current?.getEnemyMeshes() ?? [],
+          getAerialUnits: () => aerialEnemyRef.current?.getActiveUnits() ?? [],
+          getBaseStructureMeshes: () => enemyBaseRef.current?.getActiveMeshes() ?? [],
+          damageBaseStructure: (mesh, amount) =>
+            enemyBaseRef.current?.damageStructure(mesh, amount) ?? false,
+          getPlayerPosition: () => player.getPosition(),
+        });
+
         // === EnvironmentPropSystem: scattered destructible/lootable sci-fi props ===
         const propSystem = new EnvironmentPropSystem(scene);
         propSystemRef.current = propSystem;
@@ -2565,6 +2581,41 @@ export const Game: React.FC = () => {
     initializeGame();
   }, [initializeGame]);
 
+  /**
+   * GHOST RIDE THE WHIP. While mounted in a vehicle AND boosting (turbo
+   * window OR Shift held), pressing B (or controller B / KeyE) ejects
+   * the player in a sideways somersault while the unmanned vehicle
+   * keeps barreling forward at locked speed. The vehicle detonates on
+   * impact with any enemy, aerial unit, base structure, or wall — or
+   * after a ~6 s fuse if it never hits anything. The actual collision
+   * scan + AoE damage live inside VehicleSystem; this callback just
+   * triggers the eject + plays the player-side bail animation.
+   */
+  const tryGhostRide = useCallback(() => {
+    if (!vehicleRef.current || !playerRef.current) return;
+    const result = vehicleRef.current.startGhostRide();
+    if (!result) {
+      // Mounted but not boosting — give the player a hint instead of
+      // silently swallowing the keypress so they learn the gate.
+      if (vehicleRef.current.getActive()) {
+        showMessage("BOOST FIRST TO GHOST RIDE", 1200);
+      }
+      return;
+    }
+    // Pop the player off the vehicle's transform BEFORE applying the
+    // somersault so PlayerController.updatePhysics() takes over again.
+    // setMounted(null) restores visibility on the humanoid mesh.
+    playerRef.current.setMounted(null);
+    // Plant the player one body-width above the vehicle so the dive-out
+    // doesn't intersect the now-moving mesh. The eject velocity itself
+    // carries them sideways and up; this is just the spawn pose.
+    const v = result.vehicle;
+    const dropPos = v.position.add(new BABYLON.Vector3(0, 2.0, 0));
+    playerRef.current.setPosition(dropPos);
+    playerRef.current.triggerSomersaultEject(result.ejectVelocity);
+    showMessage("GHOST RIDE THE WHIP!", 1500);
+  }, [showMessage]);
+
   const handleRespawnVehicles = useCallback(() => {
     if (!playerRef.current || !vehicleRef.current) return;
     const pos = playerRef.current.getPosition();
@@ -3120,7 +3171,21 @@ export const Game: React.FC = () => {
       } else if (e.code === "KeyE") {
         if (!playerRef.current) return;
         const pos = playerRef.current.getPosition();
-        // Priority: exit vehicle > enter vehicle > base structures
+        // Priority: ghost-ride (controller B mid-boost) > exit vehicle
+        // > enter vehicle > base structures. We deliberately gate the
+        // ghost-ride branch on `!e.isTrusted` so ONLY the synthetic
+        // KeyE dispatched by GamepadInput (Xbox B → KeyE) hijacks
+        // the exit. Real keyboard E always falls through to the
+        // normal exit path even while boosting, since keyboard players
+        // already have a dedicated KeyB binding for the ghost ride.
+        if (
+          !e.isTrusted &&
+          vehicleRef.current?.getActive() &&
+          vehicleRef.current.isBoosting()
+        ) {
+          tryGhostRide();
+          return;
+        }
         if (vehicleRef.current?.getActive()) {
           const v = vehicleRef.current.exit();
           if (v) {
@@ -3151,11 +3216,20 @@ export const Game: React.FC = () => {
           if (document.pointerLockElement) document.exitPointerLock();
         }
       } else if (e.code === "KeyB") {
-        // Cycle the equipped melee weapon: SABRE → owned arsenal weapons →
-        // SABRE. No-op (returns "Beam Sabre") when nothing is unlocked.
-        if (!e.repeat && meleeArsenalRef.current) {
-          const name = meleeArsenalRef.current.cycle(1);
-          showMessage(`MELEE: ${name.toUpperCase()}`, 1200);
+        // Context-sensitive:
+        //   in vehicle → GHOST RIDE THE WHIP (only fires while boosting)
+        //   on foot    → cycle equipped melee weapon
+        // Keeping both bindings on KeyB is safe because they're
+        // mutually exclusive: meleeArsenal.cycle is meaningless while
+        // mounted (the player can't swing), and ghost-ride's gate
+        // (isBoosting) refuses the trigger on foot.
+        if (!e.repeat) {
+          if (vehicleRef.current?.getActive()) {
+            tryGhostRide();
+          } else if (meleeArsenalRef.current) {
+            const name = meleeArsenalRef.current.cycle(1);
+            showMessage(`MELEE: ${name.toUpperCase()}`, 1200);
+          }
         }
       } else if (e.code === "KeyN") {
         // Fire the active arsenal weapon's signature special. No-op if the
@@ -3320,10 +3394,16 @@ export const Game: React.FC = () => {
       ShiftLeft: "boost",
     };
     const setKey = (code: string, down: boolean) => {
-      if (!vehicleRef.current?.getActive()) return;
       const k = codeToInput[code];
       if (!k) return;
-      vehicleRef.current.setInput({ [k]: down } as any);
+      // We always FORWARD keyup events even when no vehicle is active
+      // so a Shift release that happens after a ghost-ride / dismount
+      // can clear the latched `input.boost` flag — otherwise the next
+      // mount inherits a stuck boost state and is immediately eligible
+      // for a tap-B ghost ride from a standstill. Keydown is still
+      // gated to avoid accumulating phantom inputs while on foot.
+      if (down && !vehicleRef.current?.getActive()) return;
+      vehicleRef.current?.setInput({ [k]: down } as any);
     };
     const onDown = (e: KeyboardEvent) => setKey(e.code, true);
     const onUp = (e: KeyboardEvent) => setKey(e.code, false);

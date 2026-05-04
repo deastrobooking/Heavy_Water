@@ -1910,4 +1910,46 @@ export class PlayerController implements IDamageable {
     this.onMeleeAttack = light;
     this.onHeavyMeleeAttack = heavy;
   }
+
+  /**
+   * GHOST RIDE bail-out. Called by Game.tsx the same frame the player
+   * triggers Ghost Ride (VehicleSystem.startGhostRide). Pops the player
+   * off the vehicle's transform, plants them in the world at their
+   * last-known mounted position, and applies a side+up shove velocity
+   * so they somersault clear of the now-driverless ride. We piggyback
+   * on the existing dodgeRoll animation (mapPlayerStateToAnimation
+   * already maps `isDodging → "dodgeRoll"`) so the bail visual is the
+   * same somersault used everywhere else — no new animation state.
+   *
+   * The dodge timer is bumped to ~0.7s (vs the standard 0.3s) so the
+   * roll plays through the airborne arc, and `isInvulnerable` stays on
+   * for the whole duration so the player can't get clipped by their
+   * own ghost-ride shockwave or by an enemy attack mid-bail.
+   */
+  triggerSomersaultEject(velocity: BABYLON.Vector3): void {
+    // The caller (Game.tsx) has ALREADY done setMounted(null), so the
+    // mount fields are clear and updatePhysics() is back online. We
+    // just need to plant the velocity + arm the dodge animation gate.
+    this.velocity.x = velocity.x;
+    this.velocity.y = velocity.y;
+    this.velocity.z = velocity.z;
+    this.isGrounded = false;
+    this.isFlying = false;
+    this.isJetpacking = false;
+    this.isBoostDashing = false;
+    this.isAirSmashing = false;
+
+    // Mirror startDodge's invulnerability window, but DON'T touch
+    // dodgeDirection/dodgeSpeed — those drive the per-frame `addInPlace`
+    // shove inside updatePhysics, and we want the natural ballistic
+    // arc from `velocity` to take over instead.
+    this.isDodging = true;
+    this.dodgeTimer = 0.7;
+    this.isInvulnerable = true;
+    this.dodgeCooldownTimer = this.dodgeCooldown;
+    this.dodgeDirection = BABYLON.Vector3.Zero();
+    this.dodgeSpeed = 0;
+    this.stateMachine.changeState("dodging");
+    this.bus.emit(GameEvents.PLAYER_DODGE);
+  }
 }
