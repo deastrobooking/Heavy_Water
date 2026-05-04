@@ -73,7 +73,7 @@ export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
   // through them. The dynamic part is the elemental list, which can
   // grow if BIO_SPECIES adds new types — `ALL_TYPES` is the single
   // source of truth so this stays in lockstep with the tab strip.
-  const tabOrder = useMemo<Tab[]>(() => ["roster", "all", ...ALL_TYPES] as Tab[], []);
+  const tabOrder = useMemo<Tab[]>(() => ["roster", "all", ...ALL_TYPES, "roster"] as Tab[], []);
 
   // Clamp once the roster shrinks (DEPLOY removes a creature) so the
   // ring never highlights an empty row.
@@ -90,15 +90,16 @@ export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
         const idx = tabOrder.indexOf(tab);
         const safe = idx < 0 ? 0 : idx;
         const next = (safe + (action === "right" ? 1 : -1) + tabOrder.length) % tabOrder.length;
-        setTab(tabOrder[next]);
-        setRosterIdx(0);
+        const nextTab = tabOrder[next];
+        setTab(nextTab);
+        if (nextTab !== "roster") setRosterIdx(0);
         return;
       }
       if (action === "up" || action === "down") {
-        // Only the roster tab has selectable rows; on dex tabs we fall
-        // through to a no-op so accidental D-Pad presses don't move
-        // an invisible cursor.
-        if (tab !== "roster") return;
+        if (tab !== "roster") {
+          if (action === "down") setTab("roster");
+          return;
+        }
         setRosterIdx(prev => {
           const max = Math.max(0, rosterCount - 1);
           const cur = Math.min(prev, max);

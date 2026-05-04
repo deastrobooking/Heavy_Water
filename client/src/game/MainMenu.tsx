@@ -52,6 +52,7 @@ const formatSavedAt = (ts: number): string => {
 export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize, saveSummary }) => {
   const [showGuide, setShowGuide] = useState(false);
   const [showVersus, setShowVersus] = useState(false);
+  const [selectedIdx, setSelectedIdx] = useState(0);
   useEffect(() => {
     let cancelled = false;
     void MusicSystem.init().then(() => {
@@ -66,6 +67,63 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize, saveSu
       window.removeEventListener("keydown", tryStart);
     };
   }, []);
+
+  const buttons = useMemo(
+    () => ([
+      { id: "start", label: "START MISSION", activate: () => onStart({ mode: "campaign" }) },
+      ...(onCustomize ? [{ id: "customize", label: "CUSTOMIZE", activate: onCustomize }] : []),
+      { id: "versus", label: "VERSUS", activate: () => setShowVersus(true) },
+      { id: "guide", label: "GUIDE", activate: () => setShowGuide(true) },
+    ]),
+    [onStart, onCustomize],
+  );
+
+  useEffect(() => {
+    setSelectedIdx((prev) => Math.min(prev, Math.max(0, buttons.length - 1)));
+  }, [buttons.length]);
+
+  useEffect(() => {
+    const nav = (action: "up" | "down" | "activate" | "close") => {
+      if (action === "close") {
+        if (showGuide) { setShowGuide(false); return; }
+        if (showVersus) { setShowVersus(false); return; }
+        return;
+      }
+      if (action === "up" || action === "down") {
+        setSelectedIdx((prev) => {
+          const max = Math.max(0, buttons.length - 1);
+          const next = Math.max(0, Math.min(max, prev + (action === "down" ? 1 : -1)));
+          return next;
+        });
+        return;
+      }
+      buttons[selectedIdx]?.activate();
+    };
+    const keyHandler = (e: KeyboardEvent) => {
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA")) return;
+      if (e.repeat) return;
+      if (e.code === "ArrowUp") { e.preventDefault(); nav("up"); }
+      else if (e.code === "ArrowDown") { e.preventDefault(); nav("down"); }
+      else if (e.code === "Enter") { e.preventDefault(); nav("activate"); }
+      else if (e.code === "Escape" || e.code === "Backspace") { e.preventDefault(); nav("close"); }
+      else if (e.code === "KeyB") { e.preventDefault(); nav("close"); }
+    };
+    const padHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { action?: string } | null;
+      if (!detail?.action) return;
+      if (detail.action === "left" || detail.action === "up") nav("up");
+      else if (detail.action === "right" || detail.action === "down") nav("down");
+      else if (detail.action === "activate") nav("activate");
+      else if (detail.action === "close") nav("close");
+    };
+    window.addEventListener("keydown", keyHandler);
+    window.addEventListener("gamepad-menu", padHandler);
+    return () => {
+      window.removeEventListener("keydown", keyHandler);
+      window.removeEventListener("gamepad-menu", padHandler);
+    };
+  }, [buttons, selectedIdx, showGuide, showVersus]);
 
   // Pre-computed star positions for star field — stable across renders
   const stars = useMemo(
@@ -191,42 +249,20 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize, saveSu
 
         {/* === ACTION BUTTONS === */}
         <div className="flex gap-4 justify-center mt-6">
+          {buttons.map((btn, idx) => (
           <button
-            onClick={() => onStart({ mode: "campaign" })}
+            key={btn.id}
+            onClick={btn.activate}
+            onMouseEnter={() => setSelectedIdx(idx)}
             className="px-12 py-4 text-xl font-bold text-black bg-gradient-to-r from-cyan-300 to-blue-500
                        rounded-lg transform hover:scale-105 transition-all duration-300
                        shadow-lg shadow-cyan-500/50 hover:shadow-blue-500/60
                        border-2 border-white/30"
+            style={selectedIdx === idx ? { outline: "2px solid #22d3ee", outlineOffset: "3px" } : undefined}
           >
-            START MISSION
+            {btn.label}
           </button>
-          {onCustomize && (
-            <button
-              onClick={onCustomize}
-              className="px-8 py-4 text-xl font-bold text-cyan-300 bg-black/40 border-2 border-cyan-400
-                         rounded-lg transform hover:scale-105 transition-all duration-300
-                         shadow-lg shadow-cyan-500/30 hover:bg-cyan-500/15"
-            >
-              CUSTOMIZE
-            </button>
-          )}
-          <button
-            onClick={() => setShowVersus(true)}
-            className="px-8 py-4 text-xl font-bold text-fuchsia-200 bg-black/40 border-2 border-fuchsia-400
-                       rounded-lg transform hover:scale-105 transition-all duration-300
-                       shadow-lg shadow-fuchsia-500/40 hover:bg-fuchsia-500/15"
-            style={{ textShadow: "0 0 8px rgba(255,72,214,0.7)" }}
-          >
-            VERSUS
-          </button>
-          <button
-            onClick={() => setShowGuide(true)}
-            className="px-8 py-4 text-xl font-bold text-amber-200 bg-black/40 border-2 border-amber-300
-                       rounded-lg transform hover:scale-105 transition-all duration-300
-                       shadow-lg shadow-amber-500/30 hover:bg-amber-500/15"
-          >
-            GUIDE
-          </button>
+          ))}
         </div>
       </div>
 
