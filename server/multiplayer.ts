@@ -124,7 +124,28 @@ function removePlayerFromRoom(playerId: string): void {
 }
 
 export function setupMultiplayer(httpServer: Server): void {
-  const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
+  // IMPORTANT: use `noServer: true` and route upgrades manually instead
+  // of `{ server, path: "/ws" }`. The shorthand registers a global
+  // upgrade listener that calls `abortHandshake(socket, 400)` for ANY
+  // non-matching path — which kills Vite's `/vite-hmr` upgrade before
+  // Vite's own listener can handle it (causing the noisy
+  // `wss://localhost:undefined/?token=…` fallback in dev). Manual
+  // routing only consumes upgrades for `/ws` and leaves everything else
+  // for downstream listeners (Vite HMR, future WSS endpoints).
+  const wss = new WebSocketServer({ noServer: true });
+
+  httpServer.on("upgrade", (req, socket, head) => {
+    let pathname: string;
+    try {
+      pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+    } catch {
+      return; // malformed URL — let other listeners decide / let it die naturally
+    }
+    if (pathname !== "/ws") return; // not ours; another listener (e.g. Vite HMR) owns it
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+  });
 
   log("WebSocket multiplayer server started on /ws");
 

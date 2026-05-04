@@ -9,6 +9,15 @@ import { nanoid } from "nanoid";
 const viteLogger = createLogger();
 
 export async function setupVite(server: Server, app: Express) {
+  // NOTE on the noisy `wss://localhost:undefined/?token=…` warning:
+  // this is the Vite client's *reconnect fallback* path firing after a
+  // transient WS close (HMR primary stays connected fine via /vite-hmr
+  // through the express server). We tried pinning `clientPort: 443` +
+  // `protocol: "wss"` to fix the fallback URL, but the Replit dev proxy
+  // refuses WS upgrades with an explicit `:443` port (only the implicit
+  // form `wss://host/vite-hmr` is accepted), which broke primary HMR.
+  // Leaving the original implicit-port config in place — the warning is
+  // a cosmetic, one-shot console line and does not affect HMR.
   const serverOptions = {
     middlewareMode: true,
     hmr: { server, path: "/vite-hmr" },
