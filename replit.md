@@ -1,7 +1,7 @@
 # Heavy Water
 
 ## Overview
-Heavy Water is a 3D futuristic sci-fi action game developed with Babylon.js, set in a far-future Detroit. The game features anime-style cell-shaded graphics, offering immersive ground and aerial combat, DBZ-style flight mechanics, and open-world exploration. Its core purpose is to defend the city from an invasion of insane hybrid organoids, encompassing both ground swarms and hostile aerial forces. Key capabilities include deep exploration, dynamic combat, character customization, crafting, and base building, aiming to deliver a rich and engaging player experience. The business vision is to target the niche market of anime-style sci-fi game enthusiasts.
+Heavy Water is a 3D futuristic sci-fi action game built with Babylon.js, set in a far-future Detroit. It features anime-style cell-shaded graphics, offering immersive ground and aerial combat with DBZ-style flight mechanics, and open-world exploration. The game's core purpose is to defend the city from an invasion of insane hybrid organoids, encompassing both ground swarms and hostile aerial forces. Key capabilities include deep exploration, dynamic combat, character customization, crafting, and base building, aiming to deliver a rich and engaging player experience. The business vision is to target the niche market of anime-style sci-fi game enthusiasts.
 
 ## User Preferences
 - Design choice: Anime retro 80's sci-fi cell-shaded graphics style
@@ -16,44 +16,35 @@ The game utilizes Babylon.js v8.x for WebGL/WebGPU rendering, focusing on an ani
 - Babylon.js handles 3D rendering with fallback from WebGPU to WebGL2.
 - Custom GLSL-ES-1.0 cell-shading with ink outlines, bloom, chromatic aberration, and FXAA.
 - SkySystem manages a custom-shader gradient skybox, day/night cycle, and weather.
-- LODCullSystem manages mesh distance culling for city elements, enemy bases, and other environmental props.
+- LODCullSystem manages mesh distance culling for environmental elements.
 
 **Core Gameplay Mechanics:**
-- **Combat:** Features a unified ExplosionSystem, melee combo chains, elemental casting, Beam Sabre, unlimited ammo for ranged weapons, and an optional Auto-Target Module for aim assistance. WeaponsSystem supports various aim providers and custom fire handlers for tool-style weapons.
-- **Melee Arsenal (alternate melee weapons):** Four optional weapons that swap in for the Beam Sabre via `MeleeArsenalSystem` (`client/src/game/MeleeArsenalSystem.ts`) — **Beam Glaive** (long polearm, wide sweep arc), **Twin Beam Daggers** (rapid 4-stab front cone), **Plasma War Axe** (slow heavy cleave with massive knockback) and **Spiked Chain Whip** (long narrow lash). Each weapon has three SPECIALS-tab tiers: `<weapon>Own` unlocks the weapon + cycle slot, `<weapon>Combo` enhances the primary (Glaive → Triple Sweep, Daggers → 4 → 6 stabs + Phantom Step, Axe → Cleave + Upper, Whip → Pull-In Lash), `<weapon>Special` binds the signature super-move to **KeyN** (Glaive → Comet Spin orbiting crescent, Daggers → Phantom Storm 3-target multi-strike, Axe → Ground Slam expanding shockwave, Whip → Flail Spin 360° radial). Per-weapon damage / reach scales 1.0× → 1.4× → 1.8× as the three tiers stack. **KeyB** cycles SABRE → owned weapons → SABRE; the sabre remains the default on every spawn (equipped slot is not persisted, only the unlock flags are). All damage flows through the central `routeHit` so alt weapons hit enemies, aerial units, turrets, bases, mining nodes and props identically. Persisted in `SpecialsOwnedSnapshot` (12 new optional flags) and re-applied via `meleeArsenal.applyLoadedState()` on load.
-
-- **Beam Sabre — Gold Tier (FINAL SPECIALS unlock):** Top-shelf SPECIALS upgrade above the existing Spin / Twin / Giant unlocks (cost 800 gears / 200 cores / 120 nano / 80 circuits / 12000 credits — pricier than Superman Flight). `BeamSabreSystem.unlockGoldSabre()` parents two new concentric box meshes (red sheath, gold halo) onto the existing `sabreMesh` so the canonical `updateBladePosition()` drives all three layers from one transform — the inner blade is recolored to bright blue, producing the inner-blue / middle-red / outer-gold silhouette. `launchEnergyWave()` keeps the base cyan wave and, when `hasGoldSabre` is set, follows it with two extra `spawnArcWave` calls (red `sizeMul 1.55 / damageMul 1.5` then giant gold `sizeMul 2.2 / damageMul 2.0`, both `piercing: true`) so every launch reads as blue → red → giant-gold in flight order. Persisted on `SpecialsOwnedSnapshot.sabreGold`; restored via `applyLoadedState({ hasGoldSabre })` which re-runs the canonical (idempotent) unlock so the layered halos rebuild on load. Stacks cleanly with Twin Wave, Giant Blade and Spin Blade.
-- **Movement:** Player characters have complex state machines, a triple-jump flight system, Rocket Skates, Boost Dash, and a Spinning Downward Smash aerial dive-bomb attack.
-- **Superman Flight (SPECIALS unlock):** Premium movement upgrade (350 gears / 90 cores / 55 nano / 40 circuits / 4000 credits). While airborne, pressing **KeyL + Space simultaneously** (gamepad dash + jump) toggles a free-flight mode that's distinct from the standard `isFlying` armor mode — the existing armor-energy economy stays untouched. `PlayerController.updateSuperman()` handles camera-relative WASD with full pitch (look down to dive, up to climb), a smoothly-eased held-Space speed boost (~2.7× cruise, ramps over ~0.16 s) intended for outrunning aerial chase enemies, and an upright-pose restore on land. The keydown handler short-circuits the combo BEFORE the jump / boost-dash branches so pressing the combo doesn't also consume a jump or fire a dash. Press **KeyX** (the universal flight-cancel) or the combo again to land manually; the mode also auto-exits on ground contact, mount, or fast-travel via `setMounted()` calling `exitSupermanMode()`. Weapons fire normally throughout. Persisted in `SpecialsOwnedSnapshot.supermanFlight` and re-applied on load via `player.unlockSupermanFlight()`.
-- **Vehicles:** Parametrically generated ATVs and space fighters managed by VehicleFactory and VehicleSystem. Tap **Space** (or gamepad A) while driving for a one-shot **Turbo Boost** — `VehicleSystem.triggerTurbo()` raises the active vehicle's max-speed cap and accel for 0.7 s with a 1.6 s cooldown (ATV: cap 24 → 56 m/s + 16 m/s instant kick; Fighter: cap 55/95 → 140 m/s + 28 m/s instant kick), gated synchronously by `turboTimer`/`turboCooldown` so holding the key can't yield permanent overdrive. Layers cleanly with the held-Shift cruise boost AND with the fighter's existing Space → vertical-thrust mapping.
+- **Combat:** Features an ExplosionSystem, melee combo chains, elemental casting, Beam Sabre, unlimited ammo for ranged weapons, and an optional Auto-Target Module. The WeaponsSystem supports various aim providers.
+- **Melee Arsenal:** Four optional alternate melee weapons (Beam Glaive, Twin Beam Daggers, Plasma War Axe, Spiked Chain Whip) are available, each with three tiers of special abilities and scaled damage/reach. A Gold Tier upgrade for the Beam Sabre provides enhanced visual effects and damage.
+- **Movement:** Player characters feature complex state machines, a triple-jump flight system, Rocket Skates, Boost Dash, and a Spinning Downward Smash. A 2-level Dash Capacitor upgrade allows for multiple stored boost-dash charges. Superman Flight is a premium movement upgrade enabling free-flight mode with speed boosts.
+- **Vehicles:** Parametrically generated ATVs and space fighters are managed by VehicleFactory and VehicleSystem, featuring a Turbo Boost mechanic.
 - **Inventory & Crafting:** A 24-slot InventorySystem and recipe-based CraftingSystem.
 - **Loot & Pickups:** Handled by a PickupSystem with enemy-specific drop tables.
 - **Progression:** Per-weapon leveling, companion upgrades, and a comprehensive UpgradeMenu.
 
 **World & Environment:**
 - A 1200x1200 open world with a central city and four biomes, generated by CityGenerator.
-- Procedural L-system foliage in two flavours: `AlienFoliageSystem` and `EarthFoliageSystem`, managed by `LSystemRenderer` and `FoliagePlacement.ts`.
-- A MountainRingSystem.
-- Accessible building interiors and a sky racetrack.
-- Destructible glowing resource nodes managed by the MiningSystem.
+- Procedural L-system foliage (AlienFoliageSystem and EarthFoliageSystem) and a MountainRingSystem.
+- Accessible building interiors, a sky racetrack, and destructible glowing resource nodes managed by the MiningSystem.
 
 **Base Building:**
 - BaseSystem and BuildingSystem enable player-placed, multi-level structures with grid-snapped placement and serialization via PrefabSystem.
 
 **Enemies & NPCs:**
 - EnemySystem includes a wave spawner, Commander enemies, aerial enemies, Hostile Enemy Bases with turrets, Boss Fortresses, and Tank ground units.
-- Bio-Creature Dex defines 125+ collectible robotic creatures with archetypes, elemental types (normal, flame, water, grass, electric, ice, psychic, evil, steel, crystal, dragon), and rarity tiers, each with distinct visual accents.
+- Bio-Creature Dex defines 125+ collectible robotic creatures with archetypes, elemental types, and rarity tiers.
 - FriendlyNPCSystem scatters NPCs with interactive dialogue.
 
 **Levels & Zones:**
 - LevelSystem defines six distinct world levels: three combat fronts (Star City, Hold the Line, Purge the Void), a peaceful sanctuary side-zone (Ashur Sanctuary), an off-canon spacelike combat zone (Orbital Front), and a peaceful indoor lore side-zone (Pontiac Secret Lab). Each level has unique themes and environmental setups.
-    - Ashur Sanctuary (Level 4) is a distinct world with a village, farming, NPCs, and creature deployment. It features unique flora and fauna, including huntable bio-creatures, and equips the Capture Net tool.
-    - Orbital Front (Level 5) is a vacuum-only zone focused on aerial combat, placing the player in a CometFighter amidst an asteroid field with adjusted flight mechanics.
-    - Pontiac Secret Lab (Level 6) is a peaceful indoor side-zone with a bunker interior, featuring scientific equipment and NPCs, accessible via the TRAVEL tab.
 
 **Customization:**
-- CharacterEditor exposes four tabs (Body / Armor / Colors / Boss Style) plus three armor presets — HUMANOID, TITAN, and the new **DREAD** preset (black-on-blood-red, built from the spike + studded parts in `RobotArmorPartsEvil.ts`: Dread Skull Helm, Studded Plate, Dread Spike Pauldron, Spine Spikes, Studded Greaves).
-- The Boss Style tab persists `EnemyStyleOverrides` (`captainPreset`, `captainVariant`, `titanPreset`) on the SavedCharacter. `EnemySystem.createEnemyMesh()` reads them via `getEnemyStyleOverrides()` so spawned captains/heavies adopt the player's chosen silhouette and tint regardless of which level/wave triggered the spawn; commanders + non-heavy types remain on their canonical roster. Cache is seeded at game start (`refreshEnemyStyleOverrides()` in Game.tsx) and refreshed on customizer save.
+- CharacterEditor exposes tabs for Body, Armor, Colors, and Boss Style, along with three armor presets (HUMANOID, TITAN, and DREAD). The Boss Style tab persists enemy appearance overrides.
 
 **Player Systems:**
 - Character customization includes procedural generation, modular body parts, and a HumanoidCharacter system.
@@ -64,20 +55,8 @@ The game utilizes Babylon.js v8.x for WebGL/WebGPU rendering, focusing on an ani
 
 **Multiplayer:**
 - MultiplayerSystem provides client-side WebSocket integration for up to 16 players per room, supporting room management, synchronization, chat, and enemy damage syncing.
-- Rooms carry a `mode: "coop" | "versus"` tag. `coop` is the default campaign / wave-defense session; `versus` is the home-screen PvP arena (see Versus Mode below).
-
-**Versus Mode (PvP-only home-screen game mode):**
-- Selectable from the main menu via the new **VERSUS** button (between CUSTOMIZE and GUIDE). Opens the `VersusLobby` modal which talks `/ws` directly: a player can **CREATE NEW ARENA** (auto-generates a 6-char room code) or **JOIN BY CODE**. On join the lobby tears its WS down and `Game.tsx` boots into a fresh session that auto-creates / -joins the same room via `MultiplayerSystem`.
-- `MainMenu` exports a `StartPayload` (`{ mode: "campaign" | "versus", versus?: { roomCode, isHost } }`) which `handleStart` writes into `versusModeRef` BEFORE `initializeGame()` runs (the ref is read inside the long-lived init closure).
-- `client/src/game/VersusArena.ts` builds a compact 320×320 walled PvP map: ~28 jittered cube buildings (deterministic seeded layout) for parkour cover, four 60 m corner spires, a neon central plaza, four perimeter forcefield walls (cyan glow, alpha 0.55, 80 m tall), and 16 evenly-spaced spawn points around the plaza ring. Exposes the same `WallCollider` / `FloorPlatform` surface as `CityGenerator` so `PlayerController` plumbing is unchanged. Roof tops of buildings + spires are registered as floor platforms so the existing parkour mechanics work unmodified.
-- The Game.tsx VERSUS MODE OVERRIDE block runs at the end of init and:
-    1. Hides the open-world city + foliage + mountains (`setVisible(false)`).
-    2. Disables enemy spawning + clears anything already spawned (`enemySystem.setSpawningEnabled(false)` + `clearAllEnemies()`, `aerialEnemySystem.disengageAndClear()`).
-    3. Mounts `VersusArena` and swaps its colliders/floors into the player.
-    4. Teleports the player to a deterministic spawn slot (`hash(playerId) % 16`).
-    5. Auto-creates (host) or auto-joins (joiner) the lobby-selected room via `MultiplayerSystem.createRoom("versus")` / `joinRoom(code)`. Falls back to a Guest connect for offline play (the server doesn't validate `userId`).
-- All other systems (city, foliage, mountains, enemies, bases) still construct so cross-references stay intact — they're hidden / silenced rather than skipped, which keeps every render-loop invariant valid without per-system `if (versus)` gates.
-- Server: `server/multiplayer.ts` accepts an optional `mode: "coop" | "versus"` on `create_room`, stores it on the `Room`, echoes it on `room_created` / `room_joined`, and includes it in `room_list` for future filtering.
+- Rooms can be `coop` (default campaign/wave-defense) or `versus` (PvP arena).
+- **Versus Mode:** A PvP-only home-screen game mode accessible from the main menu. Players can create new arenas or join by code, leading to a compact 320x320 walled PvP map with deterministic seeded building layouts and specific spawn points. This mode overrides the open-world elements, disabling enemy spawning and hiding unnecessary world components while preserving system integrity.
 
 **UI/UX:**
 - Redesigned HUD, AuthUI, GameUI, shop interfaces, upgrade interfaces, multiplayer lobby, contextual build hotbar, MainMenu with character customization, and an EnemyHealthBarSystem for HTML overlays.

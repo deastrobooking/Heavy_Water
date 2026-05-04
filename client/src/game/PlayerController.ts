@@ -62,6 +62,12 @@ export const PLAYER_UPGRADES: PlayerUpgradeDef[] = [
   { id: "fireRateBoost",     name: "Armor Mod: Pulse Driver", description: "+4% fire rate per level (caps at +40%)",            baseAmount: 0.04, baseCost: 350, costGrowth: 0.55, maxLevel: 10 },
   { id: "damageReduction",   name: "Armor Mod: Aegis Plating",description: "-3% incoming damage per level (caps at -30%)",     baseAmount: 0.03, baseCost: 400, costGrowth: 0.55, maxLevel: 10 },
   { id: "staminaBoost",      name: "Armor Mod: Kinetic Cells",description: "+15 max stamina per level (caps at +75)",          baseAmount: 15,   baseCost: 250, costGrowth: 0.5,  maxLevel: 5  },
+
+  // Dash Capacitor — stores extra boost-dash charges so KeyL can be tapped
+  // 2× or 3× back-to-back before the regen window catches up. Max level 2:
+  // L1 unlocks Double Dash (2 charges), L2 unlocks Triple Dash (3 charges).
+  // Each charge regenerates on the existing 0.7 s boost-dash cooldown.
+  { id: "dashCharges",       name: "Dash Capacitor",  description: "Store an extra dash charge — chain back-to-back bursts (L1: Double Dash, L2: Triple Dash)", baseAmount: 1, baseCost: 600, costGrowth: 1.0, maxLevel: 2 },
 ];
 
 function upgradeCost(def: PlayerUpgradeDef, level: number): number {
@@ -145,6 +151,11 @@ export class PlayerController implements IDamageable {
   // Boost dash — a forward camera-direction burst with brief invuln frames.
   // Distinct from the standard Q dodge: dashing right before a beam-sabre
   // slash triggers an instant energy wave (LB → LT chain).
+  // Dash now uses a *charge* system instead of a single cooldown so the
+  // "Dash Capacitor" upgrade (PLAYER_UPGRADES.dashCharges) can grant
+  // stored extra dashes (double / triple back-to-back). The cooldown
+  // timer still represents the time-to-next-charge — it just regenerates
+  // ONE charge per cycle and re-arms itself while charges < max.
   private isBoostDashing: boolean = false;
   private boostDashTimer: number = 0;
   private boostDashDuration: number = 0.28;
@@ -153,6 +164,8 @@ export class PlayerController implements IDamageable {
   private boostDashSpeed: number = 4.2;
   private boostDashDirection: BABYLON.Vector3 = BABYLON.Vector3.Zero();
   private lastBoostDashAt: number = 0;
+  private maxDashCharges: number = 1;
+  private dashCharges: number = 1;
 
   private isJetpacking: boolean = false;
   private jetpackFuel: number = 200;
@@ -425,7 +438,7 @@ export class PlayerController implements IDamageable {
         this.startDodge();
       }
 
-      if (e.code === "KeyL" && !this.isBoostDashing && this.boostDashCooldownTimer <= 0 && !this.isSupermanFlight) {
+      if (e.code === "KeyL" && !this.isBoostDashing && this.dashCharges > 0 && !this.isSupermanFlight) {
         this.startBoostDash();
       }
 
@@ -613,7 +626,13 @@ export class PlayerController implements IDamageable {
   private startBoostDash(): void {
     if (this.stateMachine.isInState("stunned", "dead")) return;
     if (this.mountedVehiclePos) return;
+    if (this.dashCharges <= 0) return;
 
+    // Consume one stored charge. The regen timer is armed at end-of-dash
+    // (in updateBoostDash) so the i-frame burst itself isn't shortened by
+    // the cooldown — a player with 3 charges can chain three full dashes
+    // back-to-back, then wait 0.7 s per charge to regenerate.
+    this.dashCharges--;
     this.isBoostDashing = true;
     this.boostDashTimer = this.boostDashDuration;
     this.isInvulnerable = true;
@@ -707,7 +726,14 @@ export class PlayerController implements IDamageable {
     if (this.boostDashTimer <= 0) {
       this.isBoostDashing = false;
       this.isInvulnerable = false;
-      this.boostDashCooldownTimer = this.boostDashCooldown;
+      // Arm the regen timer ONLY if no regen is already in flight and we
+      // still have room to refill. Without this guard, chaining a second
+      // dash mid-regen would reset the regen clock and effectively delay
+      // the next charge — breaking the "back-to-back, then steady drip"
+      // feel of the Dash Capacitor upgrade.
+      if (this.dashCharges < this.maxDashCharges && this.boostDashCooldownTimer <= 0) {
+        this.boostDashCooldownTimer = this.boostDashCooldown;
+      }
       return;
     }
     // Apply horizontal dash velocity; preserve gravity on Y.
@@ -718,7 +744,21 @@ export class PlayerController implements IDamageable {
 
   private updateTimers(dt: number): void {
     if (this.dodgeCooldownTimer > 0) this.dodgeCooldownTimer -= dt;
-    if (this.boostDashCooldownTimer > 0) this.boostDashCooldownTimer -= dt;
+    if (this.boostDashCooldownTimer > 0) {
+      this.boostDashCooldownTimer -= dt;
+      if (this.boostDashCooldownTimer <= 0) {
+        // Regen one charge per cooldown cycle. If still below the cap,
+        // re-arm immediately so a 3-charge player who just dumped all
+        // three dashes refills at 0.7 s + 1.4 s + 2.1 s (steady drip)
+        // rather than only ever regenerating one.
+        if (this.dashCharges < this.maxDashCharges) {
+          this.dashCharges++;
+          if (this.dashCharges < this.maxDashCharges) {
+            this.boostDashCooldownTimer = this.boostDashCooldown;
+          }
+        }
+      }
+    }
     if (this.parryCooldownTimer > 0) this.parryCooldownTimer -= dt;
     if (this.staminaRegenDelay > 0) this.staminaRegenDelay -= dt;
 
@@ -1368,6 +1408,13 @@ export class PlayerController implements IDamageable {
     this.isDodging = false;
     this.isBoostDashing = false;
     this.isParrying = false;
+    // Restore dash charges to the upgraded cap and clear the regen clock
+    // so a respawned player isn't punished for whatever dash state they
+    // died in (e.g. died with 0 charges and 0.4 s left on the regen).
+    this.dashCharges = this.maxDashCharges;
+    this.boostDashCooldownTimer = 0;
+    this.boostDashTimer = 0;
+    this.lastBoostDashAt = 0;
     this.velocity.setAll(0);
     this.meshRoot.position.copyFrom(spawnPosition);
     // Reset orientation. Without this the character respawned still rotated
@@ -1432,6 +1479,9 @@ export class PlayerController implements IDamageable {
       case "fireRateBoost": return 0;
       case "damageReduction": return 0;
       case "staminaBoost": return 0;
+      // Dash Capacitor: baseline is 1 charge (the default single dash);
+      // each level adds +1 (Double Dash → Triple Dash).
+      case "dashCharges": return 1;
       default: return 0;
     }
   }
@@ -1480,6 +1530,20 @@ export class PlayerController implements IDamageable {
       case "fireRateBoost":
       case "damageReduction":
         break;
+      case "dashCharges": {
+        // Bump the cap and top off the player's available charges by the
+        // delta so buying the upgrade mid-fight grants the new charge
+        // immediately instead of waiting for the regen cycle.
+        const newMax = Math.max(1, Math.floor(value));
+        const delta = newMax - this.maxDashCharges;
+        this.maxDashCharges = newMax;
+        if (delta > 0) {
+          this.dashCharges = Math.min(newMax, this.dashCharges + delta);
+        } else if (this.dashCharges > newMax) {
+          this.dashCharges = newMax;
+        }
+        break;
+      }
     }
   }
 
