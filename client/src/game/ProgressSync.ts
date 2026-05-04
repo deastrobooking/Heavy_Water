@@ -34,6 +34,23 @@ export interface SpecialsOwnedSnapshot {
    *  with three stacked waves (blue → red → largest gold). Premium
    *  SPECIALS unlock; persists across death/restart. */
   sabreGold?: boolean;
+  // ---- Melee Arsenal — alternate melee weapons that swap in for the
+  // ---- Beam Sabre via KeyB. Each weapon has three SPECIALS-tab tiers:
+  // ---- own (unlock the weapon + base primary attack), combo (extra
+  // ---- chain hits / pull-in / upper-swing depending on weapon), and
+  // ---- special (signature super-move). All optional for back-compat.
+  glaiveOwn?: boolean;
+  glaiveCombo?: boolean;
+  glaiveSpecial?: boolean;
+  daggersOwn?: boolean;
+  daggersCombo?: boolean;
+  daggersSpecial?: boolean;
+  axeOwn?: boolean;
+  axeCombo?: boolean;
+  axeSpecial?: boolean;
+  whipOwn?: boolean;
+  whipCombo?: boolean;
+  whipSpecial?: boolean;
 }
 
 export interface ProgressSnapshot {

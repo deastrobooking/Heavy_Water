@@ -17,6 +17,7 @@ import { CombatSystem } from "./CombatSystem";
 import { SpecialWeaponsSystem } from "./SpecialWeaponsSystem";
 import { ElementalSpecialsSystem, ElementalDisplay, ElementalKind } from "./ElementalSpecialsSystem";
 import { BeamSabreSystem } from "./BeamSabreSystem";
+import { MeleeArsenalSystem, type ArsenalWeaponId } from "./MeleeArsenalSystem";
 import { MegaBeamCannonSystem } from "./MegaBeamCannonSystem";
 import { ArmorSystem } from "./ArmorSystem";
 import { CraftingSystem } from "./CraftingSystem";
@@ -70,7 +71,11 @@ type GamePhase = "auth" | "menu" | "playing" | "paused" | "gameover";
 // One source of truth for the SPECIALS-tab unlocks. Used both for
 // affordability checks in `specialsList` and for charging in
 // `handleUnlockSpecial`, so prices can never drift between the two.
-type SpecialId = "sabreSpin" | "sabreTwin" | "sabreGiant" | "sabreGold" | "autoLoot" | "roboDragon" | "autoTarget" | "supermanFlight";
+type SpecialId = "sabreSpin" | "sabreTwin" | "sabreGiant" | "sabreGold" | "autoLoot" | "roboDragon" | "autoTarget" | "supermanFlight"
+  | "glaiveOwn" | "glaiveCombo" | "glaiveSpecial"
+  | "daggersOwn" | "daggersCombo" | "daggersSpecial"
+  | "axeOwn" | "axeCombo" | "axeSpecial"
+  | "whipOwn" | "whipCombo" | "whipSpecial";
 interface SpecialDef {
   id: SpecialId;
   name: string;
@@ -105,6 +110,34 @@ const SPECIALS_DEFS: readonly SpecialDef[] = [
   // pricier than the Superman Flight upgrade above.
   { id: "sabreGold",      name: "Gold Sabre (Final)", description: "Final-tier blade — inner blue, middle red, outer gold halo. Every energy wave fires three stacked waves: blue, red, then a giant gold finisher.",
     cost: { gears: 800, cores: 200, nanofiber: 120, circuits: 80, credits: 12000 } },
+  // -------- Melee Arsenal — alternate melee weapons. Each weapon has three
+  // -------- SPECIALS tiers: OWN (unlock the weapon + cycle slot), COMBO
+  // -------- (chain / pull-in / upper-swing on the primary), SPECIAL (the
+  // -------- signature super-move bound to KeyN). Cycle with KeyB.
+  { id: "glaiveOwn",      name: "Beam Glaive",          description: "Long polearm beam — wide horizontal sweep arc. Cycle with KeyB to equip in place of the Beam Sabre.",
+    cost: { gears: 60,  cores: 10, nanofiber: 6 } },
+  { id: "glaiveCombo",    name: "Glaive Combo: Triple Sweep", description: "Glaive primary becomes a 3-sweep chain that fans across the front cone.",
+    cost: { gears: 110, cores: 20, nanofiber: 14 } },
+  { id: "glaiveSpecial",  name: "Glaive Special: Comet Spin", description: "KeyN spawns a green crescent that orbits the player at 6 m for 1.4 s, slicing anything it crosses.",
+    cost: { gears: 160, cores: 30, nanofiber: 22, circuits: 10 } },
+  { id: "daggersOwn",     name: "Twin Beam Daggers",    description: "Twin pink beam blades — fast 4-stab front-cone primary attack. Cycle with KeyB.",
+    cost: { gears: 70,  cores: 12, nanofiber: 8 } },
+  { id: "daggersCombo",   name: "Daggers Combo: Phantom Step", description: "Stab count rises 4 → 6 and a phantom-step sparkle fires forward at the start of every chain.",
+    cost: { gears: 120, cores: 22, nanofiber: 16 } },
+  { id: "daggersSpecial", name: "Daggers Special: Phantom Storm", description: "KeyN strikes the 3 nearest enemies in 18 m for huge damage, leaving an afterimage at each.",
+    cost: { gears: 170, cores: 32, nanofiber: 24, circuits: 10 } },
+  { id: "axeOwn",         name: "Plasma War Axe",       description: "Heavy two-hander — slow, hard cleave with massive knockback. Cycle with KeyB.",
+    cost: { gears: 90,  cores: 16, nanofiber: 10 } },
+  { id: "axeCombo",       name: "Axe Combo: Cleave + Upper", description: "Primary cleave is followed automatically by a wider upper-swing return.",
+    cost: { gears: 140, cores: 26, nanofiber: 18, circuits: 8 } },
+  { id: "axeSpecial",     name: "Axe Special: Ground Slam", description: "KeyN slams the ground — an expanding shockwave ring (radius 14 m) damages and knocks up everything it touches.",
+    cost: { gears: 200, cores: 38, nanofiber: 28, circuits: 14 } },
+  { id: "whipOwn",        name: "Spiked Chain Whip",    description: "Long-reach spiked chain — narrow 16 m lash that hits enemies in a forward line. Cycle with KeyB.",
+    cost: { gears: 80,  cores: 14, nanofiber: 9 } },
+  { id: "whipCombo",      name: "Whip Combo: Pull-In Lash", description: "On hit, the whip yanks the closest target ~3 m closer to you for follow-up melee.",
+    cost: { gears: 130, cores: 24, nanofiber: 17, circuits: 8 } },
+  { id: "whipSpecial",    name: "Whip Special: Flail Spin", description: "KeyN spins the whip in a 360° flail around you — 4 ticks over 1 s in a 9 m radius.",
+    cost: { gears: 190, cores: 36, nanofiber: 26, circuits: 12 } },
 ];
 
 export const Game: React.FC = () => {
@@ -136,6 +169,7 @@ export const Game: React.FC = () => {
   const specialWeaponsRef = useRef<SpecialWeaponsSystem | null>(null);
   const elementalSpecialsRef = useRef<ElementalSpecialsSystem | null>(null);
   const beamSabreRef = useRef<BeamSabreSystem | null>(null);
+  const meleeArsenalRef = useRef<MeleeArsenalSystem | null>(null);
   const megaCannonRef = useRef<MegaBeamCannonSystem | null>(null);
   // Combo input timestamps for the Mega Beam Cannon (beam + weapon press
   // within the window). Held flags let us also fire when one input is
@@ -219,7 +253,18 @@ export const Game: React.FC = () => {
     sabreSpin: boolean; sabreTwin: boolean; sabreGiant: boolean; sabreGold: boolean;
     autoLoot: boolean; roboDragon: boolean; autoTarget: boolean;
     supermanFlight: boolean;
-  }>({ sabreSpin: false, sabreTwin: false, sabreGiant: false, sabreGold: false, autoLoot: false, roboDragon: false, autoTarget: false, supermanFlight: false });
+    glaiveOwn: boolean; glaiveCombo: boolean; glaiveSpecial: boolean;
+    daggersOwn: boolean; daggersCombo: boolean; daggersSpecial: boolean;
+    axeOwn: boolean; axeCombo: boolean; axeSpecial: boolean;
+    whipOwn: boolean; whipCombo: boolean; whipSpecial: boolean;
+  }>({
+    sabreSpin: false, sabreTwin: false, sabreGiant: false, sabreGold: false,
+    autoLoot: false, roboDragon: false, autoTarget: false, supermanFlight: false,
+    glaiveOwn: false, glaiveCombo: false, glaiveSpecial: false,
+    daggersOwn: false, daggersCombo: false, daggersSpecial: false,
+    axeOwn: false, axeCombo: false, axeSpecial: false,
+    whipOwn: false, whipCombo: false, whipSpecial: false,
+  });
   // Mirror of `specialsOwned` for use inside long-lived bus.on closures
   // (e.g. PLAYER_DIED) where the latest React state isn't directly visible.
   // Kept in sync via a useEffect below.
@@ -508,6 +553,14 @@ export const Game: React.FC = () => {
         const beamSabre = new BeamSabreSystem(scene, engine.getCamera());
         beamSabreRef.current = beamSabre;
 
+        // Melee Arsenal — alternate melee weapons (Glaive / Daggers / Axe /
+        // Whip). Cycled in via KeyB (KeyN fires the active weapon's
+        // signature special). The system stays dormant until at least one
+        // weapon is unlocked from the SPECIALS tab.
+        const meleeArsenal = new MeleeArsenalSystem(scene, engine.getCamera());
+        meleeArsenalRef.current = meleeArsenal;
+        meleeArsenal.setDamageRouter(() => { /* replaced once render loop starts */ });
+
         const megaCannon = new MegaBeamCannonSystem(scene, engine.getCamera());
         megaCannonRef.current = megaCannon;
         megaCannon.setDamageRouter(() => { /* replaced once render loop starts */ });
@@ -530,6 +583,7 @@ export const Game: React.FC = () => {
         combatSystem.setAimOriginProvider(aimOrigin);
         beamSabre.setAimOriginProvider(aimOrigin);
         megaCannon.setAimOriginProvider(aimOrigin);
+        meleeArsenal.setAimOriginProvider(aimOrigin);
 
         // Vehicle "nose gun": when the player is mounted on a non-ATV vehicle
         // (the orbital fighter, primarily) override the weapons-fire path so
@@ -1291,6 +1345,7 @@ export const Game: React.FC = () => {
           // Pull premium / upgrade state straight from each owning system so
           // helper-bot upgrades and SPECIALS unlocks survive a hard restart.
           const sabreState = beamSabre.getSpecialsState();
+          const arsenalSnap = meleeArsenal.getSnapshot();
           const companions = companionSystem.serializeForSave();
           const elementalLevels = elementalSpecials.getLevels() as Record<string, number>;
           const specialsOwnedSnap = {
@@ -1307,6 +1362,18 @@ export const Game: React.FC = () => {
             // React mirror which can lag a frame.
             autoTarget: weapons.isAutoTargetEnabled(),
             supermanFlight: player.getHasSupermanFlight(),
+            glaiveOwn: arsenalSnap.glaive.unlocked,
+            glaiveCombo: arsenalSnap.glaive.comboUnlocked,
+            glaiveSpecial: arsenalSnap.glaive.specialUnlocked,
+            daggersOwn: arsenalSnap.daggers.unlocked,
+            daggersCombo: arsenalSnap.daggers.comboUnlocked,
+            daggersSpecial: arsenalSnap.daggers.specialUnlocked,
+            axeOwn: arsenalSnap.axe.unlocked,
+            axeCombo: arsenalSnap.axe.comboUnlocked,
+            axeSpecial: arsenalSnap.axe.specialUnlocked,
+            whipOwn: arsenalSnap.whip.unlocked,
+            whipCombo: arsenalSnap.whip.comboUnlocked,
+            whipSpecial: arsenalSnap.whip.specialUnlocked,
           };
           return {
             stats: player.getStats(),
@@ -1409,6 +1476,18 @@ export const Game: React.FC = () => {
                   hasGoldSabre: snap.specialsOwned?.sabreGold,
                 });
                 setBeamSabreLevel(beamSabre.getLevel);
+              }
+              // Restore melee-arsenal SPECIALS unlocks. Equipped slot is
+              // intentionally NOT restored — players cycle in via KeyB
+              // each session so the sabre remains the default on spawn.
+              if (snap.specialsOwned) {
+                const so = snap.specialsOwned;
+                meleeArsenal.applyLoadedState({
+                  glaive:  { unlocked: !!so.glaiveOwn,  comboUnlocked: !!so.glaiveCombo,  specialUnlocked: !!so.glaiveSpecial  },
+                  daggers: { unlocked: !!so.daggersOwn, comboUnlocked: !!so.daggersCombo, specialUnlocked: !!so.daggersSpecial },
+                  axe:     { unlocked: !!so.axeOwn,    comboUnlocked: !!so.axeCombo,    specialUnlocked: !!so.axeSpecial    },
+                  whip:    { unlocked: !!so.whipOwn,   comboUnlocked: !!so.whipCombo,   specialUnlocked: !!so.whipSpecial   },
+                });
               }
               // Elemental specials per-element levels.
               if (snap.elementalLevels) elementalSpecials.setLevels(snap.elementalLevels as any);
@@ -1684,6 +1763,11 @@ export const Game: React.FC = () => {
           // mining nodes and props (not just ground enemies).
           beamSabre.setDamageRouter(routeHit);
           beamSabre.update(dt, enemyMeshes);
+          // Melee Arsenal — same damage router so alt melee weapons hit
+          // every damageable mesh class (enemies, aerial units, turrets,
+          // bases, mining nodes, props) with no per-system gates.
+          meleeArsenal.setDamageRouter(routeHit);
+          meleeArsenal.update(dt);
 
           // Mega Beam Cannon (beam + weapon combo). Routes through the same
           // hit pipeline so the missiles + Kamehameha beam damage every
@@ -2086,6 +2170,7 @@ export const Game: React.FC = () => {
         if (elementalSpecialsRef.current) { try { elementalSpecialsRef.current.dispose(); } catch {} }
         elementalSpecialsRef.current = null;
         beamSabreRef.current = null;
+        if (meleeArsenalRef.current) { try { meleeArsenalRef.current.dispose(); } catch {} meleeArsenalRef.current = null; }
         if (megaCannonRef.current) { try { megaCannonRef.current.dispose(); } catch {} megaCannonRef.current = null; }
         armorSystemRef.current = null;
         craftingSystemRef.current = null;
@@ -2173,6 +2258,7 @@ export const Game: React.FC = () => {
     if (specialWeaponsRef.current) { try { specialWeaponsRef.current.dispose(); } catch {} specialWeaponsRef.current = null; }
     if (elementalSpecialsRef.current) { try { elementalSpecialsRef.current.dispose(); } catch {} elementalSpecialsRef.current = null; }
     if (beamSabreRef.current) { try { beamSabreRef.current.dispose(); } catch {} beamSabreRef.current = null; }
+    if (meleeArsenalRef.current) { try { meleeArsenalRef.current.dispose(); } catch {} meleeArsenalRef.current = null; }
     if (megaCannonRef.current) { try { megaCannonRef.current.dispose(); } catch {} megaCannonRef.current = null; }
     if (companionRef.current) { try { companionRef.current.dispose(); } catch {} companionRef.current = null; }
     if (capsuleRef.current) { try { capsuleRef.current.dispose(); } catch {} capsuleRef.current = null; }
@@ -2435,6 +2521,13 @@ export const Game: React.FC = () => {
     // same tick.
     if (specialsUnlockInFlightRef.current.has(id)) return;
     specialsUnlockInFlightRef.current.add(id);
+    // Single exit point so EVERY early-return path (insufficient
+    // resources, missing system, parse failure, runEffect failure)
+    // releases the in-flight guard. Without this, a single failed
+    // purchase attempt would soft-lock the SPECIAL for the rest of
+    // the session — a soft-lock the architect review flagged HIGH.
+    let committed = false;
+    try {
     const def = SPECIALS_DEFS.find(d => d.id === id);
     if (!def) return;
     const c = def.cost;
@@ -2476,6 +2569,39 @@ export const Game: React.FC = () => {
       // online for the unlock to take effect, so the only failure mode
       // is the player ref itself which we already checked above.
       runEffect = () => { player.unlockSupermanFlight(); showMessage("SUPERMAN FLIGHT UNLOCKED — DASH+JUMP IN AIR", 2400); return true; };
+    } else if (
+      id === "glaiveOwn"   || id === "glaiveCombo"   || id === "glaiveSpecial"   ||
+      id === "daggersOwn"  || id === "daggersCombo"  || id === "daggersSpecial"  ||
+      id === "axeOwn"      || id === "axeCombo"      || id === "axeSpecial"      ||
+      id === "whipOwn"     || id === "whipCombo"     || id === "whipSpecial"
+    ) {
+      // Melee Arsenal unlocks — map the 12 SPECIALS-tab ids onto the
+      // arsenal's own / combo / special tiers per weapon. The COMBO and
+      // SPECIAL tiers also imply OWN (the arsenal idempotently sets the
+      // owned flag inside unlockCombo / unlockSpecial), so the player
+      // can buy any tier in any order without the weapon getting stuck
+      // in a half-unlocked state.
+      const arsenal = meleeArsenalRef.current;
+      if (!arsenal) { showMessage("ARSENAL OFFLINE", 1500); return; }
+      const parse = (sid: string): { weapon: ArsenalWeaponId; tier: "own" | "combo" | "special" } | null => {
+        for (const w of ["glaive", "daggers", "axe", "whip"] as ArsenalWeaponId[]) {
+          if (sid === `${w}Own`) return { weapon: w, tier: "own" };
+          if (sid === `${w}Combo`) return { weapon: w, tier: "combo" };
+          if (sid === `${w}Special`) return { weapon: w, tier: "special" };
+        }
+        return null;
+      };
+      const parsed = parse(id);
+      if (!parsed) return;
+      runEffect = () => {
+        const cfg = SPECIALS_DEFS.find(d => d.id === id);
+        const niceName = cfg?.name ?? id;
+        if (parsed.tier === "own")     arsenal.unlockWeapon(parsed.weapon);
+        if (parsed.tier === "combo")   arsenal.unlockCombo(parsed.weapon);
+        if (parsed.tier === "special") arsenal.unlockSpecial(parsed.weapon);
+        showMessage(`${niceName.toUpperCase()} UNLOCKED`, 2200);
+        return true;
+      };
     } else if (id === "roboDragon") {
       const comp = companionRef.current;
       if (!comp) { showMessage("HELPER SYSTEM OFFLINE", 1500); return; }
@@ -2495,10 +2621,7 @@ export const Game: React.FC = () => {
         return true;
       };
     }
-    if (!runEffect || !runEffect()) {
-      specialsUnlockInFlightRef.current.delete(id);
-      return;
-    }
+    if (!runEffect || !runEffect()) return;
     // Charge only after the side-effect succeeds.
     if (c.gears > 0)     inv.removeItem("gear", c.gears);
     if (c.cores > 0)     inv.removeItem("energy_core", c.cores);
@@ -2506,13 +2629,22 @@ export const Game: React.FC = () => {
     if (c.circuits)      inv.removeItem("circuit_board", c.circuits);
     if (c.credits)       player.spendCredits(c.credits);
     setSpecialsOwned(prev => ({ ...prev, [id]: true }));
-    // Keep the in-flight flag set — `specialsOwned[id]` will be true on the
-    // next render, so the guard above will hold. Don't clear or repeated
-    // re-buys would slip through during the React commit gap.
+    // Mark the purchase committed so the finally below KEEPS the in-flight
+    // flag set — `specialsOwned[id]` will be true on the next render, so
+    // the guard above will hold. Clearing it here would let a rapid re-buy
+    // slip through during the React commit gap.
+    committed = true;
     syncResourcesNow();
     // Force a save immediately so the unlock can never be lost to a crash or
     // the death/restart cycle that prompted this whole fix.
     forceSaveRef.current?.();
+    } finally {
+      // Only release the in-flight guard if the purchase didn't commit,
+      // so EVERY early-return path (insufficient resources, missing
+      // system, parse failure, runEffect false, etc.) lets the player
+      // retry the SPECIAL on a later click.
+      if (!committed) specialsUnlockInFlightRef.current.delete(id);
+    }
   }, [specialsOwned, showMessage, syncResourcesNow]);
 
   const handleLabBuild = useCallback((presetName: string) => {
@@ -2648,10 +2780,26 @@ export const Game: React.FC = () => {
           setGardenOpen(true);
           if (document.pointerLockElement) document.exitPointerLock();
         }
+      } else if (e.code === "KeyB") {
+        // Cycle the equipped melee weapon: SABRE → owned arsenal weapons →
+        // SABRE. No-op (returns "Beam Sabre") when nothing is unlocked.
+        if (!e.repeat && meleeArsenalRef.current) {
+          const name = meleeArsenalRef.current.cycle(1);
+          showMessage(`MELEE: ${name.toUpperCase()}`, 1200);
+        }
+      } else if (e.code === "KeyN") {
+        // Fire the active arsenal weapon's signature special. No-op if the
+        // sabre is equipped or the active weapon's special tier is not yet
+        // unlocked. Keeps the Beam Sabre's own combo keys (`;` / `'`)
+        // untouched — those still drive Fury Slash / Smash Lash.
+        if (!e.repeat && meleeArsenalRef.current?.isEquipped()) {
+          const fired = meleeArsenalRef.current.fireSpecial();
+          if (!fired) showMessage("SPECIAL ON COOLDOWN", 1000);
+        }
       } else if (e.code === "KeyY" || e.code === "KeyJ") {
         // The Beam Sabre is always active. Y (keyboard) and J (controller LT)
-        // both trigger a slash. KeyB stays reserved for interact / vehicle
-        // entry; KeyG stays reserved for build mode.
+        // both trigger a slash. KeyB cycles the equipped MELEE weapon (sabre /
+        // glaive / daggers / axe / whip); KeyG stays reserved for build mode.
         // startCharge only matters once the Spinning Blade upgrade is owned —
         // otherwise it just calls attack() like before.
         if (!e.repeat) {
@@ -2665,7 +2813,13 @@ export const Game: React.FC = () => {
           if (megaCannonRef.current && (weaponHeldRef.current || now - weaponPressTimeRef.current < COMBO_WINDOW_MS)) {
             megaCannonRef.current.fire();
           }
-          if (beamSabreRef.current) {
+          // Melee Arsenal intercept — when an alt melee weapon is equipped,
+          // the slash key fires THAT weapon's primary attack instead of the
+          // sabre's, and we skip startCharge entirely so the sabre charge
+          // bar can't accidentally interfere with the alt swing.
+          if (meleeArsenalRef.current?.isEquipped()) {
+            meleeArsenalRef.current.attack();
+          } else if (beamSabreRef.current) {
             beamSabreRef.current.startCharge();
           }
           // Smash combo: KeyJ held + Space held + airborne for 1 s. The
@@ -2738,8 +2892,11 @@ export const Game: React.FC = () => {
         beamHeldRef.current = false;
         // The beam-sabre release is essential for air combat (Spinning
         // Blade), so it always fires alongside the smash combo's
-        // attack-key tracking — the two systems are independent.
-        if (beamSabreRef.current) {
+        // attack-key tracking — the two systems are independent. When an
+        // alt melee weapon is equipped, the sabre's release-charge path
+        // is skipped (the alt weapon's primary fired on key-down and
+        // doesn't use a charge model).
+        if (beamSabreRef.current && !meleeArsenalRef.current?.isEquipped()) {
           beamSabreRef.current.releaseCharge();
         }
         smashAttackRef.current?.notifyAttackUp();
@@ -2828,6 +2985,7 @@ export const Game: React.FC = () => {
       if (specialWeaponsRef.current) specialWeaponsRef.current.dispose();
       if (elementalSpecialsRef.current) elementalSpecialsRef.current.dispose();
       if (beamSabreRef.current) beamSabreRef.current.dispose();
+      if (meleeArsenalRef.current) meleeArsenalRef.current.dispose();
       if (megaCannonRef.current) megaCannonRef.current.dispose();
       if (companionRef.current) companionRef.current.dispose();
       if (capsuleRef.current) capsuleRef.current.dispose();
