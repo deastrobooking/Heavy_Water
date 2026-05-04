@@ -98,6 +98,11 @@ export interface ProgressSnapshot {
    *  jewels are NOT in the inventory — they were consumed when mounted.
    *  Optional for backward compat with pre-jewel saves. */
   jewelMounts?: Record<string, string>;
+  /** Ids of humanoid synthetics the player has already freed from their
+   *  containment cages. Persisted across runs so re-entering a level never
+   *  respawns a rescuee whose story moment has already played. Optional
+   *  for backward compat with pre-rescue saves. */
+  rescuedSyntheticIds?: string[];
 }
 
 export async function loadProgress(): Promise<ProgressSnapshot | null> {

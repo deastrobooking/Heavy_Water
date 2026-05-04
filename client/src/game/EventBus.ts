@@ -101,6 +101,11 @@ export const GameEvents = {
   /** Fired when the captured ally inside the spire is freed. Carries the
    *  ally's world position so other systems can mark it / spawn pickups. */
   ALLY_RESCUED: "boss:allyRescued",
+  /** Fired by RescueSystem when the player frees a captured humanoid
+   *  synthetic from its containment cage. Payload: { id, name, title,
+   *  level, position }. Used to persist the rescued id and play any
+   *  optional companion / VFX hooks. */
+  SYNTHETIC_RESCUED: "rescue:syntheticRescued",
   /** Fired by LevelSystem when a level is finished. */
   LEVEL_COMPLETED: "level:completed",
   /** Fired by LevelSystem when a new level begins (including the initial

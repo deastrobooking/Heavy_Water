@@ -11,6 +11,7 @@ import { AerialEnemySystem } from "./AerialEnemySystem";
 import { SmashAttackSystem } from "./SmashAttackSystem";
 import { EnemyHealthBarSystem, EnemyLike } from "./EnemyHealthBarSystem";
 import { FriendlyNPCSystem } from "./FriendlyNPCSystem";
+import { RescueSystem } from "./RescueSystem";
 import { GamepadInput } from "./GamepadInput";
 import { ChestSystem, Loot } from "./ChestSystem";
 import { CombatSystem } from "./CombatSystem";
@@ -155,6 +156,7 @@ export const Game: React.FC = () => {
   const smashAttackRef = useRef<SmashAttackSystem | null>(null);
   const enemyHealthBarsRef = useRef<EnemyHealthBarSystem | null>(null);
   const friendlyNPCsRef = useRef<FriendlyNPCSystem | null>(null);
+  const rescueSystemRef = useRef<RescueSystem | null>(null);
   const sanctuarySystemRef = useRef<SanctuarySystem | null>(null);
   const pontiacLabSystemRef = useRef<PontiacLabSystem | null>(null);
   const spaceLevelSystemRef = useRef<SpaceLevelSystem | null>(null);
@@ -1046,6 +1048,15 @@ export const Game: React.FC = () => {
             enemySystem.setSpawningEnabled(true);
           }
 
+          // Refresh the rescue roster for the new level. RescueSystem skips
+          // levels with no roster (peaceful zones), and prunes any rescuees
+          // already freed in a prior run. setLevel is idempotent — calling
+          // it with the same level twice (e.g. on a fast-travel re-warp)
+          // is a no-op.
+          if (rescueSystemRef.current && typeof payload?.level === "number") {
+            rescueSystemRef.current.setLevel(payload.level as WorldLevel);
+          }
+
           // Sanctuary mounts ONLY for Level 4. Other peaceful zones (e.g.
            // Level 6 Pontiac Secret Lab) share the `peaceful` flag for
            // wave-spawn suppression but own their own world-swap system,
@@ -1192,6 +1203,16 @@ export const Game: React.FC = () => {
           showMessage("ALLY RESCUED", 3000);
         });
 
+        // SYNTHETIC_RESCUED → toast + immediate forced save so the rescued id
+        // is persisted before the player can die or close the tab. The
+        // RescueSystem itself opens the centered story bubble; we just
+        // mirror a short HUD toast and flush the save.
+        bus.on(GameEvents.SYNTHETIC_RESCUED, (data: any) => {
+          const name = (data && typeof data.name === "string") ? data.name : "SYNTHETIC";
+          showMessage(`${name} RESCUED`, 2500);
+          if (forceSaveRef.current) forceSaveRef.current();
+        });
+
         const enemyHealthBars = new EnemyHealthBarSystem(scene, engine.getCamera());
         enemyHealthBars.setEnemyProvider(() => {
           const ground: EnemyLike[] = enemySystem.getActiveEnemies();
@@ -1215,10 +1236,42 @@ export const Game: React.FC = () => {
           if (gardenOpenRef.current) return true;
           if (upgradeMenuOpenRef.current) return true;
           if (gardenRef.current?.isGardenOpenCheck()) return true;
+          // Defer to RescueSystem while a story bubble is mid-flight so the
+          // E press that advances the rescue line can't also pop / advance
+          // an adjacent friendly-NPC dialogue. (Cages and NPCs don't share
+          // map regions today, but this keeps the contract robust if either
+          // roster ever moves.)
+          if (rescueSystemRef.current?.isStoryBubbleOpen()) return true;
           return false;
         });
         friendlyNPCs.spawnDefaults();
         friendlyNPCsRef.current = friendlyNPCs;
+
+        // Captured-synthetic rescues — caged humanoids scattered through
+        // each combat level (L1, L2, L3, L5). Press E inside a cage to free
+        // the rescuee and trigger a centered story-bubble moment. Mounted
+        // here once; the LEVEL_STARTED handler below calls `setLevel` to
+        // (re)spawn the per-level roster, skipping any rescuees the player
+        // has already freed in a prior run (restored from ProgressSync).
+        const rescueSystem = new RescueSystem(scene, engine.getCamera());
+        rescueSystem.setPlayerPositionProvider(() => player.getPosition());
+        rescueSystem.setInputBlockedProvider(() => {
+          if (labOpenRef.current) return true;
+          if (gardenOpenRef.current) return true;
+          if (upgradeMenuOpenRef.current) return true;
+          if (gardenRef.current?.isGardenOpenCheck()) return true;
+          if (shopRef.current?.isOpen()) return true;
+          return false;
+        });
+        rescueSystemRef.current = rescueSystem;
+        // Seed the initial roster for the level we're on right now.
+        // LevelSystem doesn't fire LEVEL_STARTED at construction, AND its
+        // `applyLoadedState` early-returns without re-emitting when the
+        // saved level is 1 — so without this call, fresh boots and L1
+        // saves would never spawn rescue cages. For L2/L3/L5/L6 saves the
+        // load handler's subsequent LEVEL_STARTED emit will swap to the
+        // correct roster (setLevel disposes the L1 roster first).
+        rescueSystem.setLevel(levelSystem.getCurrentLevel());
 
         const gamepad = new GamepadInput(engine.getCamera());
         gamepad.onConnectionChange((connected, padId) => {
@@ -1421,6 +1474,9 @@ export const Game: React.FC = () => {
             // Per-weapon Power-Jewel mounts (omitted entirely when nothing
             // is mounted to keep older clients unconfused).
             jewelMounts: jewelSystem.serialize(),
+            // Captured-synthetic rescues already played out — re-entering a
+            // level never spawns a rescuee whose story moment is finished.
+            rescuedSyntheticIds: rescueSystemRef.current?.serialize() ?? [],
           };
         };
 
@@ -1551,6 +1607,13 @@ export const Game: React.FC = () => {
               // mount map and pushes the per-weapon multiplier into
               // WeaponsSystem via the onMountChanged callback we wired above.
               jewelSystem.applyLoadedState(snap.jewelMounts);
+              // Restore the rescued-synthetic id set BEFORE LevelSystem
+              // re-emits LEVEL_STARTED, so the cage roster spawned by the
+              // resulting setLevel call already prunes anyone the player
+              // has freed in a prior run.
+              if (rescueSystemRef.current) {
+                rescueSystemRef.current.applyLoadedState(snap.rescuedSyntheticIds);
+              }
               // Restore world-level progression. For L2, applyLoadedState
               // re-emits LEVEL_STARTED, which our listener uses to swap
               // banner/objective, tint the sky, seed the second fortress,
@@ -2306,6 +2369,7 @@ export const Game: React.FC = () => {
     if (levelSystemRef.current) { try { levelSystemRef.current.dispose(); } catch {} levelSystemRef.current = null; }
     if (enemyHealthBarsRef.current) { try { enemyHealthBarsRef.current.dispose(); } catch {} enemyHealthBarsRef.current = null; }
     if (friendlyNPCsRef.current) { try { friendlyNPCsRef.current.dispose(); } catch {} friendlyNPCsRef.current = null; }
+    if (rescueSystemRef.current) { try { rescueSystemRef.current.dispose(); } catch {} rescueSystemRef.current = null; }
     if (sanctuarySystemRef.current) { try { sanctuarySystemRef.current.dispose(); } catch {} sanctuarySystemRef.current = null; }
     if (pontiacLabSystemRef.current) { try { pontiacLabSystemRef.current.dispose(); } catch {} pontiacLabSystemRef.current = null; }
     if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }
@@ -3072,6 +3136,7 @@ export const Game: React.FC = () => {
       if (skyRef.current) skyRef.current.dispose();
       if (enemyHealthBarsRef.current) enemyHealthBarsRef.current.dispose();
       if (friendlyNPCsRef.current) friendlyNPCsRef.current.dispose();
+      if (rescueSystemRef.current) { try { rescueSystemRef.current.dispose(); } catch {} rescueSystemRef.current = null; }
       if (sanctuarySystemRef.current) { try { sanctuarySystemRef.current.dispose(); } catch {} sanctuarySystemRef.current = null; }
       if (pontiacLabSystemRef.current) { try { pontiacLabSystemRef.current.dispose(); } catch {} pontiacLabSystemRef.current = null; }
       if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }

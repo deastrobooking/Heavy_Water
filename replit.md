@@ -39,6 +39,7 @@ The game utilizes Babylon.js v8.x for WebGL/WebGPU rendering, focusing on an ani
 - EnemySystem includes a wave spawner, Commander enemies, aerial enemies, Hostile Enemy Bases with turrets, Boss Fortresses, and Tank ground units.
 - Bio-Creature Dex defines 125+ collectible robotic creatures with archetypes, elemental types, and rarity tiers.
 - FriendlyNPCSystem scatters NPCs with interactive dialogue.
+- RescueSystem scatters captured humanoid synthetics in glowing red containment cages across each combat level (3 per level on L1/L2/L3/L5). Press **E** inside a cage to break it, fire `SYNTHETIC_RESCUED`, and play a centered story-bubble moment with the rescuee's name + 3 lines of personal backstory. Rescued ids persist via `ProgressSnapshot.rescuedSyntheticIds` so revisiting a level never respawns a freed rescuee. Skips peaceful zones (L4 Sanctuary, L6 Pontiac Lab — those are the destinations the rescued are headed to).
 
 **Levels & Zones:**
 - LevelSystem defines six distinct world levels: three combat fronts (Star City, Hold the Line, Purge the Void), a peaceful sanctuary side-zone (Ashur Sanctuary), an off-canon spacelike combat zone (Orbital Front), and a peaceful indoor lore side-zone (Pontiac Secret Lab). Each level has unique themes and environmental setups.
