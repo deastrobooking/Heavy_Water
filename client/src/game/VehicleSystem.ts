@@ -43,6 +43,14 @@ export class VehicleSystem {
   private getGroundHeight: ((x: number, z: number, currentY?: number) => number) | null = null;
   private input: VehicleInputState = { forward: false, back: false, left: false, right: false, up: false, down: false, boost: false };
   private nextId: number = 0;
+  // Jump-press turbo. While `turboTimer > 0` the active vehicle's max-speed
+  // cap is overridden upward (and accel bumped) to deliver a punchy burst.
+  // `turboCooldown` blocks rapid re-triggers so the player can't sit on the
+  // jump key for permanent overdrive.
+  private turboTimer: number = 0;
+  private turboCooldown: number = 0;
+  private static readonly TURBO_DURATION = 0.7;
+  private static readonly TURBO_COOLDOWN = 1.6;
   private wallColliders: WallCollider[] = [];
   /** When true, fighter throttle is locked — the ship cruises at full
    *  speed regardless of player input. Used by SpaceLevelSystem so the
@@ -146,6 +154,39 @@ export class VehicleSystem {
     Object.assign(this.input, state);
   }
 
+  /** Tap-jump turbo. Press Space (or the gamepad jump button) while
+   *  driving for a punchy speed kick + temporary cap override. Returns
+   *  true if the turbo actually fired so callers can play SFX / show
+   *  a HUD ping; returns false when on cooldown or no vehicle is active. */
+  triggerTurbo(): boolean {
+    if (!this.active) return false;
+    if (this.turboCooldown > 0 || this.turboTimer > 0) return false;
+    // No-op in orbital forceForward mode. The fighter's cruise branch
+    // clamps speed to its forced cruise band on every tick, so a turbo
+    // kick would be erased the same frame and the cooldown would burn
+    // for nothing — better to refuse the trigger and keep the HUD ping
+    // honest. Hold-Shift boost is still the right tool there.
+    if (this.forceForward && this.active.kind !== "atv") return false;
+    this.turboTimer = VehicleSystem.TURBO_DURATION;
+    this.turboCooldown = VehicleSystem.TURBO_COOLDOWN;
+    // Immediate forward kick along the vehicle's current heading. ATVs
+    // get a smaller bump because they're capped much lower than fighters.
+    const v = this.active;
+    if (v.kind === "atv") {
+      v.speed = Math.max(v.speed, 24) + 16; // base ≈ cruise + 16 m/s
+    } else {
+      v.speed = Math.max(v.speed, 55) + 28; // fighter cruise + 28 m/s
+    }
+    EventBus.getInstance().emit("vehicle:turbo", { id: v.id, kind: v.kind });
+    return true;
+  }
+
+  /** True while the jump-press turbo is still ramping the vehicle past
+   *  its normal max-speed cap. Useful for HUD / camera FX. */
+  isTurboActive(): boolean {
+    return this.turboTimer > 0;
+  }
+
   spawnPreset(presetName: string, position: BABYLON.Vector3): VehicleInstance | null {
     const desc = VEHICLE_PRESETS[presetName];
     if (!desc) return null;
@@ -244,6 +285,16 @@ export class VehicleSystem {
 
   update(dt: number): void {
     if (!this.active) return;
+    // Tick the jump-turbo timers regardless of vehicle kind so the cap /
+    // cooldown both decay even if the player exits and re-enters mid-burst.
+    if (this.turboTimer > 0) {
+      this.turboTimer -= dt;
+      if (this.turboTimer < 0) this.turboTimer = 0;
+    }
+    if (this.turboCooldown > 0) {
+      this.turboCooldown -= dt;
+      if (this.turboCooldown < 0) this.turboCooldown = 0;
+    }
     const v = this.active;
     if (v.kind === "atv") this.updateATV(v, dt);
     else this.updateFighter(v, dt);
@@ -277,9 +328,11 @@ export class VehicleSystem {
     const yawDelta = ((targetYaw - v.yaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
     v.yaw += yawDelta * Math.min(1, dt * 6);
 
-    // Throttle
-    const accel = 22;
-    const maxSpeed = this.input.boost ? 38 : 24;
+    // Throttle. Turbo (Space-tap) raises both the cap and the accel for a
+    // short window so the burst feels meaty, not just a number bump.
+    const turboOn = this.turboTimer > 0;
+    const accel = turboOn ? 38 : 22;
+    const maxSpeed = turboOn ? 56 : (this.input.boost ? 38 : 24);
     const drag = 4;
     if (this.input.forward) v.speed += accel * dt;
     if (this.input.back) v.speed -= accel * 0.7 * dt;
@@ -342,10 +395,14 @@ export class VehicleSystem {
       if (this.input.boost) v.speed += accel * dt;
       v.speed = Math.max(cruise, Math.min(maxSpeed, v.speed));
     } else {
-      const maxSpeed = this.input.boost ? 95 : 55;
-      if (this.input.forward) v.speed += accel * dt;
+      // Turbo (jump-tap) overrides the normal/boost cap with a higher
+      // ceiling and gives a chunkier accel so the burst reads instantly.
+      const turboOn = this.turboTimer > 0;
+      const maxSpeed = turboOn ? 140 : (this.input.boost ? 95 : 55);
+      const fwdAccel = turboOn ? accel * 1.6 : accel;
+      if (this.input.forward) v.speed += fwdAccel * dt;
       if (this.input.back) v.speed -= accel * 0.6 * dt;
-      if (!this.input.forward && !this.input.back) {
+      if (!this.input.forward && !this.input.back && !turboOn) {
         if (v.speed > 0) v.speed = Math.max(0, v.speed - drag * dt);
         else if (v.speed < 0) v.speed = Math.min(0, v.speed + drag * dt);
       }

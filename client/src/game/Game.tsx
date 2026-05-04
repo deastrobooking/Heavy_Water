@@ -2678,7 +2678,18 @@ export const Game: React.FC = () => {
         // Track Space for the smash combo. We don't preventDefault here
         // because PlayerController owns the actual jump impulse via its
         // own keydown listener — we're just mirroring the held state.
-        if (!e.repeat) smashAttackRef.current?.notifyJumpDown();
+        if (!e.repeat) {
+          smashAttackRef.current?.notifyJumpDown();
+          // Jump-press turbo. While mounted in any vehicle, a Space tap
+          // delivers a punchy speed kick (with a built-in cooldown so the
+          // player can't just hold for permanent overdrive). Doesn't
+          // suppress the existing Space→up vertical-thrust mapping for
+          // fighters — both effects layer cleanly.
+          if (vehicleRef.current?.getActive()) {
+            const fired = vehicleRef.current.triggerTurbo();
+            if (fired) showMessage("TURBO!", 700);
+          }
+        }
       } else if (e.code === "Semicolon") {
         // Fury Slash — LT + Y combo (gamepad) or `;` (keyboard).
         // Note: these combo keys are intentionally rare codes — KeyU/KeyI
