@@ -3,7 +3,7 @@
 <img width="1512" height="982" alt="Screenshot 2026-05-05 at 10 14 43 PM" src="https://github.com/user-attachments/assets/fe4d8f0e-9037-4b8d-97b3-969ebe91833a" />
 Heavy Water is a sci-fi open-world action game built with Babylon.js, React, TypeScript, Express, PostgreSQL, and WebSockets. The game combines fast aerial and ground combat, modular robot systems, crafting and building, companion progression, and optional multiplayer rooms.
 
-Join in the battle against the Swarm.  of the humanoid creations of Dr. Cynthia and Dr. Sergio
+Join in the battle against the Swarm. Playing as the humanoid robot creations of Dr. Cynthia and Dr. Sergio. 
 
 This README is a consolidated technical reference for the current codebase.
 
