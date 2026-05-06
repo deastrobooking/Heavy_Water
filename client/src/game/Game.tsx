@@ -63,6 +63,7 @@ import { SpaceLevelSystem } from "./SpaceLevelSystem";
 import { SwarmsLairSystem } from "./SwarmsLairSystem";
 import { SaginawLabSystem } from "./SaginawLabSystem";
 import { ZugIslandSystem } from "./ZugIslandSystem";
+import { AnnArborSystem } from "./AnnArborSystem";
 import { setPlayerIsFlyingProvider as setEnemyPlayerIsFlyingProvider } from "./EnemySystem";
 import { RESCUE_DEFS } from "./RescueSystem";
 import { loadProgress, saveProgress, ProgressSnapshot } from "./ProgressSync";
@@ -168,6 +169,7 @@ export const Game: React.FC = () => {
   const swarmsLairSystemRef = useRef<SwarmsLairSystem | null>(null);
   const saginawLabSystemRef = useRef<SaginawLabSystem | null>(null);
   const zugIslandSystemRef = useRef<ZugIslandSystem | null>(null);
+  const annArborSystemRef = useRef<AnnArborSystem | null>(null);
   // Long-lived progress mirrors for the Pontiac Lab → Swarms Lair chain.
   // PontiacLabSystem is rebuilt on every L6 entry, so the freed-animal id
   // set must outlive it here in Game.tsx (read on next mount, written on
@@ -1271,6 +1273,34 @@ export const Game: React.FC = () => {
             zugIslandSystemRef.current = null;
           }
 
+          // Mount/dispose the Ann Arbor Apocalypse side-zone (Level 10) —
+          // medium-sized city with a giant alien mothership crashed into
+          // its downtown towers. 10 maxed captains atop the saucer + a
+          // continuous ground swarm of every robot type. Same handles bag
+          // + dispose pattern as the ZugIsland block above.
+          const isAnnArbor = typeof payload?.level === "number"
+            && LevelSystem.isAnnArbor(payload.level as WorldLevel);
+          if (isAnnArbor && !annArborSystemRef.current) {
+            annArborSystemRef.current = new AnnArborSystem(
+              scene,
+              enemySystem,
+              () => player.getPosition(),
+              {
+                city: cityGenerator,
+                worldVisibles: [
+                  mountainRingRef.current,
+                  alienFoliageRef.current,
+                  earthFoliageRef.current,
+                  propSystemRef.current,
+                ],
+                lodCull,
+              },
+            );
+          } else if (!isAnnArbor && annArborSystemRef.current) {
+            try { annArborSystemRef.current.dispose(); } catch {}
+            annArborSystemRef.current = null;
+          }
+
           // Mount/dispose the orbital side-zone (Level 5) on the same edge
           // as the sanctuary. SpaceLevelSystem owns the skybox swap, the
           // Earth backdrop, the asteroid field, and pre-engages
@@ -1315,7 +1345,7 @@ export const Game: React.FC = () => {
           // the Swarms Lair (its own self-contained arena — boss + minions
           // are spawned by SwarmsLairSystem itself, no city fortress to
           // seed).
-          if (!isPeaceful && !isSpacelike && !isLair && !isSaginawLab && !isZugIsland && payload?.level >= 2) {
+          if (!isPeaceful && !isSpacelike && !isLair && !isSaginawLab && !isZugIsland && !isAnnArbor && payload?.level >= 2) {
             const baseWave = enemySystem.getWaveNumber() + 2;
             const targetWave = payload.level === 3 ? Math.max(baseWave, 9) : Math.max(baseWave, 5);
             enemySystem.jumpToWave(targetWave);
@@ -2604,6 +2634,7 @@ export const Game: React.FC = () => {
         if (swarmsLairSystemRef.current) { try { swarmsLairSystemRef.current.dispose(); } catch {} swarmsLairSystemRef.current = null; }
         if (saginawLabSystemRef.current) { try { saginawLabSystemRef.current.dispose(); } catch {} saginawLabSystemRef.current = null; }
         if (zugIslandSystemRef.current) { try { zugIslandSystemRef.current.dispose(); } catch {} zugIslandSystemRef.current = null; }
+        if (annArborSystemRef.current) { try { annArborSystemRef.current.dispose(); } catch {} annArborSystemRef.current = null; }
         if (friendlyNPCsRef.current) { try { friendlyNPCsRef.current.dispose(); } catch {} friendlyNPCsRef.current = null; }
         if (rescueSystemRef.current) { try { rescueSystemRef.current.dispose(); } catch {} rescueSystemRef.current = null; }
         if (multiplayerRef.current) { try { multiplayerRef.current.dispose(); } catch {} }
@@ -2776,6 +2807,7 @@ export const Game: React.FC = () => {
     if (swarmsLairSystemRef.current) { try { swarmsLairSystemRef.current.dispose(); } catch {} swarmsLairSystemRef.current = null; }
     if (saginawLabSystemRef.current) { try { saginawLabSystemRef.current.dispose(); } catch {} saginawLabSystemRef.current = null; }
     if (zugIslandSystemRef.current) { try { zugIslandSystemRef.current.dispose(); } catch {} zugIslandSystemRef.current = null; }
+    if (annArborSystemRef.current) { try { annArborSystemRef.current.dispose(); } catch {} annArborSystemRef.current = null; }
     if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} gamepadRef.current = null; }
     if (aerialEnemyRef.current) { try { aerialEnemyRef.current.dispose(); } catch {} aerialEnemyRef.current = null; }
     if (smashAttackRef.current) { try { smashAttackRef.current.dispose(); } catch {} smashAttackRef.current = null; }
@@ -3607,6 +3639,7 @@ export const Game: React.FC = () => {
       if (swarmsLairSystemRef.current) { try { swarmsLairSystemRef.current.dispose(); } catch {} swarmsLairSystemRef.current = null; }
       if (saginawLabSystemRef.current) { try { saginawLabSystemRef.current.dispose(); } catch {} saginawLabSystemRef.current = null; }
       if (zugIslandSystemRef.current) { try { zugIslandSystemRef.current.dispose(); } catch {} zugIslandSystemRef.current = null; }
+      if (annArborSystemRef.current) { try { annArborSystemRef.current.dispose(); } catch {} annArborSystemRef.current = null; }
       if (aerialEnemyRef.current) aerialEnemyRef.current.dispose();
       if (smashAttackRef.current) { try { smashAttackRef.current.dispose(); } catch {} smashAttackRef.current = null; }
       if (gamepadRef.current) gamepadRef.current.dispose();
@@ -3627,7 +3660,7 @@ export const Game: React.FC = () => {
     const ls = levelSystemRef.current;
     const player = playerRef.current;
     if (!ls || !player) return;
-    if (level < 1 || level > 9) return;
+    if (level < 1 || level > 10) return;
     const sp = LevelSystem.getSpawnPointFor(level as WorldLevel);
     // Spacelike levels need a high spawn Y so the player wakes up amid the
     // 25–105 m asteroid band (the orbital fighter is auto-entered there);

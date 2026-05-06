@@ -177,6 +177,10 @@ export class EnemyUnit implements IDamageable {
   /** True for captains spawned by the boss fortress: emit a special ENEMY_KILLED
    *  payload so Game.tsx can broadcast a victory toast. */
   public isBossCaptain: boolean = false;
+  /** When non-null, updateChase / patrol Y-snaps are overridden to this
+   *  altitude. Used by AnnArborSystem to keep the 10 throne captains on
+   *  the saucer deck (y≈152) instead of falling to the ground. */
+  public keepAirborneY: number | null = null;
   /** Boss-variant theme (color + stat scalars) used when this enemy is a
    *  captain. Null for every other type — the variant has no effect on
    *  drones / soldiers / heavies / etc. */
@@ -405,6 +409,11 @@ export class EnemyUnit implements IDamageable {
       // Body sits 3.5 m up so the six legs reach the ground without the
       // chassis sinking when chase code touches Y.
       this.mesh.position.y = 3.5;
+    } else if (this.keepAirborneY != null) {
+      // Throne captains on the Ann Arbor saucer deck: stay on the deck
+      // instead of snapping to ground so the player has to actually fly
+      // up and pick them off.
+      this.mesh.position.y = this.keepAirborneY;
     } else {
       this.mesh.position.y = 1.5;
     }
@@ -1905,6 +1914,18 @@ export class EnemySystem {
    *  silence ground spawns when entering the peaceful sanctuary. */
   setSpawningEnabled(enabled: boolean): void {
     this.spawningEnabled = enabled;
+  }
+
+  /** Override the live-enemy population cap. Used by side-zones that need
+   *  a larger swarm than the default (e.g. AnnArborSystem maintains ~70
+   *  ground enemies). Caller is responsible for restoring the prior value
+   *  on dispose — getMaxEnemies() returns the current cap so it can be
+   *  snapshotted before mutation. */
+  setMaxEnemies(n: number): void {
+    this.maxEnemies = Math.max(1, Math.floor(n));
+  }
+  getMaxEnemies(): number {
+    return this.maxEnemies;
   }
 
   /** Despawn every active enemy mesh. Used when warping into a peaceful

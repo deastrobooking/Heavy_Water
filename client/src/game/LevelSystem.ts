@@ -11,7 +11,7 @@ import { BossVariantId } from "./BossVariants";
  *  bio-crops, and runs errands for the nearby Village of Earth. It does not
  *  appear in the L1→L2→L3 progression chain; it's reached from the new TRAVEL
  *  tab on the upgrade menu and acts as the player's home base. */
-export type WorldLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+export type WorldLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
 /** Persisted shape used by ProgressSync. */
 export interface LevelSnapshot {
@@ -246,6 +246,26 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     completeSubtitle: "The Legion is broken. Zug Island holds.",
     timeOfDay: 21.0,
   },
+  10: {
+    level: 10,
+    displayName: "ANN ARBOR APOCALYPSE",
+    banner: "LEVEL 10 — ANN ARBOR APOCALYPSE",
+    objective: "A mothership has landed on Ann Arbor. Bring down the maxed captains on its deck and hold the streets against the swarm.",
+    // Hardest level on the roster — maxed captains atop the saucer +
+    // an everything-goes ground swarm. Bumps over Zug Legion (4.5).
+    difficultyMultiplier: 5.0,
+    // Sickly purple/violet apocalypse sky bleeding off the mothership.
+    skyTint: { r: 0.85, g: 0.40, b: 1.10 },
+    bossVariantId: "void",
+    fortressCenter: { x: -9999, z: 9999 },
+    // Pure WEST corner of the expanded open world — west of every
+    // other map section (origin city, Saginaw SE, Zug SW). Must match
+    // AnnArborSystem.CENTER so fast-travel lands on the city street
+    // directly under the mothership.
+    spawnPoint: { x: -3000, z: 0 },
+    completeSubtitle: "The mothership is dead. Ann Arbor breathes.",
+    timeOfDay: 21.5, // late-evening apocalypse
+  },
   7: {
     level: 7,
     displayName: "SWARMS LAIR",
@@ -452,7 +472,17 @@ export class LevelSystem {
 
   /** All known levels — used by the TRAVEL tab. */
   static getAllLevels(): WorldLevel[] {
-    return [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  }
+
+  /** `true` for Ann Arbor Apocalypse (Level 10) — a medium-sized
+   *  city WEST of every other map section, with a giant alien
+   *  mothership crashed through the downtown towers. Combat is
+   *  active: 10 maxed captains atop the saucer + a continuous
+   *  ground swarm of every robot type. Spawns are owned by
+   *  AnnArborSystem rather than the standard wave/fortress chain. */
+  static isAnnArbor(level: WorldLevel): boolean {
+    return level === 10;
   }
 
   /** `true` for the Saginaw Underwater Lab (Level 8) — a flooded indoor
@@ -512,7 +542,8 @@ export class LevelSystem {
   applyLoadedState(snap: Partial<LevelSnapshot> | null | undefined): void {
     let lvl: WorldLevel = 1;
     const raw = snap && typeof snap.worldLevel === "number" ? snap.worldLevel : 1;
-    if (raw >= 9) lvl = 9;
+    if (raw >= 10) lvl = 10;
+    else if (raw === 9) lvl = 9;
     else if (raw === 8) lvl = 8;
     else if (raw === 7) lvl = 7;
     else if (raw === 6) lvl = 6;
@@ -532,7 +563,7 @@ export class LevelSystem {
     // cleared just because the player saved there; that would let them
     // skip the campaign on re-entry. Only treat the main chain (1→2→3)
     // as cleared-on-load.
-    if (lvl === 4 || lvl === 5 || lvl === 6 || lvl === 7 || lvl === 8 || lvl === 9) {
+    if (lvl === 4 || lvl === 5 || lvl === 6 || lvl === 7 || lvl === 8 || lvl === 9 || lvl === 10) {
       this.advanceTo(lvl);
       return;
     }
