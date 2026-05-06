@@ -11,7 +11,7 @@ import { BossVariantId } from "./BossVariants";
  *  bio-crops, and runs errands for the nearby Village of Earth. It does not
  *  appear in the L1→L2→L3 progression chain; it's reached from the new TRAVEL
  *  tab on the upgrade menu and acts as the player's home base. */
-export type WorldLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export type WorldLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 /** Persisted shape used by ProgressSync. */
 export interface LevelSnapshot {
@@ -221,6 +221,25 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     completeSubtitle: "Saginaw is silent. The water swallows the rest.",
     timeOfDay: 23.0,
   },
+  9: {
+    level: 9,
+    displayName: "ZUG ISLAND — LEGION",
+    banner: "LEVEL 9 — ZUG ISLAND LEGION",
+    objective: "Hold Zug Island. Cut down the Legion — titans, captains, spider tanks, no end.",
+    // Hardest combat zone in the game by a wide margin — bumps over the
+    // Saginaw Lab (3.5) so the wave-spawner keeps the enemy count
+    // saturated even after the player levels their gear.
+    difficultyMultiplier: 4.5,
+    // Burnt orange/red tint — Zug Island's industrial sky reads as
+    // perpetually slag-lit. The system itself owns its visual identity
+    // (ember discs, blast furnaces, smokestacks) via ZugIslandSystem.
+    skyTint: { r: 1.40, g: 0.55, b: 0.25 },
+    bossVariantId: "inferno",
+    fortressCenter: { x: 9999, z: -9999 },
+    spawnPoint: { x: 0, z: 0 },
+    completeSubtitle: "The Legion is broken. Zug Island holds.",
+    timeOfDay: 21.0,
+  },
   7: {
     level: 7,
     displayName: "SWARMS LAIR",
@@ -427,7 +446,7 @@ export class LevelSystem {
 
   /** All known levels — used by the TRAVEL tab. */
   static getAllLevels(): WorldLevel[] {
-    return [1, 2, 3, 4, 5, 6, 7, 8];
+    return [1, 2, 3, 4, 5, 6, 7, 8, 9];
   }
 
   /** `true` for the Saginaw Underwater Lab (Level 8) — a flooded indoor
@@ -437,6 +456,15 @@ export class LevelSystem {
    *  than the standard wave/fortress chain. */
   static isSaginawLab(level: WorldLevel): boolean {
     return level === 8;
+  }
+
+  /** `true` for the Zug Island Legion (Level 9) — a wide-open industrial
+   *  wasteland combat side-zone. Like the Saginaw Lab, combat IS active
+   *  here, but spawns are owned by ZugIslandSystem (sustained waves of
+   *  titans + captains + spider tanks) rather than the standard
+   *  wave/fortress chain. */
+  static isZugIsland(level: WorldLevel): boolean {
+    return level === 9;
   }
 
   /** `true` for the Pontiac Secret Lab side-zone (Level 6). Like the
@@ -478,7 +506,8 @@ export class LevelSystem {
   applyLoadedState(snap: Partial<LevelSnapshot> | null | undefined): void {
     let lvl: WorldLevel = 1;
     const raw = snap && typeof snap.worldLevel === "number" ? snap.worldLevel : 1;
-    if (raw >= 8) lvl = 8;
+    if (raw >= 9) lvl = 9;
+    else if (raw === 8) lvl = 8;
     else if (raw === 7) lvl = 7;
     else if (raw === 6) lvl = 6;
     else if (raw === 5) lvl = 5;
@@ -497,7 +526,7 @@ export class LevelSystem {
     // cleared just because the player saved there; that would let them
     // skip the campaign on re-entry. Only treat the main chain (1→2→3)
     // as cleared-on-load.
-    if (lvl === 4 || lvl === 5 || lvl === 6 || lvl === 7 || lvl === 8) {
+    if (lvl === 4 || lvl === 5 || lvl === 6 || lvl === 7 || lvl === 8 || lvl === 9) {
       this.advanceTo(lvl);
       return;
     }

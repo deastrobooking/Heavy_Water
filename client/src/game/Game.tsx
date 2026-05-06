@@ -62,6 +62,7 @@ import { PontiacLabSystem } from "./PontiacLabSystem";
 import { SpaceLevelSystem } from "./SpaceLevelSystem";
 import { SwarmsLairSystem } from "./SwarmsLairSystem";
 import { SaginawLabSystem } from "./SaginawLabSystem";
+import { ZugIslandSystem } from "./ZugIslandSystem";
 import { setPlayerIsFlyingProvider as setEnemyPlayerIsFlyingProvider } from "./EnemySystem";
 import { RESCUE_DEFS } from "./RescueSystem";
 import { loadProgress, saveProgress, ProgressSnapshot } from "./ProgressSync";
@@ -166,6 +167,7 @@ export const Game: React.FC = () => {
   const spaceLevelSystemRef = useRef<SpaceLevelSystem | null>(null);
   const swarmsLairSystemRef = useRef<SwarmsLairSystem | null>(null);
   const saginawLabSystemRef = useRef<SaginawLabSystem | null>(null);
+  const zugIslandSystemRef = useRef<ZugIslandSystem | null>(null);
   // Long-lived progress mirrors for the Pontiac Lab → Swarms Lair chain.
   // PontiacLabSystem is rebuilt on every L6 entry, so the freed-animal id
   // set must outlive it here in Game.tsx (read on next mount, written on
@@ -1241,6 +1243,33 @@ export const Game: React.FC = () => {
             saginawLabSystemRef.current = null;
           }
 
+          // Mount/dispose the Zug Island Legion side-zone (Level 9) —
+          // open industrial arena with sustained waves of titans,
+          // captains, and spider tanks. Same handles bag + dispose
+          // pattern as the SaginawLab block above.
+          const isZugIsland = typeof payload?.level === "number"
+            && LevelSystem.isZugIsland(payload.level as WorldLevel);
+          if (isZugIsland && !zugIslandSystemRef.current) {
+            zugIslandSystemRef.current = new ZugIslandSystem(
+              scene,
+              enemySystem,
+              () => player.getPosition(),
+              {
+                city: cityGenerator,
+                worldVisibles: [
+                  mountainRingRef.current,
+                  alienFoliageRef.current,
+                  earthFoliageRef.current,
+                  propSystemRef.current,
+                ],
+                lodCull,
+              },
+            );
+          } else if (!isZugIsland && zugIslandSystemRef.current) {
+            try { zugIslandSystemRef.current.dispose(); } catch {}
+            zugIslandSystemRef.current = null;
+          }
+
           // Mount/dispose the orbital side-zone (Level 5) on the same edge
           // as the sanctuary. SpaceLevelSystem owns the skybox swap, the
           // Earth backdrop, the asteroid field, and pre-engages
@@ -1285,7 +1314,7 @@ export const Game: React.FC = () => {
           // the Swarms Lair (its own self-contained arena — boss + minions
           // are spawned by SwarmsLairSystem itself, no city fortress to
           // seed).
-          if (!isPeaceful && !isSpacelike && !isLair && !isSaginawLab && payload?.level >= 2) {
+          if (!isPeaceful && !isSpacelike && !isLair && !isSaginawLab && !isZugIsland && payload?.level >= 2) {
             const baseWave = enemySystem.getWaveNumber() + 2;
             const targetWave = payload.level === 3 ? Math.max(baseWave, 9) : Math.max(baseWave, 5);
             enemySystem.jumpToWave(targetWave);
@@ -2556,6 +2585,7 @@ export const Game: React.FC = () => {
         if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }
         if (swarmsLairSystemRef.current) { try { swarmsLairSystemRef.current.dispose(); } catch {} swarmsLairSystemRef.current = null; }
         if (saginawLabSystemRef.current) { try { saginawLabSystemRef.current.dispose(); } catch {} saginawLabSystemRef.current = null; }
+        if (zugIslandSystemRef.current) { try { zugIslandSystemRef.current.dispose(); } catch {} zugIslandSystemRef.current = null; }
         if (friendlyNPCsRef.current) { try { friendlyNPCsRef.current.dispose(); } catch {} friendlyNPCsRef.current = null; }
         if (rescueSystemRef.current) { try { rescueSystemRef.current.dispose(); } catch {} rescueSystemRef.current = null; }
         if (multiplayerRef.current) { try { multiplayerRef.current.dispose(); } catch {} }
@@ -2727,6 +2757,7 @@ export const Game: React.FC = () => {
     if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }
     if (swarmsLairSystemRef.current) { try { swarmsLairSystemRef.current.dispose(); } catch {} swarmsLairSystemRef.current = null; }
     if (saginawLabSystemRef.current) { try { saginawLabSystemRef.current.dispose(); } catch {} saginawLabSystemRef.current = null; }
+    if (zugIslandSystemRef.current) { try { zugIslandSystemRef.current.dispose(); } catch {} zugIslandSystemRef.current = null; }
     if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} gamepadRef.current = null; }
     if (aerialEnemyRef.current) { try { aerialEnemyRef.current.dispose(); } catch {} aerialEnemyRef.current = null; }
     if (smashAttackRef.current) { try { smashAttackRef.current.dispose(); } catch {} smashAttackRef.current = null; }
@@ -3533,6 +3564,7 @@ export const Game: React.FC = () => {
       if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }
       if (swarmsLairSystemRef.current) { try { swarmsLairSystemRef.current.dispose(); } catch {} swarmsLairSystemRef.current = null; }
       if (saginawLabSystemRef.current) { try { saginawLabSystemRef.current.dispose(); } catch {} saginawLabSystemRef.current = null; }
+      if (zugIslandSystemRef.current) { try { zugIslandSystemRef.current.dispose(); } catch {} zugIslandSystemRef.current = null; }
       if (aerialEnemyRef.current) aerialEnemyRef.current.dispose();
       if (smashAttackRef.current) { try { smashAttackRef.current.dispose(); } catch {} smashAttackRef.current = null; }
       if (gamepadRef.current) gamepadRef.current.dispose();
@@ -3599,6 +3631,8 @@ export const Game: React.FC = () => {
         ? "Swarms Lair — underground cave arena. Insectoid swarms guard General Voidcrown."
         : lvl === 8
         ? "Saginaw Underwater Lab — flooded endgame arena. Captains only, plus spider-tank missile mid-bosses."
+        : lvl === 9
+        ? "Zug Island — Legion stronghold. Endless waves of titans, captains, and spider tanks. Hardest zone in the game."
         : lvl === 1
         ? "Star City Front — first-stage Detroit defense. Rescue the captured ally."
         : lvl === 2

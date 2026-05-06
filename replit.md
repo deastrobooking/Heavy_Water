@@ -46,6 +46,11 @@ _Populate as you build_
 - Note: All mesh positioning must use height/2 to rest on ground
 - Communication: Concise updates; documentation must always reflect changes.
 
+## Side-Zones
+- **Level 7 — Swarms Lair**: Indoor cave; General Voidcrown.
+- **Level 8 — Saginaw Underwater Lab**: Flooded arena; captains-only + spider-tank mid-bosses.
+- **Level 9 — Zug Island Legion**: Open industrial wasteland; sustained waves of titans + captains + spider tanks (live target ~60, lifetime cap ~600). Hardest combat zone.
+
 ## Gotchas
 - **Ghost Ride the Whip**: Ejecting from a vehicle (B key/controller) while boosting leaves it driverless but still active; it will explode after 6 seconds or on first contact with enemies/structures.
 - **Grounded-elite fix**: Commanders/captains/titans no longer fly upward indefinitely when the player is grounded.
