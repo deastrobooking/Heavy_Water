@@ -193,13 +193,24 @@ export class MeleeArsenalSystem {
     return !!(m.isEnemy && m.damageable);
   }
 
+  /** Per-level player damage scaling (PlayerController.getLevelDamageMul).
+   *  Applied uniformly to every alternate-melee hit so the level cap
+   *  reaches the arsenal weapons the same way it reaches the sabre and
+   *  ranged weapons. */
+  private playerLevelMul: number = 1;
+  setPlayerLevelMul(mul: number): void {
+    if (mul > 0) this.playerLevelMul = mul;
+  }
+
   private dealDamage(mesh: BABYLON.AbstractMesh, amount: number, info: DamageInfo): number {
+    const scaled = amount * this.playerLevelMul;
     if (this.damageRouter) {
-      this.damageRouter(mesh, amount);
-      return amount;
+      this.damageRouter(mesh, scaled);
+      return scaled;
     }
     const damageable = (mesh.metadata as any).damageable as IDamageable;
-    const result = applyDamage(damageable, info);
+    const scaledInfo: DamageInfo = { ...info, amount: scaled };
+    const result = applyDamage(damageable, scaledInfo);
     return result.damageAmount;
   }
 

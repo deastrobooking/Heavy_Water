@@ -1636,10 +1636,23 @@ export class PlayerController implements IDamageable {
     return true;
   }
 
+  /** Hard cap on the player's level. +10 maxHP / +5 stamina per level
+   *  with attack-damage scaling via getLevelDamageMul means level 100
+   *  gives +990 maxHP, +495 stamina, and +99% projectile damage on top
+   *  of every other multiplier — comfortably "endgame" without breaking
+   *  the elite/captain HP curve. */
+  static readonly MAX_LEVEL = 100;
+
   addExperience(amount: number): void {
+    if (this.stats.level >= PlayerController.MAX_LEVEL) return;
     this.stats.experience += amount;
-    const expNeeded = this.stats.level * 100;
-    if (this.stats.experience >= expNeeded) {
+    // Loop so a single huge XP grant (e.g. boss-clear bonus) can level
+    // up multiple times — but stop at MAX_LEVEL so the cap is hard.
+    while (
+      this.stats.level < PlayerController.MAX_LEVEL &&
+      this.stats.experience >= this.stats.level * 100
+    ) {
+      const expNeeded = this.stats.level * 100;
       this.stats.experience -= expNeeded;
       this.stats.level++;
       this.stats.maxHealth += 10;
@@ -1650,6 +1663,19 @@ export class PlayerController implements IDamageable {
       this.stats.stamina = this.stats.maxStamina;
       this.bus.emit(GameEvents.PLAYER_LEVEL_UP, { level: this.stats.level });
     }
+    // At cap, drain residual XP so the bar reads "MAX" and a future
+    // overflow can't roll the integer.
+    if (this.stats.level >= PlayerController.MAX_LEVEL) {
+      this.stats.experience = 0;
+    }
+  }
+
+  /** Per-level attack-damage multiplier exposed for WeaponsSystem.
+   *  Linear +1% per level over level 1 → +99% at level 100. Combat
+   *  systems (WeaponsSystem.createProjectile, melee paths) read this
+   *  on every hit so it stacks with armor damage mods + jewels. */
+  getLevelDamageMul(): number {
+    return 1 + (Math.max(1, this.stats.level) - 1) * 0.01;
   }
 
   grantFlightArmor(): void {

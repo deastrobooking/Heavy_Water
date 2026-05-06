@@ -112,6 +112,11 @@ export class WeaponsSystem {
   // vehicle bonuses inside fire() / createProjectile().
   private playerDamageMul: number = 1;
   private playerFireRateMul: number = 1;
+  /** Per-level damage multiplier from the player's character level
+   *  (PlayerController.getLevelDamageMul). Updated by Game.tsx on
+   *  PLAYER_LEVEL_UP and on initial load. Stacks multiplicatively with
+   *  vehicleMode, playerDamageMul, and jewel mounts. */
+  private playerLevelMul: number = 1;
   /** Per-weapon damage multiplier from any mounted Power Jewel. Updated by
    *  JewelSystem via setWeaponJewelMul() whenever the player mounts /
    *  unmounts a jewel. Stacks multiplicatively with vehicleMode and
@@ -393,6 +398,13 @@ export class WeaponsSystem {
     if (boosts.fireRateMul > 0) this.playerFireRateMul = boosts.fireRateMul;
   }
 
+  /** Receives the per-level damage multiplier (1.0 at level 1, ramping
+   *  to 1.99 at the level-100 cap). Called by Game.tsx on PLAYER_LEVEL_UP
+   *  and once after the initial save loads. */
+  setPlayerLevelMul(mul: number): void {
+    if (mul > 0) this.playerLevelMul = mul;
+  }
+
   /** Set the Power-Jewel damage multiplier for a specific weapon. Owned by
    *  JewelSystem — called whenever the player mounts / unmounts a jewel and
    *  on initial save load. mul should be >= 1; values <= 0 are ignored to
@@ -472,7 +484,7 @@ export class WeaponsSystem {
     // Core boosts so a fully-modded player firing from an orbital fighter
     // with a flawless jewel mounted hits hardest.
     const jewelMul = this.weaponJewelMul.get(weapon.type) ?? 1;
-    const dmgMul = (this.vehicleMode ? 1.5 : 1) * this.playerDamageMul * jewelMul;
+    const dmgMul = (this.vehicleMode ? 1.5 : 1) * this.playerDamageMul * jewelMul * this.playerLevelMul;
     const speedMul = this.vehicleMode ? 2.5 : 1;
     const lifetimeMul = this.vehicleMode ? 2.0 : 1;
 

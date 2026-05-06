@@ -1,86 +1,63 @@
 # Heavy Water
 
-## Overview
-Heavy Water is a 3D futuristic sci-fi action game built with Babylon.js, set in a far-future Detroit. It features anime-style cell-shaded graphics, offering immersive ground and aerial combat with DBZ-style flight mechanics, and open-world exploration. The game's core purpose is to defend the city from an invasion of insane hybrid organoids, encompassing both ground swarms and hostile aerial forces. Key capabilities include deep exploration, dynamic combat, character customization, crafting, and base building, aiming to deliver a rich and engaging player experience. The business vision is to target the niche market of anime-style sci-fi game enthusiasts.
+Heavy Water is a 3D futuristic sci-fi action game where players defend a cell-shaded Detroit from alien invasion through immersive ground and aerial combat, exploration, and customization.
 
-## User Preferences
+## Run & Operate
+_Populate as you build_
+
+## Stack
+- **Frameworks**: React, Express
+- **Runtime**: Node.js
+- **Rendering**: Babylon.js v8.x (WebGPU/WebGL2)
+- **ORM**: Drizzle ORM
+- **Authentication**: Passport.js (local strategy, scrypt hashing)
+- **Session Management**: express-session with connect-pg-simple
+- **Realtime**: `ws` library
+- **Build Tool**: Vite
+- **Language**: TypeScript
+
+## Where things live
+- `src/`: Main application source code
+- `docs/`: Canonical developer documentation (39 markdown files)
+- `public/`: Static assets
+- `server/`: Backend server logic
+- `schema.ts`: Database schema (via Drizzle ORM)
+- `interface.ts`: API contracts and WebSocket protocols
+- `theme.ts`: UI theme and styling
+
+## Architecture decisions
+- **Babylon.js for rendering**: Chosen over React Three Fiber for direct WebGL/WebGPU control and specific rendering pipeline requirements.
+- **EventBus**: Decouples game systems for better maintainability and scalability.
+- **Generic StateMachine**: Standardizes entity behavior management across diverse game elements.
+- **Unified DamageSystem**: Centralizes all combat damage calculations and effects.
+- **JSONB for Player Progress**: Utilizes PostgreSQL's JSONB for flexible and schema-less storage of player progress, inventory, and upgrades, avoiding frequent DB migrations.
+
+## Product
+- Immersive open-world exploration of a futuristic Detroit.
+- Dynamic ground and aerial combat with DBZ-style flight mechanics.
+- Character customization, crafting, and base building.
+- Player progression through weapon leveling, companion upgrades, and a comprehensive upgrade menu.
+- Multiplayer support for up to 16 players in co-op campaigns or PvP arenas.
+- Rich lore through collectible robotic creatures and interactive NPCs.
+
+## User preferences
 - Design choice: Anime retro 80's sci-fi cell-shaded graphics style
 - Design choice: Use Babylon.js (not React Three Fiber)
 - Note: All mesh positioning must use height/2 to rest on ground
 - Communication: Concise updates; documentation must always reflect changes.
 
-## System Architecture
-The game utilizes Babylon.js v8.x for WebGL/WebGPU rendering, focusing on an anime cell-shaded aesthetic with advanced post-processing effects. The frontend is built with React, TypeScript, and Vite. Core systems include an EventBus for decoupled communication, a generic StateMachine for entity behaviors, and a unified DamageSystem for combat.
+## Gotchas
+- **Ghost Ride the Whip**: Ejecting from a vehicle (B key/controller) while boosting leaves it driverless but still active; it will explode after 6 seconds or on first contact with enemies/structures.
+- **Grounded-elite fix**: Commanders/captains/titans no longer fly upward indefinitely when the player is grounded.
+- **Power Jewels**: Very rare drops, specific sources (vaults, bosses, aerial battleships), mounted via Upgrade Menu's WEAPONS tab; persist via `ProgressSync.jewelMounts`.
+- **Level Cap**: Player level capped at 100; `addExperience` handles multi-level gains and residual XP.
+- **Capsule Upgrades**: Force-save immediately upon purchase to prevent loss from crashes.
+- **Legendary Companion**: Grant conditions (General Voidcrown defeated, all 12 synthetics freed, all 4 lab animals freed) are re-evaluated on each relevant event.
 
-**Rendering & Graphics:**
-- Babylon.js handles 3D rendering with fallback from WebGPU to WebGL2.
-- Custom GLSL-ES-1.0 cell-shading with ink outlines, bloom, chromatic aberration, and FXAA.
-- SkySystem manages a custom-shader gradient skybox, day/night cycle, and weather.
-- LODCullSystem manages mesh distance culling for environmental elements.
-
-**Core Gameplay Mechanics:**
-- **Combat:** Features an ExplosionSystem, melee combo chains, elemental casting, Beam Sabre, unlimited ammo for ranged weapons, and an optional Auto-Target Module. The WeaponsSystem supports various aim providers.
-- **Melee Arsenal:** Four optional alternate melee weapons (Beam Glaive, Twin Beam Daggers, Plasma War Axe, Spiked Chain Whip) are available, each with three tiers of special abilities and scaled damage/reach. A Gold Tier upgrade for the Beam Sabre provides enhanced visual effects and damage.
-- **Movement:** Player characters feature complex state machines, a triple-jump flight system, Rocket Skates, Boost Dash, and a Spinning Downward Smash. A 2-level Dash Capacitor upgrade allows for multiple stored boost-dash charges. Superman Flight is a premium movement upgrade enabling free-flight mode with speed boosts.
-- **Vehicles:** Parametrically generated ATVs and space fighters are managed by VehicleFactory and VehicleSystem, featuring a Turbo Boost mechanic and a **Ghost Ride the Whip** eject. While mounted AND boosting (jump-tap turbo window OR Shift held), pressing **B** (keyboard) or **B** on Xbox controllers (the existing B→KeyE binding routes through automatically when boosting) bails the player in a sideways somersault (`PlayerController.triggerSomersaultEject`, reuses the dodgeRoll animation with extended invuln) while the unmanned vehicle continues forward at a locked heading + speed (60 m/s ATV / 110 m/s fighter). The driverless vehicle scans for enemies, aerial units, base structures, and walls each frame; first hit OR a 6 s fuse triggers a large orange-red explosion (18 m blast radius, 420 base damage with linear falloff, big shake) via `effect:explosion`. Wired in `Game.tsx` (`tryGhostRide`) with live getters into EnemySystem / AerialEnemySystem / EnemyBaseSystem.
-- **Inventory & Crafting:** A 100-slot InventorySystem (lifted from 24 so rare special-upgrade drops like Power Jewels never bounce off a full bag) and recipe-based CraftingSystem. Per-item `maxStack` ceilings still apply; only the slot count was raised. Persists via the open-ended `ProgressSnapshot.inventoryCounts` JSONB record — no DB migration required.
-- **Loot & Pickups:** Handled by a PickupSystem with enemy-specific drop tables.
-- **Progression:** Per-weapon leveling, companion upgrades, and a comprehensive UpgradeMenu.
-
-**World & Environment:**
-- A 1200x1200 open world with a central city and four biomes, generated by CityGenerator.
-- Procedural L-system foliage (AlienFoliageSystem and EarthFoliageSystem) and a MountainRingSystem.
-- Accessible building interiors, a sky racetrack, and destructible glowing resource nodes managed by the MiningSystem.
-
-**Base Building:**
-- BaseSystem and BuildingSystem enable player-placed, multi-level structures with grid-snapped placement and serialization via PrefabSystem.
-
-**Enemies & NPCs:**
-- EnemySystem includes a wave spawner, Commander enemies, aerial enemies, Hostile Enemy Bases with turrets, Boss Fortresses, and Tank ground units.
-- Bio-Creature Dex defines 125+ collectible robotic creatures with archetypes, elemental types, and rarity tiers.
-- FriendlyNPCSystem scatters NPCs with interactive dialogue.
-- RescueSystem scatters captured humanoid synthetics in glowing red containment cages across each combat level (3 per level on L1/L2/L3/L5). Press **E** inside a cage to break it, fire `SYNTHETIC_RESCUED`, and play a centered story-bubble moment with the rescuee's name + 3 lines of personal backstory. Rescued ids persist via `ProgressSnapshot.rescuedSyntheticIds` so revisiting a level never respawns a freed rescuee. Skips peaceful zones (L4 Sanctuary, L6 Pontiac Lab — those are the destinations the rescued are headed to).
-- PontiacLabSystem additionally hosts 4 caged lab animals (KIT, GLIM, MOSSBACK, RIVET) in mini red cages along the south wall and a glowing hexagonal cave hatch in the floor. Press **E** inside an animal cage to fire `ANIMAL_FREED` (toast + persist via `ProgressSnapshot.freedLabAnimalIds`); press **E** on the hatch to fire `LAB_CAVE_ENTERED`, which Game.tsx routes through `handleFastTravel(7)` to warp the player into the Swarms Lair.
-
-**Levels & Zones:**
-- LevelSystem defines seven distinct world levels: three combat fronts (Star City, Hold the Line, Purge the Void), a peaceful sanctuary side-zone (Ashur Sanctuary), an off-canon spacelike combat zone (Orbital Front), a peaceful indoor lore side-zone (Pontiac Secret Lab), and an underground combat side-zone (Swarms Lair). Each level has unique themes and environmental setups.
-- **Swarms Lair (Level 7):** Self-contained underground cave arena owned by SwarmsLairSystem (mirrors the lab/sanctuary/space side-zone pattern — hides city/mountains/foliage/props on mount, restores on dispose). Reached via TRAVEL or via the Pontiac Lab cave hatch. Spawns ~10 insectoid swarm minions ringing an 80×80m main arena and General Voidcrown — a humanoid boss spawned via `spawnCaptain` with a 2.5× HP multiplier and a `mesh.scaling.setAll(1.15)` post-spawn upscale (15% larger than a standard humanoid captain, smaller than a titan). Killing the General fires `SWARMS_GENERAL_DEFEATED` (radius-gated to the arena center). The boss + flag both persist via `ProgressSnapshot.swarmsGeneralDefeated`.
-
-**Legendary Companion Grant:**
-- After defeating General Voidcrown AND freeing every caged synthetic across L1/L2/L3/L5 (12 total) AND freeing all 4 lab animals, Game.tsx grants the legendary `MiniGeneralVoidcrown` ally companion (a tall biped silhouette in dark void/blood palette, routed through the standard `companionSystem.addCompanion` path / `ALLY_PRESETS`). The grant is one-shot, idempotent, auto-bumps `maxCompanions` if the roster is full, fires `LEGENDARY_COMPANION_GRANTED`, and persists via `ProgressSnapshot.legendaryCompanionGranted` so reloads never re-issue the companion. The grant is re-evaluated on every `SYNTHETIC_RESCUED`, `ANIMAL_FREED`, and `SWARMS_GENERAL_DEFEATED` event so whichever condition closes last triggers the unlock.
-
-**Customization:**
-- CharacterEditor exposes tabs for Body, Armor, Colors, and Boss Style, along with three armor presets (HUMANOID, TITAN, and DREAD). The Boss Style tab persists enemy appearance overrides.
-
-**Power Jewels:**
-- Very rare weapon-mount drops in three tiers (Rough +15%, Cut +30%, Flawless +50% damage). Drop sources: enemy-base vaults (5% / 1.5% / 0.4%), boss-fortress vaults (guaranteed Rough + 50% Cut + 20% Flawless), boss captains (guaranteed, weighted toward higher tiers), and aerial battleships (35% chance, mostly Rough).
-- Mounted via the WEAPONS tab of the Upgrade Menu — each ranged weapon (pistol, rifle, shotgun, rocket, laser, grenade, tracking missile) has its own jewel slot. Mount/unmount round-trips through the inventory; mounted jewels persist in `ProgressSync.jewelMounts` and re-apply their multiplier on load.
-
-**Player Systems:**
-- Character customization includes procedural generation, modular body parts, and a HumanoidCharacter system.
-- ProgressSync.ts handles player progress, stats, inventory, and upgrades with auto-save. Every in-game upgrade round-trips through the JSONB snapshot — including `playerUpgrades`, `weaponLevels`, `beamSabreLevel`, `elementalLevels`, `specialsOwned` (sabre tiers, melee arsenal own/combo/special, autoLoot, robo-dragon, autoTarget, superman flight, gold sabre), `appliedCapsuleUpgradeIds` (armor-capsule one-time purchases), `equippedArmor` (every slot + active elemental aura), `baseStructureLevels` (per-kind lab/garden tier), `companions[]`, `maxCompanions`, `jewelMounts`, `bioDexCaughtIds[]`, and per-zone milestones. Capsule purchases force-save immediately so a crash inside the 30s autosave window can never lose a 5000-credit upgrade.
-- A ShopSystem manages in-game commerce.
-- CompanionSystem manages digital companions.
-- MapSystem provides a real-time minimap.
-
-**Multiplayer:**
-- MultiplayerSystem provides client-side WebSocket integration for up to 16 players per room, supporting room management, synchronization, chat, and enemy damage syncing.
-- Rooms can be `coop` (default campaign/wave-defense) or `versus` (PvP arena).
-- **Versus Mode:** A PvP-only home-screen game mode accessible from the main menu. Players can create new arenas or join by code, leading to a compact 320x320 walled PvP map with deterministic seeded building layouts and specific spawn points. This mode overrides the open-world elements, disabling enemy spawning and hiding unnecessary world components while preserving system integrity.
-
-**UI/UX:**
-- Redesigned HUD, AuthUI, GameUI, shop interfaces, upgrade interfaces, multiplayer lobby, contextual build hotbar, MainMenu with character customization, and an EnemyHealthBarSystem for HTML overlays.
-- Cloud-save summary card displayed in the main menu for authenticated players.
-- GamepadInput provides seamless controller integration. Pure-nav menu mode (D-Pad cycles rows/tabs, A activates, B closes) activates whenever ANY pause-style modal is open: the upgrade bay, the shop dialog, the bio garden, the main menu, AND any open NPC dialogue bubble. Game.tsx feeds all four in-game states (`upgradeMenuOpenRef || shopOpenRef || gardenOpenRef || friendlyNPCs.isDialogueOpen()`) into `gamepad.setMenuOpenProvider`; the MainMenu listens directly on its own. Each modal owns a matching dual-listener (`keydown` + `gamepad-menu` CustomEvent) so keyboard arrows/Enter and controller D-Pad/A behave identically — Shop and Garden render an amber `ring-2` highlight + auto-`scrollIntoView` on the focused row, FriendlyNPCSystem shares one `advance()` body between its E-keypress and gamepad-A handlers, and ShopSystem honors the gamepad `close` action so B backs out of the outpost dialog (KeyB stays bound to the in-world melee-cycle so the close path is gamepad-only). The Garden adds a dedicated UPGRADE-button focus state: pressing Down past the last roster row (or Down on any DEX tab) jumps focus to the bottom UPGRADE GARDEN button, where A/Enter activates it. The MainMenu wraps START / CUSTOMIZE / VERSUS / GUIDE on a single ring (D-Pad Up/Down/Left/Right + arrow keys all step the cursor; A/Enter activates; B/Esc closes the topmost open sub-dialog).
-- EffectsSystem drives visual effects.
-
-## Developer Documentation
-- Canonical developer hub: [`docs/`](docs/) — 39 markdown files (~3700 lines) covering getting-started, architecture, repository structure, 9 how-to guides (add a level / side-zone / enemy / weapon / companion / event / API route / DB change / debug HMR), 17 system references (rendering, character/armor, vehicles, EventBus, levels, combat, enemies, weapons, companions, inventory, NPCs/rescue, audio/music, base building, progression, multiplayer/versus, world-gen, UI), 6 quick-reference tables (events, world levels, HTTP API, WS protocol, DB schema, controls), plus deployment / troubleshooting / contributing.
-- Existing `README.md`, `GAMEPLAY_GUIDE.md`, and `Docs/DEVELOPERS_GUIDE.md` are intentionally kept and linked from `docs/README.md` — they remain valid for player-facing and historical long-form material.
-- Convention: when you add a major system, update both `replit.md` (this file) **and** the matching `docs/systems/*.md` reference in the same PR.
-
-## External Dependencies
-- **PostgreSQL**: Primary database with Drizzle ORM.
-- **Passport.js**: User authentication with local strategy and scrypt hashing.
-- **Express-session with connect-pg-simple**: Persistent session management.
-- **ws library**: WebSocket server for multiplayer.
+## Pointers
+- **Developer Hub**: [`docs/`](docs/)
+- **Player-facing Guides**: `README.md`, `GAMEPLAY_GUIDE.md`
+- **Historical Developer Guide**: `Docs/DEVELOPERS_GUIDE.md`
+- **Babylon.js Documentation**: [babylonjs.com](https://doc.babylonjs.com/)
+- **Drizzle ORM Documentation**: [orm.drizzle.team](https://orm.drizzle.team/docs/overview)
+- **Passport.js Documentation**: [www.passportjs.org](http://www.passportjs.org/docs/)

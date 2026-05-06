@@ -61,6 +61,8 @@ import { SanctuarySystem } from "./SanctuarySystem";
 import { PontiacLabSystem } from "./PontiacLabSystem";
 import { SpaceLevelSystem } from "./SpaceLevelSystem";
 import { SwarmsLairSystem } from "./SwarmsLairSystem";
+import { SaginawLabSystem } from "./SaginawLabSystem";
+import { setPlayerIsFlyingProvider as setEnemyPlayerIsFlyingProvider } from "./EnemySystem";
 import { RESCUE_DEFS } from "./RescueSystem";
 import { loadProgress, saveProgress, ProgressSnapshot } from "./ProgressSync";
 import { EventBus, GameEvents } from "./EventBus";
@@ -163,6 +165,7 @@ export const Game: React.FC = () => {
   const pontiacLabSystemRef = useRef<PontiacLabSystem | null>(null);
   const spaceLevelSystemRef = useRef<SpaceLevelSystem | null>(null);
   const swarmsLairSystemRef = useRef<SwarmsLairSystem | null>(null);
+  const saginawLabSystemRef = useRef<SaginawLabSystem | null>(null);
   // Long-lived progress mirrors for the Pontiac Lab → Swarms Lair chain.
   // PontiacLabSystem is rebuilt on every L6 entry, so the freed-animal id
   // set must outlive it here in Game.tsx (read on next mount, written on
@@ -530,6 +533,14 @@ export const Game: React.FC = () => {
         player.setBuildingColliders(cityGenerator.getWallColliders());
         player.setFloorPlatforms(cityGenerator.getFloorPlatforms());
         playerRef.current = player;
+        // Wire the EnemySystem flying-state provider so commanders /
+        // captains / titans only chase upward when the player is
+        // actually airborne. Fixes the "every hit makes them rise"
+        // bug where the target-Y re-add stacked endlessly on grounded
+        // hits and the elite would float into the skybox.
+        try {
+          setEnemyPlayerIsFlyingProvider(() => player.getIsFlying() || (player as any).isSupermanFlight === true);
+        } catch {}
 
         const weapons = new WeaponsSystem(scene, engine.getCamera());
         weaponsRef.current = weapons;
@@ -1203,6 +1214,33 @@ export const Game: React.FC = () => {
             swarmsLairSystemRef.current = null;
           }
 
+          // Mount/dispose the Saginaw Underwater Lab side-zone (Level 8) —
+          // hardest combat zone in the game. Captains-only spawns + 2
+          // spider-tank mid-bosses. Mirrors the SwarmsLair mount block
+          // exactly (same handles bag, same dispose pattern).
+          const isSaginawLab = typeof payload?.level === "number"
+            && LevelSystem.isSaginawLab(payload.level as WorldLevel);
+          if (isSaginawLab && !saginawLabSystemRef.current) {
+            saginawLabSystemRef.current = new SaginawLabSystem(
+              scene,
+              enemySystem,
+              () => player.getPosition(),
+              {
+                city: cityGenerator,
+                worldVisibles: [
+                  mountainRingRef.current,
+                  alienFoliageRef.current,
+                  earthFoliageRef.current,
+                  propSystemRef.current,
+                ],
+                lodCull,
+              },
+            );
+          } else if (!isSaginawLab && saginawLabSystemRef.current) {
+            try { saginawLabSystemRef.current.dispose(); } catch {}
+            saginawLabSystemRef.current = null;
+          }
+
           // Mount/dispose the orbital side-zone (Level 5) on the same edge
           // as the sanctuary. SpaceLevelSystem owns the skybox swap, the
           // Earth backdrop, the asteroid field, and pre-engages
@@ -1247,7 +1285,7 @@ export const Game: React.FC = () => {
           // the Swarms Lair (its own self-contained arena — boss + minions
           // are spawned by SwarmsLairSystem itself, no city fortress to
           // seed).
-          if (!isPeaceful && !isSpacelike && !isLair && payload?.level >= 2) {
+          if (!isPeaceful && !isSpacelike && !isLair && !isSaginawLab && payload?.level >= 2) {
             const baseWave = enemySystem.getWaveNumber() + 2;
             const targetWave = payload.level === 3 ? Math.max(baseWave, 9) : Math.max(baseWave, 5);
             enemySystem.jumpToWave(targetWave);
@@ -1800,6 +1838,10 @@ export const Game: React.FC = () => {
               // player upgrade levels, so the player's saved damage / fire-rate
               // mods take effect immediately after a reload.
               weapons.setPlayerBoosts(player.getPlayerBoosts());
+              // Push per-level damage multiplier (level 1 → 1.0 baseline,
+              // up to 1.99 at the level-100 cap) so saved high-level
+              // characters keep their attack scaling on reload.
+              weapons.setPlayerLevelMul(player.getLevelDamageMul());
               // Restore Power-Jewel mounts AFTER inventoryCounts has been
               // applied. Mounted jewels are NOT in inventoryCounts (they were
               // consumed when mounted), so this pass simply rebuilds the
@@ -1899,7 +1941,12 @@ export const Game: React.FC = () => {
           startAutosaveTimer();
         }
 
-        bus.on(GameEvents.PLAYER_LEVEL_UP, () => { void doSaveProgress(); });
+        bus.on(GameEvents.PLAYER_LEVEL_UP, () => {
+          // Per-level damage scaling is pushed every time the player
+          // levels up so the next shot fired uses the new multiplier.
+          try { weapons.setPlayerLevelMul(player.getLevelDamageMul()); } catch {}
+          void doSaveProgress();
+        });
         bus.on(GameEvents.WEAPON_UPGRADED, () => { void doSaveProgress(); });
         // Push the player's armor-mod boosts to WeaponsSystem any time the
         // player buys an upgrade. Save the new state too.
@@ -2499,6 +2546,7 @@ export const Game: React.FC = () => {
         if (pontiacLabSystemRef.current) { try { pontiacLabSystemRef.current.dispose(); } catch {} pontiacLabSystemRef.current = null; }
         if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }
         if (swarmsLairSystemRef.current) { try { swarmsLairSystemRef.current.dispose(); } catch {} swarmsLairSystemRef.current = null; }
+        if (saginawLabSystemRef.current) { try { saginawLabSystemRef.current.dispose(); } catch {} saginawLabSystemRef.current = null; }
         if (friendlyNPCsRef.current) { try { friendlyNPCsRef.current.dispose(); } catch {} friendlyNPCsRef.current = null; }
         if (rescueSystemRef.current) { try { rescueSystemRef.current.dispose(); } catch {} rescueSystemRef.current = null; }
         if (multiplayerRef.current) { try { multiplayerRef.current.dispose(); } catch {} }
@@ -2669,6 +2717,7 @@ export const Game: React.FC = () => {
     if (pontiacLabSystemRef.current) { try { pontiacLabSystemRef.current.dispose(); } catch {} pontiacLabSystemRef.current = null; }
     if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }
     if (swarmsLairSystemRef.current) { try { swarmsLairSystemRef.current.dispose(); } catch {} swarmsLairSystemRef.current = null; }
+    if (saginawLabSystemRef.current) { try { saginawLabSystemRef.current.dispose(); } catch {} saginawLabSystemRef.current = null; }
     if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} gamepadRef.current = null; }
     if (aerialEnemyRef.current) { try { aerialEnemyRef.current.dispose(); } catch {} aerialEnemyRef.current = null; }
     if (smashAttackRef.current) { try { smashAttackRef.current.dispose(); } catch {} smashAttackRef.current = null; }
@@ -3474,6 +3523,7 @@ export const Game: React.FC = () => {
       if (pontiacLabSystemRef.current) { try { pontiacLabSystemRef.current.dispose(); } catch {} pontiacLabSystemRef.current = null; }
       if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }
       if (swarmsLairSystemRef.current) { try { swarmsLairSystemRef.current.dispose(); } catch {} swarmsLairSystemRef.current = null; }
+      if (saginawLabSystemRef.current) { try { saginawLabSystemRef.current.dispose(); } catch {} saginawLabSystemRef.current = null; }
       if (aerialEnemyRef.current) aerialEnemyRef.current.dispose();
       if (smashAttackRef.current) { try { smashAttackRef.current.dispose(); } catch {} smashAttackRef.current = null; }
       if (gamepadRef.current) gamepadRef.current.dispose();
@@ -3494,7 +3544,7 @@ export const Game: React.FC = () => {
     const ls = levelSystemRef.current;
     const player = playerRef.current;
     if (!ls || !player) return;
-    if (level < 1 || level > 7) return;
+    if (level < 1 || level > 8) return;
     const sp = LevelSystem.getSpawnPointFor(level as WorldLevel);
     // Spacelike levels need a high spawn Y so the player wakes up amid the
     // 25–105 m asteroid band (the orbital fighter is auto-entered there);
@@ -3538,6 +3588,8 @@ export const Game: React.FC = () => {
         ? "Pontiac Secret Lab — Dr. You's covert pre-war research wing. Cryo subjects, holo terminals, lore."
         : lvl === 7
         ? "Swarms Lair — underground cave arena. Insectoid swarms guard General Voidcrown."
+        : lvl === 8
+        ? "Saginaw Underwater Lab — flooded endgame arena. Captains only, plus spider-tank missile mid-bosses."
         : lvl === 1
         ? "Star City Front — first-stage Detroit defense. Rescue the captured ally."
         : lvl === 2

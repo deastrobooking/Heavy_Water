@@ -9,8 +9,20 @@ import { HUMANOID_PRESETS } from "./HumanoidPresets";
 import { BossVariant, BossVariantId, BOSS_VARIANTS, getBossVariant } from "./BossVariants";
 import { getEnemyStyleOverrides } from "./CharacterEditor";
 
-export type EnemyType = "drone" | "soldier" | "heavy" | "insectoid" | "hybrid" | "commander" | "captain" | "tank";
+export type EnemyType = "drone" | "soldier" | "heavy" | "insectoid" | "hybrid" | "commander" | "captain" | "tank" | "titan" | "spider_tank";
 export type EnemyAIState = "idle" | "patrol" | "chase" | "attack" | "stunned" | "dead" | "flying" | "hovering" | "dodging";
+
+/** Module-level provider so EnemyUnit instances can ask "is the player
+ *  currently airborne?" without each one needing a callback wired in.
+ *  Game.tsx flips this on construction via setPlayerIsFlyingProvider().
+ *  Used by the commander "fly to chase the player upward" branches —
+ *  when the player is grounded, commanders STAY grounded too, fixing
+ *  the bug where a hit would chain stun→fly and the target-height
+ *  re-add at every hit caused captains/commanders to climb forever. */
+let playerIsFlyingFn: () => boolean = () => false;
+export function setPlayerIsFlyingProvider(fn: () => boolean): void {
+  playerIsFlyingFn = fn;
+}
 
 /** A homing red orb the BossCaptain fires at the player. Tracked per-captain
  *  so we can lerp it forward + check the impact-radius each frame, and clean
@@ -100,6 +112,24 @@ const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     maxHealth: 600, attackDamage: 45, defense: 18, movementSpeed: 1.8, attackCooldown: 3.5,
     knockbackForce: 1100, experienceValue: 120, detectionRange: 55, chaseRange: 80,
     attackRange: 28, patrolSpeed: 0.025, chaseSpeed: 0.045, credits: 90,
+  },
+  // Titan — a beefier "heavy" variant. Uses TankTitan preset upscaled
+  // 1.6x with double HP + 50% more damage so it reads as a true mid-boss
+  // alongside captains in late waves. Selected from the wave drip-spawn
+  // and from a dedicated periodic spawner (one every ~28 s on wave 2+).
+  titan: {
+    maxHealth: 900, attackDamage: 38, defense: 22, movementSpeed: 2.4, attackCooldown: 2.6,
+    knockbackForce: 1300, experienceValue: 220, detectionRange: 22, chaseRange: 35,
+    attackRange: 9, patrolSpeed: 0.04, chaseSpeed: 0.07, credits: 140,
+  },
+  // Spider Tank — Saginaw Lab mid-boss. Six-legged walker with a missile
+  // turret on top. Stays at long range (32 m) and lobs homing tracking
+  // missiles via the captainCastTracker code path, so the player feels
+  // the missile-weapon read at a distance even though it's an enemy unit.
+  spider_tank: {
+    maxHealth: 2200, attackDamage: 55, defense: 20, movementSpeed: 2.2, attackCooldown: 2.8,
+    knockbackForce: 1500, experienceValue: 600, detectionRange: 70, chaseRange: 110,
+    attackRange: 32, patrolSpeed: 0.03, chaseSpeed: 0.06, credits: 400,
   },
 };
 
@@ -237,6 +267,15 @@ export class EnemyUnit implements IDamageable {
       this.dodgeCooldown = Math.max(0, this.dodgeCooldown - dt);
     }
 
+    if (this.type === "spider_tank") {
+      // Spider tank uses the captain-tracker path for its homing missile
+      // attack — tick the same projectile pool every frame so missiles
+      // home + impact correctly.
+      this.lastPlayerPos.copyFrom(playerPosition);
+      this.captainAbilityCd = Math.max(0, this.captainAbilityCd - dt);
+      this.tickCaptainTrackers(dt, playerPosition);
+    }
+
     if (this.type === "captain") {
       this.lastPlayerPos.copyFrom(playerPosition);
       this.updateAura();
@@ -327,8 +366,13 @@ export class EnemyUnit implements IDamageable {
     const dist = dir.length();
 
     if (this.type === "commander") {
-      if (playerPos.y > this.mesh.position.y + 5) {
-        this.targetFlightHeight = playerPos.y + 3;
+      // Only chase upward when the player is ACTUALLY airborne. Without
+      // this gate, even a grounded player at the top of a small ramp
+      // could trigger flying — and the takeDamage stun→fly chain on
+      // each hit would compound the targetFlightHeight, sending the
+      // commander spiraling into the sky forever.
+      if (playerIsFlyingFn() && playerPos.y > this.mesh.position.y + 5) {
+        this.targetFlightHeight = Math.min(playerPos.y + 3, this.patrolOrigin.y + 35);
         this.fsm.changeState("flying");
         return 0;
       }
@@ -357,6 +401,10 @@ export class EnemyUnit implements IDamageable {
     } else if (this.type === "commander") {
       const targetY = Math.max(this.patrolOrigin.y, 1.5);
       this.mesh.position.y += (targetY - this.mesh.position.y) * 0.05;
+    } else if (this.type === "spider_tank") {
+      // Body sits 3.5 m up so the six legs reach the ground without the
+      // chassis sinking when chase code touches Y.
+      this.mesh.position.y = 3.5;
     } else {
       this.mesh.position.y = 1.5;
     }
@@ -376,15 +424,24 @@ export class EnemyUnit implements IDamageable {
     this.faceDirection(playerPos.subtract(this.mesh.position));
 
     if (this.attackTimer <= 0) {
-      damage = this.config.attackDamage;
       this.attackTimer = this.config.attackCooldown;
       if (this.type === "commander") {
+        damage = this.config.attackDamage;
         this.createCommanderAttackEffect();
       } else if (this.type === "captain") {
+        damage = this.config.attackDamage;
         this.captainSabreSlashEffect(playerPos);
       } else if (this.type === "tank") {
+        damage = this.config.attackDamage;
         this.createTankShellEffect(playerPos);
+      } else if (this.type === "spider_tank") {
+        // Spider tank fires a homing missile rather than dealing instant
+        // melee/contact damage. The damage lands later via pendingDamage
+        // when tickCaptainTrackers detects an impact, so we return 0
+        // here on the launch frame.
+        this.captainCastTracker(playerPos);
       } else {
+        damage = this.config.attackDamage;
         this.createAttackEffect();
       }
     }
@@ -395,9 +452,16 @@ export class EnemyUnit implements IDamageable {
   private updateStunned(dt: number): number {
     this.stunTimer -= dt;
     if (this.stunTimer <= 0) {
-      if (this.type === "commander") {
+      // Commanders only re-enter flying out of stun when the player is
+      // also airborne — otherwise just chase on the ground. Prevents the
+      // bug where every hit would re-add +8 m to the flight height and
+      // the commander would climb infinitely.
+      if (this.type === "commander" && playerIsFlyingFn()) {
         this.fsm.changeState("flying");
-        this.targetFlightHeight = this.mesh.position.y + 8 + Math.random() * 5;
+        this.targetFlightHeight = Math.min(
+          this.mesh.position.y + 8 + Math.random() * 5,
+          this.patrolOrigin.y + 35,
+        );
       } else {
         this.fsm.changeState("chase");
       }
@@ -490,8 +554,11 @@ export class EnemyUnit implements IDamageable {
   private checkForPlayer(playerPos: BABYLON.Vector3): void {
     const dist = BABYLON.Vector3.Distance(this.mesh.position, playerPos);
     if (dist <= this.config.detectionRange) {
-      if (this.type === "commander" && playerPos.y > 10) {
-        this.targetFlightHeight = playerPos.y + 3;
+      // Same fix as updateChase / updateStunned: only fly when the player
+      // is actually airborne. A grounded player on a tall building roof
+      // (y > 10) shouldn't lure commanders into a permanent climb.
+      if (this.type === "commander" && playerIsFlyingFn() && playerPos.y > 10) {
+        this.targetFlightHeight = Math.min(playerPos.y + 3, this.patrolOrigin.y + 35);
         this.fsm.changeState("flying");
       } else {
         this.fsm.changeState("chase");
@@ -565,8 +632,18 @@ export class EnemyUnit implements IDamageable {
     }
 
     if (this.type === "commander") {
-      if (this.health < this.maxHealth * 0.5 && this.fsm.getState() !== "flying") {
-        this.targetFlightHeight = this.mesh.position.y + 10 + Math.random() * 8;
+      // CRITICAL bug-fix: previously every hit while at <50% HP re-set
+      // `targetFlightHeight = mesh.position.y + 10` — additive from the
+      // *current* position — so each successive hit drove the commander
+      // 10 m higher forever. Now we (a) gate on the player actually
+      // flying and (b) clamp to a reasonable ceiling above the original
+      // patrol height so even when flying is allowed the runaway climb
+      // can't happen.
+      if (this.health < this.maxHealth * 0.5 && this.fsm.getState() !== "flying" && playerIsFlyingFn()) {
+        this.targetFlightHeight = Math.min(
+          this.patrolOrigin.y + 10 + Math.random() * 8,
+          this.patrolOrigin.y + 35,
+        );
         this.fsm.changeState("flying");
       } else if (this.fsm.getState() !== "stunned") {
         this.fsm.changeState("stunned");
@@ -1206,6 +1283,9 @@ export class EnemySystem {
     if (type === "tank") {
       return this.createTankMesh(position);
     }
+    if (type === "spider_tank") {
+      return this.createSpiderTankMesh(position);
+    }
 
     // Commanders + Captains use humanoid models instead of robots.
     if (type === "commander" || type === "captain") {
@@ -1299,6 +1379,13 @@ export class EnemySystem {
       // record type so a future EnemyType addition fails to compile if it
       // forgets a preset.
       tank: ["TankTitan"],
+      // Titan reuses the TankTitan robot preset but is upscaled + tougher
+      // when the EnemyUnit constructor runs (config + per-spawn scale).
+      titan: ["TankTitan"],
+      // Spider tank is parametric; this entry is just a fallback so the
+      // exhaustive Record type compiles. createEnemyMesh short-circuits
+      // to createSpiderTankMesh above before it ever reads this entry.
+      spider_tank: ["TankTitan"],
     };
 
     const variants = presetMap[type] || ["ScoutPrime"];
@@ -1316,8 +1403,14 @@ export class EnemySystem {
     if (preset) {
       const root = this.robotFactory.createRobot(preset, position);
 
-      const hitboxH = type === "hybrid" ? 3.5 : type === "heavy" ? 3 : 2;
-      const hitboxR = type === "hybrid" ? 0.8 : type === "heavy" ? 0.7 : 0.5;
+      const hitboxH = type === "hybrid" ? 3.5
+        : type === "titan" ? 4.5
+        : type === "heavy" ? 3
+        : 2;
+      const hitboxR = type === "hybrid" ? 0.8
+        : type === "titan" ? 1.2
+        : type === "heavy" ? 0.7
+        : 0.5;
       const hitbox = BABYLON.MeshBuilder.CreateCapsule(`enemyHit_${type}_${Date.now()}`, {
         height: hitboxH,
         radius: hitboxR,
@@ -1329,6 +1422,11 @@ export class EnemySystem {
 
       if (type === "drone") {
         hitbox.position.y = 5;
+      }
+
+      // Scale titans up to read as a true heavy mid-boss alongside captains.
+      if (type === "titan") {
+        root.scaling.setAll(1.6);
       }
 
       return hitbox;
@@ -1571,6 +1669,137 @@ export class EnemySystem {
     return enemy;
   }
 
+  /** Build a six-legged spider-tank mesh — Saginaw Lab mid-boss. The body
+   *  sits 3.5 m above ground (matches updateChase ground-snap), with six
+   *  jointed legs angling out + down to plant on the floor. A turret on
+   *  top sports a pair of forward-facing missile pods so the silhouette
+   *  reads "long-range homing weapon" before it fires. */
+  private createSpiderTankMesh(position: BABYLON.Vector3): BABYLON.Mesh {
+    const scene = this.scene;
+    const idSuffix = `${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
+    // Tall capsule hitbox so the spider tank reads as a multi-meter-high
+    // unit. Center sits at y=3.5 to match the updateChase ground-snap.
+    const hitbox = BABYLON.MeshBuilder.CreateCapsule(`enemyHit_spiderTank_${idSuffix}`,
+      { height: 5.0, radius: 2.0 }, scene);
+    hitbox.isVisible = false;
+    hitbox.position.copyFrom(position);
+    hitbox.position.y = 3.5;
+
+    const root = new BABYLON.TransformNode(`spiderTankRoot_${idSuffix}`, scene);
+    root.parent = hitbox;
+    // Body local origin centered on hitbox center; legs reach down to ground.
+    root.position = BABYLON.Vector3.Zero();
+
+    // Materials — dark armor + cyan emissive trim (matches the underwater
+    // lab palette so the boss reads as a Saginaw lab construct).
+    const armorMat = new BABYLON.StandardMaterial(`spiderArmorMat_${idSuffix}`, scene);
+    armorMat.diffuseColor = new BABYLON.Color3(0.18, 0.22, 0.28);
+    armorMat.emissiveColor = new BABYLON.Color3(0.04, 0.06, 0.10);
+    armorMat.specularColor = new BABYLON.Color3(0.20, 0.22, 0.25);
+
+    const trimMat = new BABYLON.StandardMaterial(`spiderTrimMat_${idSuffix}`, scene);
+    trimMat.diffuseColor = new BABYLON.Color3(0.10, 0.55, 0.85);
+    trimMat.emissiveColor = new BABYLON.Color3(0.20, 0.85, 1.10);
+    trimMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    // Main chassis — wide flattened sphere so the silhouette reads "spider
+    // body" not "tank hull".
+    const body = BABYLON.MeshBuilder.CreateSphere(`spiderBody_${idSuffix}`,
+      { diameter: 4.4, segments: 12 }, scene);
+    body.scaling.set(1.0, 0.55, 1.1);
+    body.position.set(0, 0, 0);
+    body.parent = root;
+    body.material = armorMat;
+
+    // Glowing eye band — a short ring of trim mat around the front of the body.
+    for (let i = 0; i < 5; i++) {
+      const eye = BABYLON.MeshBuilder.CreateSphere(`spiderEye_${i}_${idSuffix}`,
+        { diameter: 0.32, segments: 6 }, scene);
+      const ang = -0.6 + (i * 0.3);
+      eye.position.set(Math.sin(ang) * 1.9, 0.2, Math.cos(ang) * 2.1);
+      eye.parent = root;
+      eye.material = trimMat;
+    }
+
+    // Six legs — three per side, splayed outward + downward. Each leg is
+    // two cylinder segments (femur + tibia) so the silhouette reads
+    // "jointed insect leg" rather than a straight stick.
+    for (let i = 0; i < 6; i++) {
+      const side = i < 3 ? -1 : 1;
+      const slot = i % 3; // 0..2 along the body
+      const angY = side * (Math.PI / 4) + (slot - 1) * 0.55;
+      const baseX = Math.sin(angY) * 1.8;
+      const baseZ = Math.cos(angY) * 1.8 * (slot === 1 ? 0.2 : 1);
+
+      // Femur — angled outward from body to mid-air.
+      const femur = BABYLON.MeshBuilder.CreateCylinder(`spiderFemur_${i}_${idSuffix}`,
+        { height: 2.2, diameter: 0.45, tessellation: 8 }, scene);
+      femur.parent = root;
+      femur.position.set(baseX + side * 1.1, -0.4, baseZ);
+      femur.rotation.z = -side * 0.9;
+      femur.material = armorMat;
+
+      // Tibia — angled down from femur tip to the floor.
+      const tibia = BABYLON.MeshBuilder.CreateCylinder(`spiderTibia_${i}_${idSuffix}`,
+        { height: 2.6, diameter: 0.32, tessellation: 8 }, scene);
+      tibia.parent = root;
+      tibia.position.set(baseX + side * 2.4, -2.0, baseZ);
+      tibia.rotation.z = side * 0.25;
+      tibia.material = armorMat;
+
+      // Foot — flat disc planted on the floor.
+      const foot = BABYLON.MeshBuilder.CreateCylinder(`spiderFoot_${i}_${idSuffix}`,
+        { height: 0.18, diameter: 0.7, tessellation: 8 }, scene);
+      foot.parent = root;
+      foot.position.set(baseX + side * 2.7, -3.4, baseZ);
+      foot.material = trimMat;
+    }
+
+    // Turret base — a short cylinder atop the body.
+    const turretBase = BABYLON.MeshBuilder.CreateCylinder(`spiderTurretBase_${idSuffix}`,
+      { height: 0.5, diameter: 1.8, tessellation: 14 }, scene);
+    turretBase.position.set(0, 1.2, 0);
+    turretBase.parent = root;
+    turretBase.material = armorMat;
+
+    // Twin missile pods on top — forward-facing rectangular launchers
+    // that reads as "homing missile weapon".
+    for (const side of [-1, 1]) {
+      const pod = BABYLON.MeshBuilder.CreateBox(`spiderPod_${side > 0 ? "R" : "L"}_${idSuffix}`,
+        { width: 0.75, height: 0.55, depth: 1.6 }, scene);
+      pod.position.set(side * 0.55, 1.7, 0.4);
+      pod.parent = root;
+      pod.material = armorMat;
+
+      // Trim ring at the muzzle so the launch tube reads emissive.
+      const muzzle = BABYLON.MeshBuilder.CreateBox(`spiderMuzzle_${side > 0 ? "R" : "L"}_${idSuffix}`,
+        { width: 0.78, height: 0.58, depth: 0.12 }, scene);
+      muzzle.position.set(side * 0.55, 1.7, 1.22);
+      muzzle.parent = root;
+      muzzle.material = trimMat;
+    }
+
+    return hitbox;
+  }
+
+  /** Spawn a single titan at a random angle around the player. Mirrors
+   *  spawnTankAtOutskirts but at a closer band so the heavy actually
+   *  closes to melee. Used by the periodic titan spawner in update(). */
+  spawnTitanAt(playerPosition: BABYLON.Vector3): void {
+    if (this.enemies.length >= this.maxEnemies) return;
+    const angle = Math.random() * Math.PI * 2;
+    const distance = 35 + Math.random() * 35;
+    const x = playerPosition.x + Math.cos(angle) * distance;
+    const z = playerPosition.z + Math.sin(angle) * distance;
+    const position = new BABYLON.Vector3(x, 1.5, z);
+    const mesh = this.createEnemyMesh("titan", position);
+    const waveMultiplier = 1 + (this.waveNumber - 1) * 0.2;
+    const enemy = new EnemyUnit(mesh, "titan", waveMultiplier);
+    this.enemies.push(enemy);
+    this.bus.emit(GameEvents.ENEMY_SPAWNED, { type: "titan", position });
+  }
+
   private selectEnemyType(): EnemyType {
     // Rare elite tiers each get their own INDEPENDENT roll (rather than
     // sharing the cumulative band of the common-tier roll below). The
@@ -1586,6 +1815,9 @@ export class EnemySystem {
     // every ~22 s, so this roll is a top-up that occasionally puts a
     // tank inside the close-in spawn cone.
     if (this.waveNumber >= 2 && Math.random() < 0.07) return "tank";
+    // Titan — periodic heavy mid-boss alongside captains. Independent
+    // roll so it doesn't cannibalize tank/commander/hybrid bands.
+    if (this.waveNumber >= 2 && Math.random() < 0.06) return "titan";
     // Common tier — single shared roll, cumulative-band style preserved
     // from the original behaviour.
     const roll = Math.random();

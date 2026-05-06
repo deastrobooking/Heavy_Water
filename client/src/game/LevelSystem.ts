@@ -11,7 +11,7 @@ import { BossVariantId } from "./BossVariants";
  *  bio-crops, and runs errands for the nearby Village of Earth. It does not
  *  appear in the L1→L2→L3 progression chain; it's reached from the new TRAVEL
  *  tab on the upgrade menu and acts as the player's home base. */
-export type WorldLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type WorldLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 /** Persisted shape used by ProgressSync. */
 export interface LevelSnapshot {
@@ -200,6 +200,26 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     // surrounds the player on warp-in.
     spawnPoint: { x: 0, z: 0 },
     completeSubtitle: "Orbit secured.",
+  },
+  8: {
+    level: 8,
+    displayName: "SAGINAW UNDERWATER LAB",
+    banner: "LEVEL 8 — SAGINAW UNDERWATER LAB",
+    objective: "Breach the flooded Saginaw lab. Survive the captains. Bring down the spider tanks.",
+    // Hardest combat zone in the game — bumps over the lair (2.8) so it
+    // reads as the post-lair endgame challenge.
+    difficultyMultiplier: 3.5,
+    // Deep blue/teal tint that bleeds through the lab's flooded ceiling.
+    // The Saginaw system itself owns its visual identity (caustics,
+    // water surface, blue fog) via SaginawLabSystem.
+    skyTint: { r: 0.20, g: 0.45, b: 0.85 },
+    bossVariantId: "frost",
+    fortressCenter: { x: -9999, z: 9999 },
+    // Spawn near origin — SaginawLabSystem builds its arena around (0,0,0)
+    // the same way SwarmsLairSystem does.
+    spawnPoint: { x: 0, z: 0 },
+    completeSubtitle: "Saginaw is silent. The water swallows the rest.",
+    timeOfDay: 23.0,
   },
   7: {
     level: 7,
@@ -407,7 +427,16 @@ export class LevelSystem {
 
   /** All known levels — used by the TRAVEL tab. */
   static getAllLevels(): WorldLevel[] {
-    return [1, 2, 3, 4, 5, 6, 7];
+    return [1, 2, 3, 4, 5, 6, 7, 8];
+  }
+
+  /** `true` for the Saginaw Underwater Lab (Level 8) — a flooded indoor
+   *  combat side-zone reachable from the TRAVEL tab. Like the Swarms
+   *  Lair, combat IS active here, but spawns are owned by
+   *  SaginawLabSystem (captains-only + spider-tank mid-bosses) rather
+   *  than the standard wave/fortress chain. */
+  static isSaginawLab(level: WorldLevel): boolean {
+    return level === 8;
   }
 
   /** `true` for the Pontiac Secret Lab side-zone (Level 6). Like the
@@ -449,7 +478,8 @@ export class LevelSystem {
   applyLoadedState(snap: Partial<LevelSnapshot> | null | undefined): void {
     let lvl: WorldLevel = 1;
     const raw = snap && typeof snap.worldLevel === "number" ? snap.worldLevel : 1;
-    if (raw >= 7) lvl = 7;
+    if (raw >= 8) lvl = 8;
+    else if (raw === 7) lvl = 7;
     else if (raw === 6) lvl = 6;
     else if (raw === 5) lvl = 5;
     else if (raw === 4) lvl = 4;
@@ -462,11 +492,12 @@ export class LevelSystem {
       this.clearedLevels.clear();
       return;
     }
-    // Levels 4 (sanctuary), 5 (orbital), 6 (Pontiac Lab), 7 (Swarms Lair)
-    // are side-content — don't auto-mark L1/L2/L3 as cleared just because
-    // the player saved there; that would let them skip the campaign on
-    // re-entry. Only treat the main chain (1→2→3) as cleared-on-load.
-    if (lvl === 4 || lvl === 5 || lvl === 6 || lvl === 7) {
+    // Levels 4 (sanctuary), 5 (orbital), 6 (Pontiac Lab), 7 (Swarms Lair),
+    // 8 (Saginaw Lab) are side-content — don't auto-mark L1/L2/L3 as
+    // cleared just because the player saved there; that would let them
+    // skip the campaign on re-entry. Only treat the main chain (1→2→3)
+    // as cleared-on-load.
+    if (lvl === 4 || lvl === 5 || lvl === 6 || lvl === 7 || lvl === 8) {
       this.advanceTo(lvl);
       return;
     }
