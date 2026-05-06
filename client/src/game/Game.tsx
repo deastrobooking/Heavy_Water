@@ -16,7 +16,7 @@ import { GamepadInput } from "./GamepadInput";
 import { ChestSystem, Loot } from "./ChestSystem";
 import { CombatSystem } from "./CombatSystem";
 import { SpecialWeaponsSystem } from "./SpecialWeaponsSystem";
-import { ElementalSpecialsSystem, ElementalDisplay, ElementalKind } from "./ElementalSpecialsSystem";
+import { ElementalSpecialsSystem, ElementalDisplay, ElementalKind, type ElementalUpgradeInfo } from "./ElementalSpecialsSystem";
 import { BeamSabreSystem } from "./BeamSabreSystem";
 import { MeleeArsenalSystem, type ArsenalWeaponId } from "./MeleeArsenalSystem";
 import { MegaBeamCannonSystem } from "./MegaBeamCannonSystem";
@@ -337,6 +337,7 @@ export const Game: React.FC = () => {
     level: 1,
   });
   const [playerUpgradeInfo, setPlayerUpgradeInfo] = useState<PlayerUpgradeInfo[]>([]);
+  const [elementalUpgradeInfo, setElementalUpgradeInfo] = useState<ElementalUpgradeInfo[]>([]);
   // Mirror the LevelSystem's current level into React state so the upgrade-menu
   // TRAVEL tab can highlight "you are here" without re-querying every render.
   const [currentWorldLevel, setCurrentWorldLevel] = useState<WorldLevel>(1);
@@ -2395,6 +2396,9 @@ export const Game: React.FC = () => {
 
           setStats(player.getStats());
           setPlayerUpgradeInfo(player.getPlayerUpgradeInfo());
+          if (elementalSpecialsRef.current) {
+            setElementalUpgradeInfo(elementalSpecialsRef.current.getUpgradeInfo(player.getCredits()));
+          }
           setInVehicle(mounted);
           setEnemyCount(enemySystem.getEnemyCount());
           setChestCount(chestSystem.getChestCount());
@@ -2982,6 +2986,30 @@ export const Game: React.FC = () => {
     const ok = playerRef.current.upgradePlayerStat(id);
     if (ok) showMessage(`UPGRADED ${id.toUpperCase()}`, 1500);
     else showMessage("UPGRADE FAILED — INSUFFICIENT CREDITS", 1500);
+  }, [showMessage]);
+
+  const handleUpgradeElemental = useCallback((kind: string) => {
+    const player = playerRef.current;
+    const elemental = elementalSpecialsRef.current;
+    if (!player || !elemental) return;
+    const cost = elemental.getUpgradeCost(kind as ElementalKind);
+    if (cost <= 0) {
+      showMessage("ELEMENT MAXED OR INVALID", 1200);
+      return;
+    }
+    if (!player.spendCredits(cost)) {
+      showMessage("UPGRADE FAILED — INSUFFICIENT CREDITS", 1500);
+      return;
+    }
+    const ok = elemental.upgrade(kind as ElementalKind);
+    if (!ok) {
+      // Refund if the underlying upgrade refused (race / max).
+      player.addCredits(cost);
+      return;
+    }
+    showMessage(`${kind.toUpperCase()} EMPOWERED`, 1500);
+    // Reuse PLAYER_UPGRADED so existing save listener picks it up.
+    EventBus.getInstance().emit(GameEvents.PLAYER_UPGRADED, { id: `elemental:${kind}` });
   }, [showMessage]);
 
   const handleUpgradeCompanion = useCallback((id: string) => {
@@ -3782,6 +3810,8 @@ export const Game: React.FC = () => {
           upgradeMenuWeapons={weaponUpgradeInfo}
           upgradeMenuCompanions={companionUpgradeInfo}
           upgradeMenuPlayer={playerUpgradeInfo}
+          upgradeMenuElemental={elementalUpgradeInfo}
+          onUpgradeElemental={handleUpgradeElemental}
           upgradeMenuResources={{
             gears: resourceCounts.gears,
             scrap: resourceCounts.scrap,

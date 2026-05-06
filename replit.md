@@ -58,6 +58,7 @@ _Populate as you build_
 - **Level Cap**: Player level capped at 100; `addExperience` handles multi-level gains and residual XP.
 - **Capsule Upgrades**: Force-save immediately upon purchase to prevent loss from crashes.
 - **Legendary Companion**: Grant conditions (General Voidcrown defeated, all 12 synthetics freed, all 4 lab animals freed) are re-evaluated on each relevant event.
+- **Elemental Upgrades**: Elemental specials (RB / DPad ↑↓) now scale L1→L20 — damage +35%/lvl, cooldown ×0.92/lvl (floor 800ms), tracking volley grows from 1 → 8 projectiles per target every 2 lvls, dome radius +20%/lvl (psychic ≈ 70m at L20). Upgraded from credits in the PLAYER tab of the Tab/Select menu; persisted via `ProgressSync.elementalLevels`.
 
 ## Pointers
 - **Developer Hub**: [`docs/`](docs/)

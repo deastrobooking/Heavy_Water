@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import type { WeaponUpgradeInfo } from "./WeaponsSystem";
 import type { CompanionUpgradeInfo } from "./CompanionSystem";
 import type { PlayerUpgradeInfo } from "./PlayerController";
+import type { ElementalUpgradeInfo } from "./ElementalSpecialsSystem";
 import { JEWEL_DEFS, JEWEL_TIERS, type JewelTier } from "./JewelSystem";
 
 /** Per-weapon Power-Jewel state surfaced into the WEAPONS tab. The menu
@@ -56,6 +57,9 @@ interface UpgradeMenuProps {
   weapons: WeaponUpgradeInfo[];
   companions: CompanionUpgradeInfo[];
   playerUpgrades?: PlayerUpgradeInfo[];
+  /** Per-element upgrade rows — rendered at the bottom of the PLAYER tab. */
+  elementalUpgrades?: ElementalUpgradeInfo[];
+  onUpgradeElemental?: (kind: string) => void;
   playerCredits?: number;
   resources: { gears: number; scrap: number; cores: number; circuits: number; nanofiber: number };
   partCounts: Record<string, number>;
@@ -100,6 +104,8 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
   weapons,
   companions,
   playerUpgrades = [],
+  elementalUpgrades = [],
+  onUpgradeElemental,
   playerCredits = 0,
   resources,
   partCounts,
@@ -144,6 +150,13 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
           canActivate: !p.maxed && p.affordable,
         });
       }
+      for (const e of elementalUpgrades) {
+        out.push({
+          key: `e-${e.kind}`,
+          activate: () => onUpgradeElemental?.(e.kind),
+          canActivate: !e.maxed && e.affordable,
+        });
+      }
     } else if (tab === "weapons") {
       for (const w of weapons) {
         out.push({
@@ -185,7 +198,7 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
       }
     }
     return out;
-  }, [tab, playerUpgrades, weapons, companions, companionWeapons, specials, travelDestinations, currentLevel, onUpgradePlayer, onUpgradeWeapon, onUpgradeCompanion, onUpgradeCompanionWeapon, onUnlockSpecial, onFastTravel]);
+  }, [tab, playerUpgrades, elementalUpgrades, weapons, companions, companionWeapons, specials, travelDestinations, currentLevel, onUpgradePlayer, onUpgradeElemental, onUpgradeWeapon, onUpgradeCompanion, onUpgradeCompanionWeapon, onUnlockSpecial, onFastTravel]);
 
   const TAB_ORDER = ["player", "weapons", "robots", "specials", "travel"] as const;
   const curIdx = Math.min(selectedIdx[tab] ?? 0, Math.max(0, rows.length - 1));
@@ -341,6 +354,62 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
               </div>
             );
           }))}
+
+          {tab === "player" && elementalUpgrades.length > 0 && (
+            <div className="mt-3 pt-2 border-t border-fuchsia-900/60">
+              <div className="text-fuchsia-300 text-xs font-bold tracking-wider mb-2">ELEMENTAL POWERS — RB / DPad ↑↓</div>
+              {elementalUpgrades.map(e => {
+                const cdSec = (e.cooldownMs / 1000).toFixed(2);
+                const nextCdSec = e.nextCooldownMs != null ? (e.nextCooldownMs / 1000).toFixed(2) : null;
+                const radius = e.radius.toFixed(1);
+                const nextRadius = e.nextRadius != null ? e.nextRadius.toFixed(1) : null;
+                const isTracking = e.category === "tracking";
+                return (
+                  <div ref={setRowRef(`e-${e.kind}`)} key={e.kind} className={`bg-zinc-800/80 border border-zinc-700 rounded-lg p-3 hover:border-fuchsia-500 transition mb-2${ringClass(`e-${e.kind}`)}`}>
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3">
+                          <div className="text-white font-bold uppercase">{e.name}</div>
+                          <div className="text-fuchsia-400 text-xs font-mono">LVL {e.level}/{e.maxLevel}</div>
+                          <div className="text-zinc-400 text-[10px] font-mono uppercase">{e.category === "dome" ? "WAVE" : "TRACKING"}</div>
+                        </div>
+                        <div className={`grid ${isTracking ? "grid-cols-4" : "grid-cols-3"} gap-2 mt-2 text-[11px]`}>
+                          <Stat label="DMG" cur={e.damage.toFixed(0)} next={e.nextDamage != null ? e.nextDamage.toFixed(0) : null} good="up" />
+                          <Stat label="RADIUS" cur={`${radius}m`} next={nextRadius != null ? `${nextRadius}m` : null} good="up" />
+                          <Stat label="CD" cur={`${cdSec}s`} next={nextCdSec != null ? `${nextCdSec}s` : null} good="down" />
+                          {isTracking && (
+                            <Stat
+                              label="VOLLEY"
+                              cur={`${e.projectilesPerCast}×`}
+                              next={e.nextProjectilesPerCast != null && e.nextProjectilesPerCast !== e.projectilesPerCast ? `${e.nextProjectilesPerCast}×` : null}
+                              good="up"
+                            />
+                          )}
+                        </div>
+                      </div>
+                      <div className="ml-3 text-right min-w-[120px]">
+                        {e.maxed ? (
+                          <div className="text-emerald-400 font-bold text-sm">MAX LEVEL</div>
+                        ) : (
+                          <>
+                            <div className="text-[10px] text-zinc-400">COST:</div>
+                            <div className={`text-xs ${playerCredits >= e.cost ? "text-fuchsia-300" : "text-red-400"}`}>{e.cost} credits</div>
+                            <button
+                              disabled={!e.affordable}
+                              onClick={() => onUpgradeElemental?.(e.kind)}
+                              className={`mt-1 px-3 py-1 rounded text-xs font-bold tracking-wider ${e.affordable ? "bg-fuchsia-500 hover:bg-fuchsia-400 text-black" : "bg-zinc-700 text-zinc-500 cursor-not-allowed"}`}
+                            >
+                              UPGRADE
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {tab === "weapons" && weapons.map(w => {
             const partsHave = partCounts[w.type] ?? 0;

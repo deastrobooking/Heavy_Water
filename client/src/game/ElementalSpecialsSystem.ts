@@ -45,7 +45,34 @@ const ELEMENT_ORDER: ElementalKind[] = [
   "psychic",
 ];
 
-const MAX_LEVEL = 5;
+const MAX_LEVEL = 20;
+
+/** Credits cost to advance from `level` → `level + 1`. Mirrors the
+ *  `upgradeCost` formula used by PLAYER_UPGRADES so the menu math feels
+ *  consistent across tabs. */
+function elementalUpgradeCost(level: number): number {
+  return Math.floor(300 * (1 + level * 0.5));
+}
+
+export interface ElementalUpgradeInfo {
+  kind: ElementalKind;
+  name: string;
+  category: ElementalCategory;
+  level: number;
+  maxLevel: number;
+  damage: number;
+  nextDamage: number | null;
+  radius: number;
+  nextRadius: number | null;
+  cooldownMs: number;
+  nextCooldownMs: number | null;
+  /** Tracking elements only — domes are AoE so this stays at 0 for them. */
+  projectilesPerCast: number;
+  nextProjectilesPerCast: number | null;
+  cost: number;
+  affordable: boolean;
+  maxed: boolean;
+}
 
 const ELEMENT_DEFS: Record<ElementalKind, {
   name: string;
@@ -265,25 +292,43 @@ export class ElementalSpecialsSystem {
   }
 
   private scaledDamage(def: typeof ELEMENT_DEFS[ElementalKind], level: number): number {
-    // +35% per level over base
+    // +35% per level. At L20 = +665% (≈ 7.65× base) so endgame waves and
+    // bolts melt titans without one-shotting the player's whole screen.
     return Math.round(def.baseDamage * (1 + 0.35 * (level - 1)));
   }
 
   private scaledRadius(def: typeof ELEMENT_DEFS[ElementalKind], level: number): number {
-    return def.baseRadius * (1 + 0.18 * (level - 1));
+    // Domes scale much harder than trackers — at L20 the psychic shockwave
+    // sweeps a ~70 m radius, large enough to clear a whole arena in one cast.
+    const perLevel = def.category === "dome" ? 0.20 : 0.14;
+    return def.baseRadius * (1 + perLevel * (level - 1));
   }
 
   private scaledTargets(def: typeof ELEMENT_DEFS[ElementalKind], level: number): number {
     if (def.category === "dome") return 999;
-    // Tracking: 2 (L1) → 10 (L5), linearly.
+    // Tracking unique-targets cap: 2 (L1) → 10 (L20), linearly. Combined
+    // with `scaledProjectilesPerCast` the actual number of bolts on screen
+    // gets dramatic: up to 10 targets × 8 bolts each = 80 projectiles.
     const base = def.baseTargets;
     const span = 10 - base;
     return Math.min(10, Math.round(base + span * ((level - 1) / (MAX_LEVEL - 1))));
   }
 
+  /** How many projectiles per target a tracking element fires per cast.
+   *  Domes return 0 (they're area-of-effect and don't multiply this way).
+   *  Tracking: starts at 1 @ L1 and gains one extra projectile every two
+   *  levels, capped at 8 — so casts go from a single bolt to a dramatic
+   *  volley of 8 bolts per target by L15+. */
+  private scaledProjectilesPerCast(def: typeof ELEMENT_DEFS[ElementalKind], level: number): number {
+    if (def.category === "dome") return 0;
+    return Math.min(8, 1 + Math.floor((level - 1) / 2));
+  }
+
   private scaledCooldown(def: typeof ELEMENT_DEFS[ElementalKind], level: number): number {
-    // -8% per level
-    return Math.max(1500, def.baseCooldown * Math.pow(0.92, level - 1));
+    // -8% per level (compounding). At L20 = ~0.205× base; we floor at 800ms
+    // so the fastest specials can be re-cast almost as quickly as a basic
+    // weapon, but still feel like a special.
+    return Math.max(800, def.baseCooldown * Math.pow(0.92, level - 1));
   }
 
   upgrade(kind: ElementalKind): boolean {
@@ -307,9 +352,10 @@ export class ElementalSpecialsSystem {
     const damage = this.scaledDamage(def, sp.level);
     const radius = this.scaledRadius(def, sp.level);
     const targets = this.scaledTargets(def, sp.level);
+    const projPerTarget = this.scaledProjectilesPerCast(def, sp.level);
 
     if (def.category === "tracking") {
-      this.spawnTrackingStrike(kind, damage, radius, targets);
+      this.spawnTrackingStrike(kind, damage, radius, targets, projPerTarget);
     } else {
       this.spawnDome(kind, damage, radius);
     }
@@ -326,28 +372,79 @@ export class ElementalSpecialsSystem {
 
   private lastEnemies: BABYLON.Mesh[] = [];
 
-  private spawnTrackingStrike(kind: ElementalKind, damage: number, radius: number, maxTargets: number): void {
+  private spawnTrackingStrike(
+    kind: ElementalKind,
+    damage: number,
+    radius: number,
+    maxTargets: number,
+    projPerTarget: number,
+  ): void {
     const def = ELEMENT_DEFS[kind];
     const playerPos = this.playerPosProvider();
     const enemies = this.pickNearestEnemies(playerPos, maxTargets, 80);
+    const volley = Math.max(1, projPerTarget);
 
     if (enemies.length === 0) {
-      // Fire one tracker straight forward as a "no target" visual fallback.
+      // No targets: still fan out `volley` trackers forward so high-level
+      // casts feel powerful even when nothing's around.
       const fwd = this.camera.getDirection(BABYLON.Vector3.Forward());
-      const spawn = playerPos.add(new BABYLON.Vector3(0, 6, 0)).add(fwd.scale(2));
-      this.spawnSingleTracker(kind, def, spawn, null, damage, radius);
+      const right = this.camera.getDirection(BABYLON.Vector3.Right());
+      for (let i = 0; i < volley; i++) {
+        this.scheduleTimeout(() => {
+          if (this.disposed) return;
+          const lateralOffset = (i - (volley - 1) / 2) * 1.6;
+          const spawn = playerPos
+            .add(new BABYLON.Vector3(0, 6, 0))
+            .add(fwd.scale(2))
+            .add(right.scale(lateralOffset));
+          this.spawnSingleTracker(kind, def, spawn, null, damage, radius);
+        }, i * 60);
+      }
       return;
     }
 
     enemies.forEach((target, idx) => {
-      // Stagger spawn for a cool sequential feel
-      this.scheduleTimeout(() => {
-        if (this.disposed) return;
-        if (target.isDisposed()) return;
-        const spawn = this.computeSpawnFor(kind, target.position);
-        this.spawnSingleTracker(kind, def, spawn, target, damage, radius);
-      }, idx * 90);
+      for (let p = 0; p < volley; p++) {
+        // Stagger spawn for a cool sequential feel — both across targets
+        // and across the per-target volley.
+        const delay = idx * 90 + p * 55;
+        this.scheduleTimeout(() => {
+          if (this.disposed) return;
+          if (target.isDisposed()) return;
+          const baseSpawn = this.computeSpawnFor(kind, target.position);
+          const spawn = this.jitterSpawn(kind, baseSpawn, p, volley);
+          this.spawnSingleTracker(kind, def, spawn, target, damage, radius);
+        }, delay);
+      }
     });
+  }
+
+  /** Adds a per-projectile spatial offset so the volley reads as a flurry
+   *  instead of N projectiles overlapping in the same pixel. Lightning bolts
+   *  splay out around the target on the XZ plane; ice eruptions ring around
+   *  the target; fireballs fan out laterally from the player's chest. */
+  private jitterSpawn(
+    kind: ElementalKind,
+    base: BABYLON.Vector3,
+    index: number,
+    volley: number,
+  ): BABYLON.Vector3 {
+    if (volley <= 1) return base;
+    const angle = (index / volley) * Math.PI * 2;
+    if (kind === "lightning") {
+      const r = 1.2 + index * 0.4;
+      return base.add(new BABYLON.Vector3(Math.cos(angle) * r, index * 0.6, Math.sin(angle) * r));
+    }
+    if (kind === "ice") {
+      const r = 1.5 + index * 0.5;
+      return base.add(new BABYLON.Vector3(Math.cos(angle) * r, 0, Math.sin(angle) * r));
+    }
+    // fireball: lateral fan from camera-right
+    const right = this.camera.getDirection(BABYLON.Vector3.Right());
+    const up = this.camera.getDirection(BABYLON.Vector3.Up());
+    const lateral = (index - (volley - 1) / 2) * 0.9;
+    const vert = ((index % 2) === 0 ? 1 : -1) * 0.4 * Math.floor(index / 2);
+    return base.add(right.scale(lateral)).add(up.scale(vert));
   }
 
   private scheduleTimeout(fn: () => void, ms: number): void {
@@ -694,6 +791,48 @@ export class ElementalSpecialsSystem {
 
   getMaxLevel(): number {
     return MAX_LEVEL;
+  }
+
+  /** Surfaces every elemental's current/next stats + credit cost so the
+   *  upgrade menu can render rows without reaching into private state.
+   *  Pass the player's credit balance and `affordable` is computed for you. */
+  getUpgradeInfo(credits: number): ElementalUpgradeInfo[] {
+    const out: ElementalUpgradeInfo[] = [];
+    for (const kind of ELEMENT_ORDER) {
+      const sp = this.specials.get(kind);
+      if (!sp) continue;
+      const def = ELEMENT_DEFS[kind];
+      const lvl = sp.level;
+      const maxed = lvl >= MAX_LEVEL;
+      const cost = maxed ? 0 : elementalUpgradeCost(lvl);
+      out.push({
+        kind,
+        name: def.name,
+        category: def.category,
+        level: lvl,
+        maxLevel: MAX_LEVEL,
+        damage: this.scaledDamage(def, lvl),
+        nextDamage: maxed ? null : this.scaledDamage(def, lvl + 1),
+        radius: this.scaledRadius(def, lvl),
+        nextRadius: maxed ? null : this.scaledRadius(def, lvl + 1),
+        cooldownMs: this.scaledCooldown(def, lvl),
+        nextCooldownMs: maxed ? null : this.scaledCooldown(def, lvl + 1),
+        projectilesPerCast: this.scaledProjectilesPerCast(def, lvl),
+        nextProjectilesPerCast: maxed ? null : this.scaledProjectilesPerCast(def, lvl + 1),
+        cost,
+        affordable: !maxed && credits >= cost,
+        maxed,
+      });
+    }
+    return out;
+  }
+
+  /** Credits cost to advance the given element from its current level. */
+  getUpgradeCost(kind: ElementalKind): number {
+    const sp = this.specials.get(kind);
+    if (!sp) return 0;
+    if (sp.level >= MAX_LEVEL) return 0;
+    return elementalUpgradeCost(sp.level);
   }
 
   setLevels(levels: Partial<Record<ElementalKind, number>>): void {

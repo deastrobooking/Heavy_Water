@@ -10,6 +10,7 @@ import { CapturedCreature } from "./BioCreatureSystem";
 import { UpgradeMenu, type SpecialUpgradeInfo, type CompanionWeaponInfo, type TravelDestinationInfo, type WeaponJewelInfo } from "./UpgradeMenu";
 import type { JewelTier } from "./JewelSystem";
 import type { PlayerUpgradeInfo } from "./PlayerController";
+import type { ElementalUpgradeInfo } from "./ElementalSpecialsSystem";
 import { LabUI, LabBlueprint } from "./LabUI";
 import { GardenCaptureUI } from "./GardenCaptureUI";
 
@@ -69,6 +70,8 @@ interface GameUIProps {
   upgradeMenuWeapons?: WeaponUpgradeInfo[];
   upgradeMenuCompanions?: CompanionUpgradeInfo[];
   upgradeMenuPlayer?: PlayerUpgradeInfo[];
+  upgradeMenuElemental?: ElementalUpgradeInfo[];
+  onUpgradeElemental?: (kind: string) => void;
   upgradeMenuResources?: { gears: number; scrap: number; cores: number; circuits: number; nanofiber: number };
   upgradeMenuPartCounts?: Record<string, number>;
   upgradeMenuSpecials?: SpecialUpgradeInfo[];
@@ -183,6 +186,8 @@ export const GameUI: React.FC<GameUIProps> = ({
   upgradeMenuWeapons = [],
   upgradeMenuCompanions = [],
   upgradeMenuPlayer = [],
+  upgradeMenuElemental = [],
+  onUpgradeElemental,
   upgradeMenuResources = { gears: 0, scrap: 0, cores: 0, circuits: 0, nanofiber: 0 },
   upgradeMenuPartCounts = {},
   upgradeMenuSpecials = [],
@@ -888,6 +893,8 @@ export const GameUI: React.FC<GameUIProps> = ({
         weapons={upgradeMenuWeapons}
         companions={upgradeMenuCompanions}
         playerUpgrades={upgradeMenuPlayer}
+        elementalUpgrades={upgradeMenuElemental}
+        onUpgradeElemental={(k) => onUpgradeElemental?.(k)}
         playerCredits={stats.credits}
         resources={upgradeMenuResources}
         partCounts={upgradeMenuPartCounts}
