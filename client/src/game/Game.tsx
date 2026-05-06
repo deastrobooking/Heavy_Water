@@ -1842,6 +1842,12 @@ export const Game: React.FC = () => {
               // up to 1.99 at the level-100 cap) so saved high-level
               // characters keep their attack scaling on reload.
               weapons.setPlayerLevelMul(player.getLevelDamageMul());
+              // Per-level damage scaling reaches melee combat (sabre,
+              // alternate arsenal, base combo) the same way it reaches
+              // ranged via WeaponsSystem.
+              try { combatSystemRef.current?.setDamageMultiplier(player.getLevelDamageMul()); } catch {}
+              try { beamSabreRef.current?.setPlayerLevelMul(player.getLevelDamageMul()); } catch {}
+              try { meleeArsenalRef.current?.setPlayerLevelMul(player.getLevelDamageMul()); } catch {}
               // Restore Power-Jewel mounts AFTER inventoryCounts has been
               // applied. Mounted jewels are NOT in inventoryCounts (they were
               // consumed when mounted), so this pass simply rebuilds the
@@ -1945,6 +1951,9 @@ export const Game: React.FC = () => {
           // Per-level damage scaling is pushed every time the player
           // levels up so the next shot fired uses the new multiplier.
           try { weapons.setPlayerLevelMul(player.getLevelDamageMul()); } catch {}
+          try { combatSystemRef.current?.setDamageMultiplier(player.getLevelDamageMul()); } catch {}
+          try { beamSabreRef.current?.setPlayerLevelMul(player.getLevelDamageMul()); } catch {}
+          try { meleeArsenalRef.current?.setPlayerLevelMul(player.getLevelDamageMul()); } catch {}
           void doSaveProgress();
         });
         bus.on(GameEvents.WEAPON_UPGRADED, () => { void doSaveProgress(); });
