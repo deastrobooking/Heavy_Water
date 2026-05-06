@@ -48,7 +48,12 @@ export class SaginawLabSystem {
   private cityHidden: boolean = false;
   private causticMats: BABYLON.StandardMaterial[] = [];
 
-  private static readonly CENTER = new BABYLON.Vector3(0, 0, 0);
+  /** Far SE corner of the expanded open world — the lab now occupies its
+   *  own dedicated section of the map (~940 m beyond the mountain ring at
+   *  r=560), opposite the SW Zug Island section. Must match
+   *  LevelSystem.LEVEL_DEFS[8].spawnPoint so fast-travel lands the player
+   *  at arena center. */
+  private static readonly CENTER = new BABYLON.Vector3(1500, 0, -1500);
   private static readonly ARENA_R = 50;
   private static readonly CEILING_Y = 28;
 

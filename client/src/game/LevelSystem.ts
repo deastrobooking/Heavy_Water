@@ -215,9 +215,11 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     skyTint: { r: 0.20, g: 0.45, b: 0.85 },
     bossVariantId: "frost",
     fortressCenter: { x: -9999, z: 9999 },
-    // Spawn near origin — SaginawLabSystem builds its arena around (0,0,0)
-    // the same way SwarmsLairSystem does.
-    spawnPoint: { x: 0, z: 0 },
+    // Far SE corner of the expanded open world — the lab now occupies its
+    // own dedicated section of the map (~940 m beyond the mountain ring at
+    // r=560), opposite the SW Zug Island section. Must match
+    // SaginawLabSystem.CENTER so fast-travel lands at arena center.
+    spawnPoint: { x: 1500, z: -1500 },
     completeSubtitle: "Saginaw is silent. The water swallows the rest.",
     timeOfDay: 23.0,
   },
@@ -236,7 +238,11 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     skyTint: { r: 1.40, g: 0.55, b: 0.25 },
     bossVariantId: "inferno",
     fortressCenter: { x: 9999, z: -9999 },
-    spawnPoint: { x: 0, z: 0 },
+    // Far SW corner of the expanded open world — the island now occupies
+    // its own dedicated section of the map (~940 m beyond the mountain
+    // ring at r=560), opposite the SE Saginaw Lab section. Must match
+    // ZugIslandSystem.CENTER so fast-travel lands at arena center.
+    spawnPoint: { x: -1500, z: -1500 },
     completeSubtitle: "The Legion is broken. Zug Island holds.",
     timeOfDay: 21.0,
   },

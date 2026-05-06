@@ -48,8 +48,8 @@ _Populate as you build_
 
 ## Side-Zones
 - **Level 7 — Swarms Lair**: Indoor cave; General Voidcrown.
-- **Level 8 — Saginaw Underwater Lab**: Flooded arena; captains-only + spider-tank mid-bosses.
-- **Level 9 — Zug Island Legion**: Open industrial wasteland; sustained waves of titans + captains + spider tanks (live target ~60, lifetime cap ~600). Hardest combat zone.
+- **Level 8 — Saginaw Underwater Lab**: Flooded arena; captains-only + spider-tank mid-bosses. Lives in its OWN map section at far SE corner `(1500, -1500)`, well beyond the mountain ring (r=560).
+- **Level 9 — Zug Island Legion**: Open industrial wasteland; sustained waves of titans + captains + spider tanks (live target ~60, lifetime cap ~600). Hardest combat zone. Lives in its OWN map section at far SW corner `(-1500, -1500)`, opposite Saginaw. Both side-zones still hide the city + mountains on mount for visual clarity, but their fast-travel coords are now distinct corners of the expanded open world rather than the previous shared `(0,0,0)` "under the city" overlap.
 
 ## Gotchas
 - **Ghost Ride the Whip**: Ejecting from a vehicle (B key/controller) while boosting leaves it driverless but still active; it will explode after 6 seconds or on first contact with enemies/structures.
