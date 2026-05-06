@@ -200,10 +200,15 @@ export class ZugIslandSystem {
     slagMat.specularColor = new BABYLON.Color3(0, 0, 0);
     this.emberMats.push(slagMat);
 
-    const heapCount = 16;
+    // Heaps live ONLY along the east + west edges — the north is reserved
+    // for the river + bridge, the south for the factory skyline. Pushed far
+    // out (radius ≥ 230) so the combat ring (ARENA_R = 120) stays open.
+    const heapCount = 10;
     for (let i = 0; i < heapCount; i++) {
-      const ang = (i / heapCount) * Math.PI * 2 + 0.13;
-      const r = ZugIslandSystem.ARENA_R + 8 + (i % 3) * 6;
+      const side = i < heapCount / 2 ? 0 : Math.PI; // east cluster vs west cluster
+      const t = (i % (heapCount / 2)) / (heapCount / 2 - 1); // 0..1 along that side
+      const ang = side + (t - 0.5) * 0.7; // narrow wedge facing E or W
+      const r = 240 + (i % 3) * 18;
       const x = c.x + Math.cos(ang) * r;
       const z = c.z + Math.sin(ang) * r;
       const h = 6 + (i % 4) * 2.5;
@@ -230,9 +235,12 @@ export class ZugIslandSystem {
     tapMat.specularColor = new BABYLON.Color3(0, 0, 0);
     this.emberMats.push(tapMat);
 
+    // Furnaces along the EAST + WEST flanks only — never inside the
+    // combat ring (the previous layout placed them at radius 70-95 which
+    // was *inside* ARENA_R=120, blocking the player). Pushed out to ~270 m.
     const positions: Array<[number, number]> = [
-      [-70, -55], [70, -55], [-70, 55], [70, 55],
-      [-95, 0], [95, 0],
+      [-270, -40], [-270, 40], [-310,   0],
+      [ 270, -40], [ 270, 40], [ 310,   0],
     ];
     for (let i = 0; i < positions.length; i++) {
       const [dx, dz] = positions[i];
@@ -262,10 +270,14 @@ export class ZugIslandSystem {
     stackMat.diffuseColor = new BABYLON.Color3(0.16, 0.12, 0.10);
     stackMat.specularColor = new BABYLON.Color3(0.05, 0.04, 0.03);
 
+    // Smokestacks form a wide outer ring (radius 220) — far enough out that
+    // the combat zone reads as open space framed by industrial silhouettes,
+    // but skipping the north arc so they don't compete with the bridge.
     const stackCount = 10;
     for (let i = 0; i < stackCount; i++) {
-      const ang = (i / stackCount) * Math.PI * 2 + 0.27;
-      const r = ZugIslandSystem.ARENA_R + 35;
+      // sweep 0..2π but skip the north quadrant (3π/2 ± π/4 area).
+      const ang = (i / stackCount) * Math.PI * 1.5 - Math.PI * 0.25;
+      const r = 220;
       const x = c.x + Math.cos(ang) * r;
       const z = c.z + Math.sin(ang) * r;
       const h = 38 + (i % 3) * 6;
@@ -288,7 +300,7 @@ export class ZugIslandSystem {
     const c = ZugIslandSystem.CENTER;
     const length = 720;
     const width = 80;
-    const z0 = c.z - 220; // north of arena, outside combat ring
+    const z0 = c.z - 360; // far north of arena — well outside combat ring (r=120)
 
     const channelMat = new BABYLON.StandardMaterial("zugRiverChannelMat", this.scene);
     channelMat.diffuseColor = new BABYLON.Color3(0.04, 0.03, 0.02);
@@ -338,7 +350,7 @@ export class ZugIslandSystem {
    *  flight is enabled in this game). Pure decoration — no collision logic. */
   private buildBridge(): void {
     const c = ZugIslandSystem.CENTER;
-    const z0 = c.z - 220; // matches river center
+    const z0 = c.z - 360; // matches river center (far north of arena)
     const deckY = 14;
     const deckLen = 140; // along Z (crossing the river)
     const deckWidth = 18;
@@ -480,19 +492,24 @@ export class ZugIslandSystem {
     signMat.emissiveColor = new BABYLON.Color3(1.4, 0.15, 0.10);
     signMat.specularColor = new BABYLON.Color3(0, 0, 0);
 
-    // 4 compass placements (NE/SE/SW/NW). NW is offset off-axis so it
-    // doesn't overlap the bridge.
-    const layouts: Array<{ ang: number; dist: number; rot: number }> = [
-      { ang: Math.PI * 0.25, dist: 340, rot: -Math.PI * 0.25 }, // SE-ish
-      { ang: Math.PI * 0.55, dist: 340, rot:  Math.PI * 0.10 }, // S
-      { ang: Math.PI * 1.25, dist: 340, rot: -Math.PI * 0.25 }, // SW-ish
-      { ang: Math.PI * 1.55, dist: 340, rot:  Math.PI * 0.10 }, // W (away from bridge)
+    // All 4 factories form a SOUTH SKYLINE behind the arena, evenly spaced
+    // along z = c.z + 380. Axis-aligned (rot = 0) so their long fronts
+    // (with the slit windows + sign panel at local -Z) all face NORTH
+    // toward the player. This guarantees the east/west/north sides of the
+    // arena stay completely open for combat. Spacing 150 m, factory width
+    // 80 m → ~70 m gaps between factories. Combined footprint stays well
+    // within the 1500×1500 ground extent.
+    const layouts: Array<{ x: number; z: number; rot: number }> = [
+      { x: -225, z: 380, rot: 0 },
+      { x:  -75, z: 380, rot: 0 },
+      { x:   75, z: 380, rot: 0 },
+      { x:  225, z: 380, rot: 0 },
     ];
 
     for (let fi = 0; fi < layouts.length; fi++) {
-      const { ang, dist, rot } = layouts[fi];
-      const cx = c.x + Math.cos(ang) * dist;
-      const cz = c.z + Math.sin(ang) * dist;
+      const { x: lx, z: lz, rot } = layouts[fi];
+      const cx = c.x + lx;
+      const cz = c.z + lz;
 
       const facRoot = new BABYLON.TransformNode(`zugFactory_${fi}`, this.scene);
       facRoot.parent = this.root;
