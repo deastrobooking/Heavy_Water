@@ -88,6 +88,9 @@ export class ZugIslandSystem {
     this.buildSlagHeaps();
     this.buildBlastFurnaces();
     this.buildSmokestacks();
+    this.buildRiver();
+    this.buildBridge();
+    this.buildGiantFactories();
     this.buildLighting();
 
     try { this.spawnInitialGarrison(); } catch (e) {
@@ -272,6 +275,321 @@ export class ZugIslandSystem {
       stack.parent = this.root;
       stack.material = stackMat;
       stack.isPickable = false;
+    }
+  }
+
+  /** Toxic-green river running E-W along the north edge of the arena. A
+   *  recessed channel ~720 m long × 80 m wide with rust-stained walls and
+   *  a glowing surface so it reads as an "industrial runoff river". The
+   *  bridge crosses it. Sits well outside the active combat ring
+   *  (ARENA_R = 120) so the wave director can't drop enemies into the
+   *  channel. */
+  private buildRiver(): void {
+    const c = ZugIslandSystem.CENTER;
+    const length = 720;
+    const width = 80;
+    const z0 = c.z - 220; // north of arena, outside combat ring
+
+    const channelMat = new BABYLON.StandardMaterial("zugRiverChannelMat", this.scene);
+    channelMat.diffuseColor = new BABYLON.Color3(0.04, 0.03, 0.02);
+    channelMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    // Sunken channel floor (below the arena ground plane).
+    const floor = BABYLON.MeshBuilder.CreateBox("zugRiverFloor",
+      { width: length, height: 4, depth: width }, this.scene);
+    floor.position.set(c.x, -2, z0);
+    floor.parent = this.root;
+    floor.material = channelMat;
+    floor.isPickable = false;
+
+    // Toxic-green/rust river surface — translucent so the channel below
+    // bleeds through. Static emissive (NOT pushed into emberMats) so it
+    // stays visibly glowing rather than fading with the existing shimmer.
+    const surface = BABYLON.MeshBuilder.CreateGround("zugRiverSurface",
+      { width: length, height: width, subdivisions: 1 }, this.scene);
+    surface.position.set(c.x, 0.05, z0);
+    surface.parent = this.root;
+    surface.isPickable = false;
+    const surfaceMat = new BABYLON.StandardMaterial("zugRiverSurfaceMat", this.scene);
+    surfaceMat.diffuseColor = new BABYLON.Color3(0.18, 0.32, 0.10);
+    surfaceMat.emissiveColor = new BABYLON.Color3(0.22, 0.40, 0.10);
+    surfaceMat.alpha = 0.82;
+    surfaceMat.specularColor = new BABYLON.Color3(0.40, 0.60, 0.30);
+    surfaceMat.backFaceCulling = false;
+    surface.material = surfaceMat;
+
+    // Rust-stained channel walls along both banks.
+    const bankMat = new BABYLON.StandardMaterial("zugRiverBankMat", this.scene);
+    bankMat.diffuseColor = new BABYLON.Color3(0.20, 0.10, 0.06);
+    bankMat.specularColor = new BABYLON.Color3(0.05, 0.04, 0.03);
+    for (const sign of [-1, 1] as const) {
+      const wall = BABYLON.MeshBuilder.CreateBox(`zugRiverWall_${sign}`,
+        { width: length, height: 3, depth: 4 }, this.scene);
+      wall.position.set(c.x, 1.0, z0 + sign * (width / 2 + 2));
+      wall.parent = this.root;
+      wall.material = bankMat;
+      wall.isPickable = false;
+    }
+  }
+
+  /** Big steel truss bridge spanning the toxic river. Deck at y=14, ~140 m
+   *  long, with two 50 m pylons at each end carrying suspension cables and
+   *  a hellish red beacon on top. Player can fly up to walk the deck (DBZ
+   *  flight is enabled in this game). Pure decoration — no collision logic. */
+  private buildBridge(): void {
+    const c = ZugIslandSystem.CENTER;
+    const z0 = c.z - 220; // matches river center
+    const deckY = 14;
+    const deckLen = 140; // along Z (crossing the river)
+    const deckWidth = 18;
+    const x0 = c.x;
+
+    const steelMat = new BABYLON.StandardMaterial("zugBridgeSteelMat", this.scene);
+    steelMat.diffuseColor = new BABYLON.Color3(0.18, 0.16, 0.16);
+    steelMat.specularColor = new BABYLON.Color3(0.20, 0.20, 0.20);
+
+    const beaconMat = new BABYLON.StandardMaterial("zugBridgeBeaconMat", this.scene);
+    beaconMat.diffuseColor = new BABYLON.Color3(0.50, 0.05, 0.05);
+    beaconMat.emissiveColor = new BABYLON.Color3(1.6, 0.20, 0.10);
+    beaconMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const cableMat = new BABYLON.StandardMaterial("zugBridgeCableMat", this.scene);
+    cableMat.diffuseColor = new BABYLON.Color3(0.08, 0.08, 0.08);
+    cableMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    // --- Deck
+    const deck = BABYLON.MeshBuilder.CreateBox("zugBridgeDeck",
+      { width: deckWidth, height: 1.0, depth: deckLen }, this.scene);
+    deck.position.set(x0, deckY, z0);
+    deck.parent = this.root;
+    deck.material = steelMat;
+    deck.isPickable = false;
+
+    // --- Side rails + cross trusses
+    for (const sign of [-1, 1] as const) {
+      const rail = BABYLON.MeshBuilder.CreateBox(`zugBridgeRail_${sign}`,
+        { width: 0.6, height: 3.0, depth: deckLen }, this.scene);
+      rail.position.set(x0 + sign * (deckWidth / 2 - 0.3), deckY + 1.5, z0);
+      rail.parent = this.root;
+      rail.material = steelMat;
+      rail.isPickable = false;
+    }
+    const trussCount = 12;
+    for (let i = 0; i < trussCount; i++) {
+      const t = i / (trussCount - 1);
+      const z = z0 - deckLen / 2 + t * deckLen;
+      for (const sign of [-1, 1] as const) {
+        const truss = BABYLON.MeshBuilder.CreateBox(`zugBridgeTruss_${sign}_${i}`,
+          { width: 0.4, height: 4.0, depth: 0.4 }, this.scene);
+        truss.position.set(x0 + sign * (deckWidth / 2), deckY + 2, z);
+        truss.parent = this.root;
+        truss.material = steelMat;
+        truss.isPickable = false;
+      }
+    }
+
+    // --- Pylons (one at each end of the deck along Z), with crossbar + beacon.
+    const pylonH = 50;
+    const pylonZ = [z0 - deckLen / 2 + 4, z0 + deckLen / 2 - 4];
+    for (let pi = 0; pi < pylonZ.length; pi++) {
+      const pz = pylonZ[pi];
+      for (const sign of [-1, 1] as const) {
+        const pylon = BABYLON.MeshBuilder.CreateBox(`zugBridgePylon_${pi}_${sign}`,
+          { width: 4, height: pylonH, depth: 4 }, this.scene);
+        pylon.position.set(x0 + sign * (deckWidth / 2 + 1), pylonH / 2, pz);
+        pylon.parent = this.root;
+        pylon.material = steelMat;
+        pylon.isPickable = false;
+      }
+      const top = BABYLON.MeshBuilder.CreateBox(`zugBridgePylonTop_${pi}`,
+        { width: deckWidth + 6, height: 2, depth: 4 }, this.scene);
+      top.position.set(x0, pylonH - 1, pz);
+      top.parent = this.root;
+      top.material = steelMat;
+      top.isPickable = false;
+
+      const beacon = BABYLON.MeshBuilder.CreateSphere(`zugBridgeBeacon_${pi}`,
+        { diameter: 2.6, segments: 12 }, this.scene);
+      beacon.position.set(x0, pylonH + 1.6, pz);
+      beacon.parent = this.root;
+      beacon.material = beaconMat;
+      beacon.isPickable = false;
+    }
+
+    // --- Suspension cables (5 per side per pylon, drooping to the deck).
+    for (let pi = 0; pi < 2; pi++) {
+      const pz = pylonZ[pi];
+      const dir = pi === 0 ? 1 : -1;
+      for (const sign of [-1, 1] as const) {
+        const startTop = new BABYLON.Vector3(x0 + sign * (deckWidth / 2 + 1), pylonH - 1, pz);
+        for (let ci = 1; ci <= 5; ci++) {
+          const cz = pz + dir * (ci * (deckLen - 8) / 12);
+          const end = new BABYLON.Vector3(x0 + sign * (deckWidth / 2), deckY + 0.6, cz);
+          const len = BABYLON.Vector3.Distance(startTop, end);
+          const cable = BABYLON.MeshBuilder.CreateCylinder(`zugBridgeCable_${pi}_${sign}_${ci}`,
+            { height: len, diameter: 0.18, tessellation: 6 }, this.scene);
+          const mid = startTop.add(end).scale(0.5);
+          cable.position.copyFrom(mid);
+          // Orient the cylinder along (end - start).
+          const axis = end.subtract(startTop).normalize();
+          const up = new BABYLON.Vector3(0, 1, 0);
+          const dot = Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(up, axis)));
+          const cross = BABYLON.Vector3.Cross(up, axis);
+          if (cross.lengthSquared() > 1e-6) {
+            cross.normalize();
+            cable.rotationQuaternion = BABYLON.Quaternion.RotationAxis(cross, Math.acos(dot));
+          }
+          cable.parent = this.root;
+          cable.material = cableMat;
+          cable.isPickable = false;
+        }
+      }
+    }
+  }
+
+  /** 4 giant evil-industrial factory complexes ringing the arena (skipping
+   *  the north side where the river + bridge live). Each: long warehouse
+   *  hall with pitched roof, hellish red emissive slit windows, attached
+   *  annex, two roof-stacks with glowing crowns, an elevated conveyor
+   *  pipe on supports, and a big red signage panel on the front. Placed
+   *  at radius ~340 m from CENTER — well outside the combat ring (r=120)
+   *  and outside the smokestack ring (r=155) but inside the 1500x1500
+   *  ground extent. */
+  private buildGiantFactories(): void {
+    const c = ZugIslandSystem.CENTER;
+
+    const wallMat = new BABYLON.StandardMaterial("zugFactoryWallMat", this.scene);
+    wallMat.diffuseColor = new BABYLON.Color3(0.18, 0.14, 0.12);
+    wallMat.specularColor = new BABYLON.Color3(0.10, 0.08, 0.06);
+
+    const roofMat = new BABYLON.StandardMaterial("zugFactoryRoofMat", this.scene);
+    roofMat.diffuseColor = new BABYLON.Color3(0.14, 0.10, 0.08);
+    roofMat.specularColor = new BABYLON.Color3(0.05, 0.04, 0.03);
+
+    const windowMat = new BABYLON.StandardMaterial("zugFactoryWindowMat", this.scene);
+    windowMat.diffuseColor = new BABYLON.Color3(0.50, 0.10, 0.04);
+    windowMat.emissiveColor = new BABYLON.Color3(1.6, 0.30, 0.10);
+    windowMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const pipeMat = new BABYLON.StandardMaterial("zugFactoryPipeMat", this.scene);
+    pipeMat.diffuseColor = new BABYLON.Color3(0.20, 0.16, 0.14);
+    pipeMat.specularColor = new BABYLON.Color3(0.10, 0.10, 0.10);
+
+    const signMat = new BABYLON.StandardMaterial("zugFactorySignMat", this.scene);
+    signMat.diffuseColor = new BABYLON.Color3(0.50, 0.05, 0.05);
+    signMat.emissiveColor = new BABYLON.Color3(1.4, 0.15, 0.10);
+    signMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    // 4 compass placements (NE/SE/SW/NW). NW is offset off-axis so it
+    // doesn't overlap the bridge.
+    const layouts: Array<{ ang: number; dist: number; rot: number }> = [
+      { ang: Math.PI * 0.25, dist: 340, rot: -Math.PI * 0.25 }, // SE-ish
+      { ang: Math.PI * 0.55, dist: 340, rot:  Math.PI * 0.10 }, // S
+      { ang: Math.PI * 1.25, dist: 340, rot: -Math.PI * 0.25 }, // SW-ish
+      { ang: Math.PI * 1.55, dist: 340, rot:  Math.PI * 0.10 }, // W (away from bridge)
+    ];
+
+    for (let fi = 0; fi < layouts.length; fi++) {
+      const { ang, dist, rot } = layouts[fi];
+      const cx = c.x + Math.cos(ang) * dist;
+      const cz = c.z + Math.sin(ang) * dist;
+
+      const facRoot = new BABYLON.TransformNode(`zugFactory_${fi}`, this.scene);
+      facRoot.parent = this.root;
+      facRoot.position.set(cx, 0, cz);
+      facRoot.rotation.y = rot;
+
+      // Main hall — long warehouse 80×40 footprint, 32 m tall.
+      const hall = BABYLON.MeshBuilder.CreateBox(`zugFactoryHall_${fi}`,
+        { width: 80, height: 32, depth: 40 }, this.scene);
+      hall.position.set(0, 16, 0);
+      hall.parent = facRoot;
+      hall.material = wallMat;
+      hall.isPickable = false;
+
+      // Pitched roof — two angled slabs forming the apex.
+      for (const sign of [-1, 1] as const) {
+        const slope = BABYLON.MeshBuilder.CreateBox(`zugFactoryRoof_${fi}_${sign}`,
+          { width: 80, height: 2, depth: 22 }, this.scene);
+        slope.position.set(0, 33, sign * 10);
+        slope.rotation.x = sign * 0.45;
+        slope.parent = facRoot;
+        slope.material = roofMat;
+        slope.isPickable = false;
+      }
+
+      // Hellish slit windows along the long faces (upper + lower bands).
+      for (const zSign of [-1, 1] as const) {
+        for (let wi = 0; wi < 6; wi++) {
+          const wx = -32.5 + wi * 13;
+          const winHi = BABYLON.MeshBuilder.CreateBox(`zugFactoryWinHi_${fi}_${zSign}_${wi}`,
+            { width: 8, height: 1.6, depth: 0.4 }, this.scene);
+          winHi.position.set(wx, 22, zSign * 20.1);
+          winHi.parent = facRoot;
+          winHi.material = windowMat;
+          winHi.isPickable = false;
+
+          const winLo = BABYLON.MeshBuilder.CreateBox(`zugFactoryWinLo_${fi}_${zSign}_${wi}`,
+            { width: 6, height: 1.2, depth: 0.4 }, this.scene);
+          winLo.position.set(wx, 8, zSign * 20.1);
+          winLo.parent = facRoot;
+          winLo.material = windowMat;
+          winLo.isPickable = false;
+        }
+      }
+
+      // Side annex — smaller block tucked against one end.
+      const annex = BABYLON.MeshBuilder.CreateBox(`zugFactoryAnnex_${fi}`,
+        { width: 26, height: 22, depth: 26 }, this.scene);
+      annex.position.set(46, 11, 0);
+      annex.parent = facRoot;
+      annex.material = wallMat;
+      annex.isPickable = false;
+
+      // Two roof-stacks rising from the hall, each crowned with a glowing ring.
+      for (let si = 0; si < 2; si++) {
+        const sx = -25 + si * 50;
+        const stackH = 56;
+        const stack = BABYLON.MeshBuilder.CreateCylinder(`zugFactoryStack_${fi}_${si}`,
+          { height: stackH, diameterTop: 5, diameterBottom: 6.5, tessellation: 14 }, this.scene);
+        stack.position.set(sx, 32 + stackH / 2, 0);
+        stack.parent = facRoot;
+        stack.material = wallMat;
+        stack.isPickable = false;
+
+        const crown = BABYLON.MeshBuilder.CreateTorus(`zugFactoryStackCrown_${fi}_${si}`,
+          { diameter: 6.0, thickness: 0.5, tessellation: 16 }, this.scene);
+        crown.position.set(sx, 32 + stackH - 0.5, 0);
+        crown.parent = facRoot;
+        crown.material = windowMat;
+        crown.isPickable = false;
+      }
+
+      // Elevated conveyor pipe along the side, on support legs.
+      const pipe = BABYLON.MeshBuilder.CreateCylinder(`zugFactoryPipe_${fi}`,
+        { height: 90, diameter: 2.4, tessellation: 12 }, this.scene);
+      pipe.position.set(0, 12, 24);
+      pipe.rotation.z = Math.PI / 2;
+      pipe.parent = facRoot;
+      pipe.material = pipeMat;
+      pipe.isPickable = false;
+      for (let pi = 0; pi < 4; pi++) {
+        const px = -36 + pi * 24;
+        const leg = BABYLON.MeshBuilder.CreateBox(`zugFactoryPipeLeg_${fi}_${pi}`,
+          { width: 1.2, height: 12, depth: 1.2 }, this.scene);
+        leg.position.set(px, 6, 24);
+        leg.parent = facRoot;
+        leg.material = pipeMat;
+        leg.isPickable = false;
+      }
+
+      // Big red signage panel on the front face.
+      const signPanel = BABYLON.MeshBuilder.CreateBox(`zugFactorySign_${fi}`,
+        { width: 30, height: 5, depth: 0.5 }, this.scene);
+      signPanel.position.set(0, 28, -20.3);
+      signPanel.parent = facRoot;
+      signPanel.material = signMat;
+      signPanel.isPickable = false;
     }
   }
 
