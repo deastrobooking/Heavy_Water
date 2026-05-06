@@ -1616,20 +1616,34 @@ export const Game: React.FC = () => {
           const arsenalSnap = meleeArsenal.getSnapshot();
           const companions = companionSystem.serializeForSave();
           const elementalLevels = elementalSpecials.getLevels() as Record<string, number>;
+          // Sticky-OR every "once unlocked = always owned" flag against the
+          // React mirror so the save snapshot can NEVER regress to false.
+          // Three concrete regressions this guards against, all observed in
+          // the wild:
+          //   • Robot Dragon dies → roster.splice removes it → an autosave
+          //     fires before the PLAYER_DIED revive timer re-adds it → snap
+          //     writes roboDragon=false and the next reload thinks the
+          //     player never bought it.
+          //   • Beam-sabre system gets recreated on a failed-init retry and
+          //     boots back up with hasGoldSabre=false before applyLoadedState
+          //     can run → next snap clobbers the gold-sabre unlock.
+          //   • Superman Flight: same risk if PlayerController is ever
+          //     re-instantiated mid-session (level transition, debug flow).
+          // The React `specialsOwned` state is the single source of truth
+          // for "the player paid for this", so OR live-state with the
+          // sticky mirror to keep the unlock once it's been earned.
+          const owned = specialsOwnedRef.current;
           const specialsOwnedSnap = {
-            sabreSpin: sabreState.hasSpinAttack,
-            sabreTwin: sabreState.hasTwinWave,
-            sabreGiant: sabreState.hasGiantBlade,
-            sabreGold: sabreState.hasGoldSabre,
-            autoLoot: pickupSystem.isAutoLootEnabled(),
-            // The roster carries the dragon by preset name; the flag mirrors
-            // the SPECIALS-tab state for affordability/UI on reload.
-            roboDragon: companions.some(c => c.presetName === "RoboDragon"),
-            // Read live state from WeaponsSystem so a hot-toggle (or a
-            // future debug command) is what actually persists, not the
-            // React mirror which can lag a frame.
-            autoTarget: weapons.isAutoTargetEnabled(),
-            supermanFlight: player.getHasSupermanFlight(),
+            sabreSpin: sabreState.hasSpinAttack || owned.sabreSpin,
+            sabreTwin: sabreState.hasTwinWave || owned.sabreTwin,
+            sabreGiant: sabreState.hasGiantBlade || owned.sabreGiant,
+            sabreGold: sabreState.hasGoldSabre || owned.sabreGold,
+            autoLoot: pickupSystem.isAutoLootEnabled() || owned.autoLoot,
+            // Dragon presence in the live roster is volatile (death, level
+            // transition, lab dismiss). The unlock itself is sticky.
+            roboDragon: owned.roboDragon || companions.some(c => c.presetName === "RoboDragon"),
+            autoTarget: weapons.isAutoTargetEnabled() || owned.autoTarget,
+            supermanFlight: player.getHasSupermanFlight() || owned.supermanFlight,
             glaiveOwn: arsenalSnap.glaive.unlocked,
             glaiveCombo: arsenalSnap.glaive.comboUnlocked,
             glaiveSpecial: arsenalSnap.glaive.specialUnlocked,
