@@ -3585,7 +3585,7 @@ export const Game: React.FC = () => {
     const ls = levelSystemRef.current;
     const player = playerRef.current;
     if (!ls || !player) return;
-    if (level < 1 || level > 8) return;
+    if (level < 1 || level > 9) return;
     const sp = LevelSystem.getSpawnPointFor(level as WorldLevel);
     // Spacelike levels need a high spawn Y so the player wakes up amid the
     // 25–105 m asteroid band (the orbital fighter is auto-entered there);
