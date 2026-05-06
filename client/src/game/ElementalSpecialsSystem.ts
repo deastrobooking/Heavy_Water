@@ -161,6 +161,21 @@ interface ActiveTracker {
   spawnPos: BABYLON.Vector3;
 }
 
+interface ActiveBeam {
+  kind: ElementalKind;
+  origin: BABYLON.Vector3;
+  direction: BABYLON.Vector3;
+  length: number;
+  radius: number;
+  damage: number;
+  lifetime: number;
+  elapsed: number;
+  meshes: BABYLON.Mesh[];
+  muzzleMesh: BABYLON.Mesh | null;
+  light: BABYLON.PointLight | null;
+  hit: Set<BABYLON.Mesh>;
+}
+
 interface ActiveDome {
   kind: ElementalKind;
   mesh: BABYLON.Mesh;
@@ -181,6 +196,7 @@ export class ElementalSpecialsSystem {
   private camera: BABYLON.FreeCamera;
   private specials: Map<ElementalKind, ElementalSpecial> = new Map();
   private activeTrackers: ActiveTracker[] = [];
+  private activeBeams: ActiveBeam[] = [];
   private activeDomes: ActiveDome[] = [];
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
   private onChange: ((list: ElementalDisplay[]) => void) | null = null;
@@ -355,7 +371,16 @@ export class ElementalSpecialsSystem {
     const projPerTarget = this.scaledProjectilesPerCast(def, sp.level);
 
     if (def.category === "tracking") {
-      this.spawnTrackingStrike(kind, damage, radius, targets, projPerTarget);
+      // The three tracking elementals (lightning, ice, fireball) used to
+      // spawn up to (volley × targets) ≈ 80 self-tracking projectiles per
+      // cast, each with its own mesh + material + point light. That was
+      // crashing the scene on high-level casts. We collapse that storm
+      // into ONE big mega-beam-style colored shaft that rays out from the
+      // camera and one-shots everything in its path. Total damage is
+      // preserved by folding the per-target volley + target count into a
+      // single beam tick so player upgrades still pay off.
+      const totalDamage = Math.round(damage * Math.max(1, targets) * Math.max(1, projPerTarget));
+      this.spawnElementalBeam(kind, totalDamage, Math.max(radius, 5));
     } else {
       this.spawnDome(kind, damage, radius);
     }
@@ -546,6 +571,94 @@ export class ElementalSpecialsSystem {
     });
   }
 
+  /** Mega-beam-style colored shaft for the three tracking elementals.
+   *  Modeled on MegaBeamCannonSystem.spawnBeam: 3 coaxial cylinders (white
+   *  core / mid halo / outer glow) tinted to the element color, with a
+   *  muzzle orb and a fill light. One damage tick per enemy whose hit
+   *  volume intersects the beam. Cheap to render (4 meshes + 1 light vs
+   *  the 80+ trackers + lights the old strike spawned). */
+  private spawnElementalBeam(kind: ElementalKind, damage: number, beamRadius: number): void {
+    const def = ELEMENT_DEFS[kind];
+    const origin = this.playerPosProvider().add(new BABYLON.Vector3(0, 1.4, 0));
+    const forward = this.camera.getDirection(BABYLON.Vector3.Forward()).normalize();
+    const beamLength = 220;
+    const muzzle = origin.add(forward.scale(2.0));
+    const center = muzzle.add(forward.scale(beamLength * 0.5));
+
+    // Inner core stays bright white for that anime "energy core" feel; the
+    // halo + outer glow take the element tint.
+    const tint = def.color.clone();
+    const cylConfigs = [
+      { diameter: beamRadius * 0.55, color: new BABYLON.Color3(1, 1, 1), alpha: 1.0 },
+      { diameter: beamRadius * 1.15, color: tint, alpha: 0.65 },
+      { diameter: beamRadius * 1.85, color: tint.scale(0.85), alpha: 0.32 },
+    ];
+
+    const meshes: BABYLON.Mesh[] = [];
+    for (let i = 0; i < cylConfigs.length; i++) {
+      const cfg = cylConfigs[i];
+      const cyl = BABYLON.MeshBuilder.CreateCylinder(`elemBeam_${kind}_${i}_${Date.now()}`, {
+        height: beamLength,
+        diameter: cfg.diameter,
+        tessellation: 18,
+      }, this.scene);
+      const mat = new BABYLON.StandardMaterial(`elemBeamMat_${kind}_${i}`, this.scene);
+      mat.emissiveColor = cfg.color;
+      mat.diffuseColor = cfg.color;
+      mat.specularColor = new BABYLON.Color3(0, 0, 0);
+      mat.alpha = cfg.alpha;
+      mat.disableLighting = true;
+      cyl.material = mat;
+      cyl.isPickable = false;
+      cyl.position.copyFrom(center);
+      // Default cylinder long axis is +Y; rotate so it lies along `forward`.
+      const q = new BABYLON.Quaternion();
+      BABYLON.Quaternion.FromUnitVectorsToRef(BABYLON.Vector3.Up(), forward, q);
+      cyl.rotationQuaternion = q;
+      meshes.push(cyl);
+    }
+
+    const muzzleMesh = BABYLON.MeshBuilder.CreateSphere(`elemBeamMuzzle_${kind}_${Date.now()}`, {
+      diameter: beamRadius * 2.4,
+      segments: 16,
+    }, this.scene);
+    const mmat = new BABYLON.StandardMaterial(`elemBeamMuzzleMat_${kind}`, this.scene);
+    mmat.emissiveColor = tint.clone();
+    mmat.diffuseColor = tint.clone();
+    mmat.alpha = 0.85;
+    mmat.disableLighting = true;
+    muzzleMesh.material = mmat;
+    muzzleMesh.isPickable = false;
+    muzzleMesh.position.copyFrom(muzzle);
+
+    const light = new BABYLON.PointLight(`elemBeamLight_${kind}_${Date.now()}`, muzzle.clone(), this.scene);
+    light.diffuse = tint.clone();
+    light.specular = new BABYLON.Color3(1, 1, 1);
+    light.intensity = 10;
+    light.range = 60;
+
+    const glow = this.scene.effectLayers?.find(l => l instanceof BABYLON.GlowLayer) as BABYLON.GlowLayer | undefined;
+    if (glow) {
+      for (const m of meshes) glow.addIncludedOnlyMesh(m);
+      glow.addIncludedOnlyMesh(muzzleMesh);
+    }
+
+    this.activeBeams.push({
+      kind,
+      origin: muzzle.clone(),
+      direction: forward.clone(),
+      length: beamLength,
+      radius: beamRadius,
+      damage,
+      lifetime: 1400, // ms — matches MegaBeamCannon's 1.4s
+      elapsed: 0,
+      meshes,
+      muzzleMesh,
+      light,
+      hit: new Set(),
+    });
+  }
+
   private spawnDome(kind: ElementalKind, damage: number, radius: number): void {
     const def = ELEMENT_DEFS[kind];
     const center = this.playerPosProvider();
@@ -686,6 +799,66 @@ export class ElementalSpecialsSystem {
       if (detonated || t.lifetime <= 0 || t.mesh.position.y < -10) {
         t.mesh.dispose();
         this.activeTrackers.splice(i, 1);
+      }
+    }
+
+    // beams (lightning / ice / fireball replacement)
+    for (let bi = this.activeBeams.length - 1; bi >= 0; bi--) {
+      const beam = this.activeBeams[bi];
+      beam.elapsed += dtMs;
+      const tt = beam.elapsed / beam.lifetime;
+      const fade = Math.max(0, 1 - tt);
+      const pulse = 1 + Math.sin(beam.elapsed * 0.03) * 0.05;
+      for (let mi = 0; mi < beam.meshes.length; mi++) {
+        const m = beam.meshes[mi];
+        const mat = m.material as BABYLON.StandardMaterial | null;
+        if (!mat) continue;
+        const baseAlpha = mi === 0 ? 1.0 : mi === 1 ? 0.65 : 0.32;
+        mat.alpha = baseAlpha * fade;
+        m.scaling.x = pulse;
+        m.scaling.z = pulse;
+      }
+      if (beam.muzzleMesh) {
+        const mmat = beam.muzzleMesh.material as BABYLON.StandardMaterial | null;
+        if (mmat) mmat.alpha = 0.85 * fade;
+        beam.muzzleMesh.scaling.setAll(1 + Math.sin(beam.elapsed * 0.022) * 0.15);
+      }
+      if (beam.light) beam.light.intensity = 10 * fade;
+
+      // One-tick damage to anything inside the beam cylinder.
+      const ox = beam.origin.x, oy = beam.origin.y, oz = beam.origin.z;
+      const dx = beam.direction.x, dy = beam.direction.y, dz = beam.direction.z;
+      const len = beam.length;
+      for (const e of enemies) {
+        if (!e || e.isDisposed() || beam.hit.has(e)) continue;
+        const ex = e.position.x - ox;
+        const ey = e.position.y - oy;
+        const ez = e.position.z - oz;
+        const proj = ex * dx + ey * dy + ez * dz;
+        if (proj < 0 || proj > len) continue;
+        const cx = ex - dx * proj;
+        const cy = ey - dy * proj;
+        const cz = ez - dz * proj;
+        const perpSq = cx * cx + cy * cy + cz * cz;
+        const meshHitR = (e.metadata as any)?.hitRadius ?? 1.5;
+        const hitR = beam.radius + meshHitR;
+        if (perpSq < hitR * hitR) {
+          beam.hit.add(e);
+          hits.push({ hitEnemy: e, damage: beam.damage });
+        }
+      }
+
+      if (beam.elapsed >= beam.lifetime) {
+        for (const m of beam.meshes) {
+          try { m.material?.dispose(); } catch {}
+          try { m.dispose(); } catch {}
+        }
+        if (beam.muzzleMesh) {
+          try { beam.muzzleMesh.material?.dispose(); } catch {}
+          try { beam.muzzleMesh.dispose(); } catch {}
+        }
+        try { beam.light?.dispose(); } catch {}
+        this.activeBeams.splice(bi, 1);
       }
     }
 
@@ -882,6 +1055,18 @@ export class ElementalSpecialsSystem {
       try { t.mesh.dispose(); } catch {}
     }
     this.activeTrackers = [];
+    for (const b of this.activeBeams) {
+      for (const m of b.meshes) {
+        try { m.material?.dispose(); } catch {}
+        try { m.dispose(); } catch {}
+      }
+      if (b.muzzleMesh) {
+        try { b.muzzleMesh.material?.dispose(); } catch {}
+        try { b.muzzleMesh.dispose(); } catch {}
+      }
+      try { b.light?.dispose(); } catch {}
+    }
+    this.activeBeams = [];
     for (const d of this.activeDomes) {
       try { d.mesh.dispose(); } catch {}
       try { d.light.dispose(); } catch {}

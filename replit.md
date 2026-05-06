@@ -60,6 +60,7 @@ _Populate as you build_
 - **Legendary Companion**: Grant conditions (General Voidcrown defeated, all 12 synthetics freed, all 4 lab animals freed) are re-evaluated on each relevant event.
 - **Sticky SPECIALS unlocks**: Save snapshot for `sabreGold`, `supermanFlight`, `roboDragon` (and the other one-time SPECIALS) is OR-ed against `specialsOwnedRef.current` so a transient live-state regression (dragon dying before respawn-revive, sabre/player system being re-instantiated mid-session) can never wipe a paid unlock from disk.
 - **Elemental Upgrades**: Elemental specials (RB / DPad ↑↓) now scale L1→L20 — damage +35%/lvl, cooldown ×0.92/lvl (floor 800ms), tracking volley grows from 1 → 8 projectiles per target every 2 lvls, dome radius +20%/lvl (psychic ≈ 70m at L20). Upgraded from credits in the PLAYER tab of the Tab/Select menu; persisted via `ProgressSync.elementalLevels`.
+- **Tracking elementals as beams**: Lightning / Ice / Fireball each fire ONE big colored mega-beam-style shaft (3 coaxial cylinders + muzzle orb + 1 light) instead of spawning per-target volleys. The old per-target tracker storm (up to ~80 self-homing projectiles per cast at high levels) was crashing/slowing the scene. Total damage = `scaledDamage × targets × volley` so upgrade levels still pay off. Dome elementals (Inferno / Windstorm / Psychic) are unchanged.
 
 ## Pointers
 - **Developer Hub**: [`docs/`](docs/)
