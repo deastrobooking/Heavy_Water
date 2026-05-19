@@ -158,6 +158,7 @@ export class ArmorCapsuleSystem {
   private onUIToggle: ((open: boolean, upgrades: ArmorUpgrade[]) => void) | null = null;
   private onUpgradeApplied: ((upgrade: ArmorUpgrade) => void) | null = null;
   private promptMesh: BABYLON.Mesh | null = null;
+  private keyHandler: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(scene: BABYLON.Scene, armorSystem: ArmorSystem) {
     this.scene = scene;
@@ -314,13 +315,14 @@ export class ArmorCapsuleSystem {
   }
 
   private setupInteraction(): void {
-    window.addEventListener("keydown", (e) => {
+    this.keyHandler = (e: KeyboardEvent) => {
       if (e.code === "KeyE" && this.playerNearCapsule && !this.isUIOpen) {
         this.openUI();
       } else if (e.code === "Escape" && this.isUIOpen) {
         this.closeUI();
       }
-    });
+    };
+    window.addEventListener("keydown", this.keyHandler);
   }
 
   update(deltaTime: number, playerPosition: BABYLON.Vector3): void {
@@ -490,9 +492,18 @@ export class ArmorCapsuleSystem {
   }
 
   dispose(): void {
+    if (this.keyHandler) {
+      window.removeEventListener("keydown", this.keyHandler);
+      this.keyHandler = null;
+    }
     this.laboratoryMeshes.forEach(m => m.dispose());
     this.laboratoryMeshes = [];
     if (this.capsuleGlow) this.capsuleGlow.dispose();
     if (this.promptMesh) this.promptMesh.dispose();
+    this.capsuleMesh = null;
+    this.capsuleGlow = null;
+    this.promptMesh = null;
+    this.onUIToggle = null;
+    this.onUpgradeApplied = null;
   }
 }

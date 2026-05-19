@@ -19,6 +19,7 @@ export class GardenSystem {
   private currentGardenId: string | null = null;
   private onGardenOpen: ((gardenId: string) => void) | null = null;
   private onGardenClose: (() => void) | null = null;
+  private keyHandler: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(scene: BABYLON.Scene, camera: BABYLON.FreeCamera, companionSystem: CompanionSystem) {
     this.scene = scene;
@@ -29,7 +30,7 @@ export class GardenSystem {
   }
 
   private setupControls(): void {
-    window.addEventListener("keydown", (e) => {
+    this.keyHandler = (e: KeyboardEvent) => {
       if (e.code === "KeyG") {
         if (this.isGardenOpen) {
           this.closeGarden();
@@ -40,7 +41,8 @@ export class GardenSystem {
       if (e.code === "Escape" && this.isGardenOpen) {
         this.closeGarden();
       }
-    });
+    };
+    window.addEventListener("keydown", this.keyHandler);
   }
 
   setOnGardenOpen(cb: (gardenId: string) => void): void {
@@ -194,6 +196,13 @@ export class GardenSystem {
   }
 
   dispose(): void {
+    if (this.keyHandler) {
+      window.removeEventListener("keydown", this.keyHandler);
+      this.keyHandler = null;
+    }
     this.gardenMeshes.forEach((mesh) => mesh.dispose());
+    this.gardenMeshes.clear();
+    this.onGardenOpen = null;
+    this.onGardenClose = null;
   }
 }

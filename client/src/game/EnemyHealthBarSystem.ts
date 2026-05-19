@@ -29,6 +29,13 @@ export class EnemyHealthBarSystem {
   private bars = new Map<EnemyLike, BarEntry>();
   private observer: BABYLON.Observer<BABYLON.Scene> | null = null;
   private maxDistance = 90;
+  private readonly tickIntervalMs = 1000 / 30;
+  private tickAccumulatorMs = 0;
+  private readonly liveEnemies = new Set<EnemyLike>();
+  private readonly staleEnemies: EnemyLike[] = [];
+  private readonly headWorld = new BABYLON.Vector3();
+  private readonly screenPosition = new BABYLON.Vector3();
+  private readonly identityMatrix = BABYLON.Matrix.Identity();
 
   constructor(scene: BABYLON.Scene, camera: BABYLON.Camera) {
     this.scene = scene;
@@ -47,7 +54,12 @@ export class EnemyHealthBarSystem {
     } as CSSStyleDeclaration);
     document.body.appendChild(this.root);
 
-    this.observer = this.scene.onBeforeRenderObservable.add(() => this.tick());
+    this.observer = this.scene.onBeforeRenderObservable.add(() => {
+      this.tickAccumulatorMs += this.scene.getEngine().getDeltaTime();
+      if (this.tickAccumulatorMs < this.tickIntervalMs) return;
+      this.tickAccumulatorMs = 0;
+      this.tick();
+    });
   }
 
   setEnemyProvider(fn: () => EnemyLike[]): void {
@@ -123,7 +135,8 @@ export class EnemyHealthBarSystem {
 
   private tick(): void {
     const enemies = this.enemyProvider();
-    const live = new Set<EnemyLike>();
+    const live = this.liveEnemies;
+    live.clear();
 
     const engine = this.scene.getEngine();
     const w = engine.getRenderWidth();
@@ -149,13 +162,19 @@ export class EnemyHealthBarSystem {
       live.add(enemy);
 
       const bb = enemy.mesh.getBoundingInfo().boundingBox;
-      const headWorld = new BABYLON.Vector3(meshPos.x, meshPos.y + (bb.maximum.y - bb.minimum.y) * 0.6 + 0.6, meshPos.z);
-      const screen = BABYLON.Vector3.Project(
-        headWorld,
-        BABYLON.Matrix.Identity(),
+      this.headWorld.set(
+        meshPos.x,
+        meshPos.y + (bb.maximum.y - bb.minimum.y) * 0.6 + 0.6,
+        meshPos.z,
+      );
+      BABYLON.Vector3.ProjectToRef(
+        this.headWorld,
+        this.identityMatrix,
         transform,
         viewport,
+        this.screenPosition,
       );
+      const screen = this.screenPosition;
 
       if (screen.z < 0 || screen.z > 1) continue;
 
@@ -175,11 +194,13 @@ export class EnemyHealthBarSystem {
       entry.container.style.opacity = `${Math.max(0.35, distFade)}`;
     }
 
-    for (const enemy of Array.from(this.bars.keys())) {
+    this.staleEnemies.length = 0;
+    for (const enemy of this.bars.keys()) {
       if (!live.has(enemy) || !enemy.isAlive) {
-        this.removeBar(enemy);
+        this.staleEnemies.push(enemy);
       }
     }
+    for (const enemy of this.staleEnemies) this.removeBar(enemy);
   }
 
   dispose(): void {

@@ -24,6 +24,16 @@ export function setPlayerIsFlyingProvider(fn: () => boolean): void {
   playerIsFlyingFn = fn;
 }
 
+const ENEMY_TARGET_FRAME_SECONDS = 1 / 60;
+
+function enemyFrameScale(dt: number): number {
+  return Math.max(0, dt / ENEMY_TARGET_FRAME_SECONDS);
+}
+
+function scaledFrameLerp(perFrameAlpha: number, frameScale: number): number {
+  return 1 - Math.pow(1 - perFrameAlpha, frameScale);
+}
+
 /** A homing red orb the BossCaptain fires at the player. Tracked per-captain
  *  so we can lerp it forward + check the impact-radius each frame, and clean
  *  up the mesh when its lifetime expires. */
@@ -344,15 +354,20 @@ export class EnemyUnit implements IDamageable {
   }
 
   private updatePatrol(dt: number, playerPos: BABYLON.Vector3): number {
+    const frameScale = enemyFrameScale(dt);
     const dir = this.patrolTarget.subtract(this.mesh.position);
     dir.y = 0;
-    if (dir.length() < 1) {
+    const dist = dir.length();
+    if (dist < 1) {
       this.fsm.changeState("idle");
       this.idleTimer = 1 + Math.random() * 2;
       return 0;
     }
 
-    this.mesh.position.addInPlace(dir.normalize().scale(this.config.patrolSpeed));
+    const step = Math.min(dist, this.config.patrolSpeed * frameScale);
+    dir.scaleInPlace(1 / dist);
+    this.mesh.position.x += dir.x * step;
+    this.mesh.position.z += dir.z * step;
     this.faceDirection(dir);
     this.checkForPlayer(playerPos);
 
@@ -360,12 +375,13 @@ export class EnemyUnit implements IDamageable {
       this.mesh.position.y = 5 + Math.sin(Date.now() * 0.003) * 0.5;
     }
     if (this.type === "commander") {
-      this.mesh.position.y += Math.sin(Date.now() * 0.002) * 0.02;
+      this.mesh.position.y += Math.sin(Date.now() * 0.002) * 0.02 * frameScale;
     }
     return 0;
   }
 
   private updateChase(dt: number, playerPos: BABYLON.Vector3): number {
+    const frameScale = enemyFrameScale(dt);
     const dir = playerPos.subtract(this.mesh.position);
     const dist = dir.length();
 
@@ -396,15 +412,20 @@ export class EnemyUnit implements IDamageable {
 
     const moveDir = dir.clone();
     moveDir.y = 0;
-    moveDir.normalize();
-    this.mesh.position.addInPlace(moveDir.scale(this.config.chaseSpeed));
-    this.faceDirection(moveDir);
+    const horizDist = moveDir.length();
+    if (horizDist > 0.001) {
+      const step = Math.min(horizDist, this.config.chaseSpeed * frameScale);
+      moveDir.scaleInPlace(1 / horizDist);
+      this.mesh.position.x += moveDir.x * step;
+      this.mesh.position.z += moveDir.z * step;
+      this.faceDirection(moveDir);
+    }
 
     if (this.type === "drone") {
       this.mesh.position.y = 5 + Math.sin(Date.now() * 0.003) * 0.5;
     } else if (this.type === "commander") {
       const targetY = Math.max(this.patrolOrigin.y, 1.5);
-      this.mesh.position.y += (targetY - this.mesh.position.y) * 0.05;
+      this.mesh.position.y += (targetY - this.mesh.position.y) * scaledFrameLerp(0.05, frameScale);
     } else if (this.type === "spider_tank") {
       // Body sits 3.5 m up so the six legs reach the ground without the
       // chassis sinking when chase code touches Y.
@@ -479,8 +500,9 @@ export class EnemyUnit implements IDamageable {
   }
 
   private updateFlying(dt: number, playerPos: BABYLON.Vector3): number {
+    const frameScale = enemyFrameScale(dt);
     const heightDiff = this.targetFlightHeight - this.mesh.position.y;
-    this.mesh.position.y += heightDiff * 0.08;
+    this.mesh.position.y += heightDiff * scaledFrameLerp(0.08, frameScale);
 
     const dir = playerPos.subtract(this.mesh.position);
     const horizDist = new BABYLON.Vector3(dir.x, 0, dir.z).length();
@@ -493,16 +515,22 @@ export class EnemyUnit implements IDamageable {
     if (horizDist > 5) {
       const moveDir = dir.clone();
       moveDir.y = 0;
-      moveDir.normalize();
-      this.mesh.position.addInPlace(moveDir.scale(this.config.chaseSpeed * 1.5));
-      this.faceDirection(moveDir);
+      const moveDist = moveDir.length();
+      if (moveDist > 0.001) {
+        const step = Math.min(moveDist, this.config.chaseSpeed * 1.5 * frameScale);
+        moveDir.scaleInPlace(1 / moveDist);
+        this.mesh.position.x += moveDir.x * step;
+        this.mesh.position.z += moveDir.z * step;
+        this.faceDirection(moveDir);
+      }
     }
 
     return 0;
   }
 
   private updateHovering(dt: number, playerPos: BABYLON.Vector3): number {
-    this.mesh.position.y += Math.sin(Date.now() * 0.003) * 0.03;
+    const frameScale = enemyFrameScale(dt);
+    this.mesh.position.y += Math.sin(Date.now() * 0.003) * 0.03 * frameScale;
 
     const dir = playerPos.subtract(this.mesh.position);
     const dist = dir.length();
@@ -514,9 +542,15 @@ export class EnemyUnit implements IDamageable {
     }
 
     const moveDir = dir.clone();
-    moveDir.normalize();
-    this.mesh.position.addInPlace(moveDir.scale(this.config.chaseSpeed * 1.2));
-    this.faceDirection(dir);
+    const moveDist = moveDir.length();
+    if (moveDist > 0.001) {
+      const step = Math.min(moveDist, this.config.chaseSpeed * 1.2 * frameScale);
+      moveDir.scaleInPlace(1 / moveDist);
+      this.mesh.position.x += moveDir.x * step;
+      this.mesh.position.y += moveDir.y * step;
+      this.mesh.position.z += moveDir.z * step;
+      this.faceDirection(dir);
+    }
 
     if (dist > this.config.chaseRange) {
       this.targetFlightHeight = 1.5;
@@ -529,7 +563,9 @@ export class EnemyUnit implements IDamageable {
   private updateDodging(dt: number, _playerPos: BABYLON.Vector3): number {
     this.dodgeTimer -= dt;
 
-    this.mesh.position.addInPlace(this.dodgeDirection.scale(0.4));
+    const step = 0.4 * enemyFrameScale(dt);
+    this.mesh.position.x += this.dodgeDirection.x * step;
+    this.mesh.position.z += this.dodgeDirection.z * step;
 
     if (this.dodgeTimer <= 0) {
       this.fsm.changeState("chase");

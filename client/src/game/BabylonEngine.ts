@@ -11,22 +11,33 @@ export interface OutlineConfig {
  * LocalStorage flag — set `localStorage.setItem("heavywater:webgpu", "1")`
  * to opt this session into the experimental WebGPU backend. Off by default
  * because our custom cell-shading outline shader is GLSL-ES-1.0 and only
- * compiles on the WebGL2 backend; WebGPU still gets bloom / FXAA /
- * chromatic aberration via Babylon's built-in pipeline (which auto-
- * recompiles its shaders for whichever backend is active).
+ * compiles on the WebGL2 backend. High-quality post effects can be opted into
+ * with `localStorage.setItem("heavywater:graphics", "high")`.
  */
 const WEBGPU_FLAG_KEY = "heavywater:webgpu";
+const GRAPHICS_QUALITY_KEY = "heavywater:graphics";
+
+function getLocalStorageValue(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
 
 export class BabylonEngine {
   private canvas: HTMLCanvasElement;
   private engine: BABYLON.AbstractEngine;
   private isWebGPU: boolean;
+  private highQualityGraphics: boolean;
   private scene: BABYLON.Scene;
   private camera: BABYLON.FreeCamera;
   private outlinePostProcess: BABYLON.PostProcess | null = null;
   private ambientLight: BABYLON.HemisphericLight | null = null;
   private sunLight: BABYLON.DirectionalLight | null = null;
   private boostedMats: WeakSet<BABYLON.StandardMaterial> = new WeakSet();
+  private resizeHandler: (() => void) | null = null;
   private outlineConfig: OutlineConfig = {
     thickness: 1.0,
     color: new BABYLON.Color3(0, 0, 0),
@@ -54,7 +65,7 @@ export class BabylonEngine {
 
     const wantsWebGPU =
       typeof window !== "undefined" &&
-      window.localStorage?.getItem(WEBGPU_FLAG_KEY) === "1";
+      getLocalStorageValue(WEBGPU_FLAG_KEY) === "1";
 
     let engine: BABYLON.AbstractEngine | null = null;
     let isWebGPU = false;
@@ -86,7 +97,7 @@ export class BabylonEngine {
 
     if (!engine) {
       engine = new BABYLON.Engine(canvas, true, {
-        preserveDrawingBuffer: true,
+        preserveDrawingBuffer: false,
         stencil: true,
       });
       isWebGPU = false;
@@ -108,6 +119,7 @@ export class BabylonEngine {
     isWebGPU: boolean = false,
   ) {
     this.canvas = canvas;
+    this.highQualityGraphics = getLocalStorageValue(GRAPHICS_QUALITY_KEY) === "high";
 
     if (canvas.width === 0 || canvas.height === 0) {
       canvas.width = canvas.clientWidth || window.innerWidth;
@@ -119,7 +131,7 @@ export class BabylonEngine {
       this.isWebGPU = isWebGPU;
     } else {
       this.engine = new BABYLON.Engine(canvas, true, {
-        preserveDrawingBuffer: true,
+        preserveDrawingBuffer: false,
         stencil: true,
       });
       this.isWebGPU = false;
@@ -153,17 +165,15 @@ export class BabylonEngine {
       console.warn("Post-processing setup failed, continuing without it:", e);
     }
 
-    // Custom GLSL-ES-1.0 cell-shading outline only compiles on WebGL2.
-    // WebGPU expects WGSL / GLSL3, so we skip it there — the player still
-    // gets bloom + FXAA + chromatic aberration from Babylon's built-in
-    // pipeline. We can port the outline shader to WGSL later.
-    if (!this.isWebGPU) {
+    // Custom GLSL-ES-1.0 cell-shading outline is a full-screen pass backed by
+    // depth + normal textures, so keep it for the opt-in high-quality mode.
+    if (!this.isWebGPU && this.highQualityGraphics) {
       try {
         this.setupCellShadingOutline();
       } catch (e) {
         console.warn("Cell-shading outline setup failed, continuing without it:", e);
       }
-    } else {
+    } else if (this.isWebGPU) {
       console.log("[BabylonEngine] Skipping ink-outline post-process on WebGPU backend");
     }
 
@@ -229,6 +239,8 @@ export class BabylonEngine {
   }
 
   private setupPostProcessing(): void {
+    const highQuality = this.highQualityGraphics;
+
     const defaultPipeline = new BABYLON.DefaultRenderingPipeline(
       "default",
       true,
@@ -236,18 +248,24 @@ export class BabylonEngine {
       [this.camera]
     );
     
-    defaultPipeline.bloomEnabled = true;
-    defaultPipeline.bloomThreshold = 0.5;
-    defaultPipeline.bloomWeight = 0.25;
-    defaultPipeline.bloomKernel = 32;
-    defaultPipeline.bloomScale = 0.3;
+    defaultPipeline.bloomEnabled = highQuality;
+    if (highQuality) {
+      defaultPipeline.bloomThreshold = 0.5;
+      defaultPipeline.bloomWeight = 0.25;
+      defaultPipeline.bloomKernel = 32;
+      defaultPipeline.bloomScale = 0.3;
+    }
 
-    defaultPipeline.chromaticAberrationEnabled = true;
-    defaultPipeline.chromaticAberration.aberrationAmount = 1.5;
+    defaultPipeline.chromaticAberrationEnabled = highQuality;
+    if (highQuality) {
+      defaultPipeline.chromaticAberration.aberrationAmount = 1.5;
+    }
 
     defaultPipeline.fxaaEnabled = true;
-    defaultPipeline.sharpenEnabled = true;
-    defaultPipeline.sharpen.edgeAmount = 0.15;
+    defaultPipeline.sharpenEnabled = highQuality;
+    if (highQuality) {
+      defaultPipeline.sharpen.edgeAmount = 0.15;
+    }
 
     this.scene.clearColor = new BABYLON.Color4(0.02, 0.02, 0.08, 1);
     this.scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
@@ -447,14 +465,20 @@ export class BabylonEngine {
       }
     });
 
-    window.addEventListener("resize", () => {
+    this.resizeHandler = () => {
       this.engine.resize();
-    });
+    };
+    window.addEventListener("resize", this.resizeHandler);
   }
 
   dispose(): void {
+    if (this.resizeHandler) {
+      window.removeEventListener("resize", this.resizeHandler);
+      this.resizeHandler = null;
+    }
     if (this.outlinePostProcess) {
       this.outlinePostProcess.dispose();
+      this.outlinePostProcess = null;
     }
     this.scene.dispose();
     this.engine.dispose();

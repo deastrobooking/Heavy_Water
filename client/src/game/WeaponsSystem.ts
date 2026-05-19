@@ -101,6 +101,8 @@ export interface Projectile {
   explosionRadius: number;
 }
 
+const TARGET_FRAME_SECONDS = 1 / 60;
+
 export class WeaponsSystem {
   private scene: BABYLON.Scene;
   private camera: BABYLON.FreeCamera;
@@ -142,6 +144,10 @@ export class WeaponsSystem {
   private scratchOrigin: BABYLON.Vector3 = new BABYLON.Vector3();
   private inventory: InventorySystem | null = null;
   private bus: EventBus = EventBus.getInstance();
+  private mouseDownHandler: ((e: MouseEvent) => void) | null = null;
+  private mouseUpHandler: ((e: MouseEvent) => void) | null = null;
+  private wheelHandler: ((e: WheelEvent) => void) | null = null;
+  private keyHandler: ((e: KeyboardEvent) => void) | null = null;
 
   private onAmmoChange: ((ammo: number, maxAmmo: number) => void) | null = null;
   private onWeaponChange: ((weapon: Weapon) => void) | null = null;
@@ -337,24 +343,27 @@ export class WeaponsSystem {
   }
 
   private setupControls(): void {
-    window.addEventListener("mousedown", (e) => {
+    this.mouseDownHandler = (e: MouseEvent) => {
       if (e.button === 0) {
         this.isFiring = true;
         this.fire();
       }
-    });
+    };
+    window.addEventListener("mousedown", this.mouseDownHandler);
 
-    window.addEventListener("mouseup", (e) => {
+    this.mouseUpHandler = (e: MouseEvent) => {
       if (e.button === 0) {
         this.isFiring = false;
       }
-    });
+    };
+    window.addEventListener("mouseup", this.mouseUpHandler);
 
-    window.addEventListener("wheel", (e) => {
+    this.wheelHandler = (e: WheelEvent) => {
       this.cycleWeapon(e.deltaY > 0 ? 1 : -1);
-    });
+    };
+    window.addEventListener("wheel", this.wheelHandler);
 
-    window.addEventListener("keydown", (e) => {
+    this.keyHandler = (e: KeyboardEvent) => {
       switch (e.code) {
         case "Digit1": this.selectWeapon("pistol"); break;
         case "Digit2": this.selectWeapon("rifle"); break;
@@ -372,7 +381,8 @@ export class WeaponsSystem {
         case "Digit8": this.selectWeapon("capture_net"); break;
         case "KeyR": this.reload(); break;
       }
-    });
+    };
+    window.addEventListener("keydown", this.keyHandler);
   }
 
   setVehicleMode(active: boolean): void {
@@ -607,14 +617,15 @@ export class WeaponsSystem {
     this.projectiles.push(projectile);
   }
 
-  update(enemies: BABYLON.Mesh[]): { hitEnemy: BABYLON.Mesh; damage: number }[] {
+  update(enemies: BABYLON.Mesh[], dt: number = TARGET_FRAME_SECONDS): { hitEnemy: BABYLON.Mesh; damage: number }[] {
     const weapon = this.weapons.get(this.currentWeapon);
     if (weapon?.isAutomatic && this.isFiring) {
       this.fire();
     }
 
     const hits: { hitEnemy: BABYLON.Mesh; damage: number }[] = [];
-    const now = Date.now();
+    const frameScale = Math.max(0, dt / TARGET_FRAME_SECONDS);
+    const elapsedMs = Math.max(0, dt * 1000);
 
     // Homing-missile lock-on range. Beyond this distance the missile cannot
     // see / steer toward an enemy. Squared form so we can avoid the sqrt
@@ -645,8 +656,8 @@ export class WeaponsSystem {
         }
         if (nearest) {
           const desired = nearest.position.subtract(projectile.mesh.position).normalize();
-          // Strong steering – missile pivots quickly toward the target.
-          projectile.direction = BABYLON.Vector3.Lerp(projectile.direction, desired, 0.18).normalize();
+          const steer = 1 - Math.pow(1 - 0.18, frameScale);
+          projectile.direction = BABYLON.Vector3.Lerp(projectile.direction, desired, steer).normalize();
           // Orient the cylinder mesh along the direction of travel.
           const dir = projectile.direction;
           const yaw = Math.atan2(dir.x, dir.z);
@@ -655,11 +666,14 @@ export class WeaponsSystem {
         }
       }
 
-      projectile.mesh.position.addInPlace(projectile.direction.scale(projectile.speed));
-      projectile.lifetime -= 16;
+      const step = projectile.speed * frameScale;
+      projectile.mesh.position.x += projectile.direction.x * step;
+      projectile.mesh.position.y += projectile.direction.y * step;
+      projectile.mesh.position.z += projectile.direction.z * step;
+      projectile.lifetime -= elapsedMs;
 
       if (projectile.type === "grenade") {
-        projectile.direction.y -= 0.01;
+        projectile.direction.y -= 0.01 * frameScale;
       }
 
       // Re-read after movement.
@@ -898,5 +912,36 @@ export class WeaponsSystem {
     }
     this.bus.emit(GameEvents.WEAPON_UPGRADED, { type, level: w.level, damage: w.damage });
     return true;
+  }
+
+  dispose(): void {
+    if (this.mouseDownHandler) window.removeEventListener("mousedown", this.mouseDownHandler);
+    if (this.mouseUpHandler) window.removeEventListener("mouseup", this.mouseUpHandler);
+    if (this.wheelHandler) window.removeEventListener("wheel", this.wheelHandler);
+    if (this.keyHandler) window.removeEventListener("keydown", this.keyHandler);
+    this.mouseDownHandler = null;
+    this.mouseUpHandler = null;
+    this.wheelHandler = null;
+    this.keyHandler = null;
+    this.isFiring = false;
+
+    for (const projectile of this.projectiles) {
+      try { projectile.mesh.dispose(); } catch {}
+    }
+    this.projectiles = [];
+    for (const mat of this.projectileMatCache.values()) {
+      try { mat.dispose(); } catch {}
+    }
+    this.projectileMatCache.clear();
+    if (this.trackingMissileNoseMat) {
+      try { this.trackingMissileNoseMat.dispose(); } catch {}
+      this.trackingMissileNoseMat = null;
+    }
+    this.onAmmoChange = null;
+    this.onWeaponChange = null;
+    this.aimOriginProvider = null;
+    this.vehicleAimProvider = null;
+    this.enemyTargetProvider = null;
+    this.specialFireHandlers.clear();
   }
 }

@@ -75,6 +75,7 @@ import { CharacterEditor, refreshEnemyStyleOverrides } from "./CharacterEditor";
 import AuthUI from "./AuthUI";
 
 type GamePhase = "auth" | "menu" | "playing" | "paused" | "gameover";
+const MAX_FRAME_DELTA_MS = 100;
 
 // One source of truth for the SPECIALS-tab unlocks. Used both for
 // affordability checks in `specialsList` and for charging in
@@ -609,9 +610,7 @@ export const Game: React.FC = () => {
         megaCannonRef.current = megaCannon;
         megaCannon.setDamageRouter(() => { /* replaced once render loop starts */ });
         // Initial no-op router so that even an attack pressed before the
-        // first render frame uses the routed code path (the real router
-        // is reassigned every frame inside the render loop, where all the
-        // enemy-tracking systems are available).
+        // render loop is wired uses the routed code path.
         beamSabre.setDamageRouter(() => { /* replaced once render loop starts */ });
         // Wire the dash → slash chain. The Beam Sabre asks the player how
         // long ago the boost-dash button was pressed; if it's recent, the
@@ -1417,11 +1416,14 @@ export const Game: React.FC = () => {
         });
 
         const enemyHealthBars = new EnemyHealthBarSystem(scene, engine.getCamera());
+        const healthBarEnemyScratch: EnemyLike[] = [];
         enemyHealthBars.setEnemyProvider(() => {
           const ground: EnemyLike[] = enemySystem.getActiveEnemies();
           const aerial: EnemyLike[] = aerialEnemySystem.getActiveUnits();
           const baseUnits: EnemyLike[] = enemyBaseSystem.getEnemyLikes();
-          return ground.concat(aerial).concat(baseUnits);
+          healthBarEnemyScratch.length = 0;
+          healthBarEnemyScratch.push(...ground, ...aerial, ...baseUnits);
+          return healthBarEnemyScratch;
         });
         enemyHealthBarsRef.current = enemyHealthBars;
 
@@ -2144,13 +2146,46 @@ export const Game: React.FC = () => {
           showMessage("FLIGHT MODE DEACTIVATED", 1000);
         });
 
+        const isPropMeta = (m: unknown): m is PropHitboxMetadata =>
+          !!m && typeof m === "object" && (m as PropHitboxMetadata).isProp === true;
+
+        const routeHit = (mesh: BABYLON.AbstractMesh, dmg: number) => {
+          const meta = mesh.metadata;
+          if (isPropMeta(meta)) {
+            meta.damageable.takeDamage({
+              amount: dmg,
+              damageType: DamageType.Kinetic,
+              hitPoint: mesh.getAbsolutePosition().clone(),
+            });
+            return;
+          }
+          if (miningSystem.damageNode(mesh, dmg)) return;
+          if (enemyBaseSystem.damageStructure(mesh, dmg)) {
+            aerialEnemySystem.engage();
+            return;
+          }
+          if (aerialEnemySystem.damageEnemy(mesh as BABYLON.Mesh, dmg)) {
+            aerialEnemySystem.engage();
+            return;
+          }
+          enemySystem.damageEnemy(mesh as BABYLON.Mesh, dmg);
+        };
+
+        beamSabre.setDamageRouter(routeHit);
+        meleeArsenal.setDamageRouter(routeHit);
+        megaCannon.setDamageRouter(routeHit);
+
         let lastTime = performance.now();
         let waveTimer = 0;
-        let uiThrottleTimer = 0;
+        let mapThrottleTimer = 0;
+        let hudThrottleTimer = 0;
+        let inventoryThrottleTimer = 0;
+        const enemyMeshScratch: BABYLON.Mesh[] = [];
+        const playerPositionScratch = new BABYLON.Vector3();
 
         engine.start(() => {
           const now = performance.now();
-          const deltaTime = now - lastTime;
+          const deltaTime = Math.min(now - lastTime, MAX_FRAME_DELTA_MS);
           lastTime = now;
           const dt = deltaTime / 1000;
 
@@ -2163,7 +2198,7 @@ export const Game: React.FC = () => {
           // Amplify weapons while mounted in a vehicle (1.5x size/damage/explosion).
           const mounted = player.isMounted();
           weapons.setVehicleMode(mounted);
-          const playerPos = player.getPosition();
+          const playerPos = player.copyPositionToRef(playerPositionScratch);
 
           combatSystem.update(dt);
 
@@ -2172,37 +2207,16 @@ export const Game: React.FC = () => {
           const miningMeshes = miningSystem.getActiveMeshes();
           const baseMeshes = enemyBaseSystem.getActiveMeshes();
           const propMeshes = propSystem.getHitboxMeshes();
-          const enemyMeshes = groundEnemyMeshes.concat(aerialMeshes).concat(miningMeshes).concat(baseMeshes).concat(propMeshes);
-          const hits = weapons.update(enemyMeshes);
-
-          const isPropMeta = (m: unknown): m is PropHitboxMetadata =>
-            !!m && typeof m === "object" && (m as PropHitboxMetadata).isProp === true;
-
-          const routeHit = (mesh: BABYLON.AbstractMesh, dmg: number) => {
-            // Props use the standard mesh.metadata.damageable interface
-            const meta = mesh.metadata;
-            if (isPropMeta(meta)) {
-              meta.damageable.takeDamage({
-                amount: dmg,
-                damageType: DamageType.Kinetic,
-                hitPoint: mesh.getAbsolutePosition().clone(),
-              });
-              return;
-            }
-            // Try mining first (cheap), then enemy bases, then aerial, then ground.
-            // Hitting an enemy base or any aerial unit promotes the aerial
-            // squadron to full attack mode.
-            if (miningSystem.damageNode(mesh, dmg)) return;
-            if (enemyBaseSystem.damageStructure(mesh, dmg)) {
-              aerialEnemySystem.engage();
-              return;
-            }
-            if (aerialEnemySystem.damageEnemy(mesh as BABYLON.Mesh, dmg)) {
-              aerialEnemySystem.engage();
-              return;
-            }
-            enemySystem.damageEnemy(mesh as BABYLON.Mesh, dmg);
-          };
+          const enemyMeshes = enemyMeshScratch;
+          enemyMeshes.length = 0;
+          enemyMeshes.push(
+            ...groundEnemyMeshes,
+            ...aerialMeshes,
+            ...miningMeshes,
+            ...baseMeshes,
+            ...propMeshes,
+          );
+          const hits = weapons.update(enemyMeshes, dt);
 
           for (const hit of hits) {
             const modifiedDamage = armorSystem.getModifiedOutgoingDamage(hit.damage);
@@ -2225,18 +2239,15 @@ export const Game: React.FC = () => {
           // Beam Sabre damage flows through the same router so slashes and
           // energy waves correctly hurt aerial fortresses, enemy bases,
           // mining nodes and props (not just ground enemies).
-          beamSabre.setDamageRouter(routeHit);
           beamSabre.update(dt, enemyMeshes);
           // Melee Arsenal — same damage router so alt melee weapons hit
           // every damageable mesh class (enemies, aerial units, turrets,
           // bases, mining nodes, props) with no per-system gates.
-          meleeArsenal.setDamageRouter(routeHit);
           meleeArsenal.update(dt);
 
           // Mega Beam Cannon (beam + weapon combo). Routes through the same
           // hit pipeline so the missiles + Kamehameha beam damage every
           // category and engage the aerial squadron just like normal fire.
-          megaCannon.setDamageRouter(routeHit);
           const cannonHits = megaCannon.update(dt, enemyMeshes, playerPos);
           for (const hit of cannonHits) {
             // routeHit already invoked inside the system's damageRouter;
@@ -2425,49 +2436,56 @@ export const Game: React.FC = () => {
           sky.update(dt);
           multiplayer.update(dt);
 
-          mapSystem.updatePlayerPosition(playerPos);
-          const mapEnemyMeshes = enemySystem.getEnemyMeshes();
-          mapSystem.updateEnemies(mapEnemyMeshes.map(m => m.position));
-          // Bases + supply caches: snapshots refreshed each frame so the map
-          // reflects newly-cleared bases and looted caches without any extra
-          // event wiring. Both calls are O(numBases + numOpenContainers) — a
-          // few dozen entries at most — so the per-frame cost is negligible.
-          mapSystem.setEnemyBases(enemyBaseSystem.getBasePositions());
-          mapSystem.setSupplyCaches(propSystem.getOpenContainers());
-          mapSystem.setBossFortresses(enemyBaseSystem.getBossFortresses());
-          mapSystem.draw();
-          setRemotePlayerCount(multiplayer.getRemotePlayerCount());
-
-          setStats(player.getStats());
-          setPlayerUpgradeInfo(player.getPlayerUpgradeInfo());
-          if (elementalSpecialsRef.current) {
-            setElementalUpgradeInfo(elementalSpecialsRef.current.getUpgradeInfo(player.getCredits()));
+          mapThrottleTimer += dt;
+          if (mapThrottleTimer >= 0.2) {
+            mapThrottleTimer = 0;
+            mapSystem.updatePlayerPosition(playerPos);
+            const mapEnemyMeshes = enemySystem.getEnemyMeshes();
+            mapSystem.updateEnemies(mapEnemyMeshes.map(m => m.position));
+            // Bases + supply caches are UI snapshots, not gameplay inputs, so
+            // refreshing them at 5 Hz keeps the minimap responsive without
+            // rebuilding canvas markers every render frame.
+            mapSystem.setEnemyBases(enemyBaseSystem.getBasePositions());
+            mapSystem.setSupplyCaches(propSystem.getOpenContainers());
+            mapSystem.setBossFortresses(enemyBaseSystem.getBossFortresses());
+            mapSystem.draw();
           }
-          setInVehicle(mounted);
-          setEnemyCount(enemySystem.getEnemyCount());
-          setChestCount(chestSystem.getChestCount());
-          setJetpackFuel(player.getJetpackFuel());
-          setMaxJetpackFuel(player.getMaxJetpackFuel());
-          setPlayerState(player.getPlayerState());
-          setBeamSabreActive(beamSabre.active);
-          setBeamSabreLevel(beamSabre.getLevel);
-          setActiveElement(armorSystem.getActiveElement());
-          setArmorDefense(armorSystem.getTotalDefense());
-          setIsFlying(player.getIsFlying());
-          setArmorEnergy(player.getArmorEnergy());
-          setMaxArmorEnergy(player.getMaxArmorEnergy());
-          setHasFlightArmor(player.getHasFlightArmor());
-          setBuildMode(buildingSystem.isBuildMode());
-          const sel = buildingSystem.getSelectedBlockType();
-          setSelectedBlock(sel);
-          const defs = buildingSystem.getBlockDefinitions();
-          setSelectedBlockDef(sel ? defs[sel] ?? null : null);
-          setPlanMode(prefabSystem.isPlanMode());
-          setSelectedPrefabIndex(prefabSystem.getSelectedIndex());
 
-          uiThrottleTimer += dt;
-          if (uiThrottleTimer >= 0.5) {
-            uiThrottleTimer = 0;
+          hudThrottleTimer += dt;
+          if (hudThrottleTimer >= 0.1) {
+            hudThrottleTimer = 0;
+            setRemotePlayerCount(multiplayer.getRemotePlayerCount());
+            setStats(player.getStats());
+            setPlayerUpgradeInfo(player.getPlayerUpgradeInfo());
+            if (elementalSpecialsRef.current) {
+              setElementalUpgradeInfo(elementalSpecialsRef.current.getUpgradeInfo(player.getCredits()));
+            }
+            setInVehicle(mounted);
+            setEnemyCount(enemySystem.getEnemyCount());
+            setChestCount(chestSystem.getChestCount());
+            setJetpackFuel(player.getJetpackFuel());
+            setMaxJetpackFuel(player.getMaxJetpackFuel());
+            setPlayerState(player.getPlayerState());
+            setBeamSabreActive(beamSabre.active);
+            setBeamSabreLevel(beamSabre.getLevel);
+            setActiveElement(armorSystem.getActiveElement());
+            setArmorDefense(armorSystem.getTotalDefense());
+            setIsFlying(player.getIsFlying());
+            setArmorEnergy(player.getArmorEnergy());
+            setMaxArmorEnergy(player.getMaxArmorEnergy());
+            setHasFlightArmor(player.getHasFlightArmor());
+            setBuildMode(buildingSystem.isBuildMode());
+            const sel = buildingSystem.getSelectedBlockType();
+            setSelectedBlock(sel);
+            const defs = buildingSystem.getBlockDefinitions();
+            setSelectedBlockDef(sel ? defs[sel] ?? null : null);
+            setPlanMode(prefabSystem.isPlanMode());
+            setSelectedPrefabIndex(prefabSystem.getSelectedIndex());
+          }
+
+          inventoryThrottleTimer += dt;
+          if (inventoryThrottleTimer >= 0.5) {
+            inventoryThrottleTimer = 0;
             setCompanionCount(companionSystem.getCompanionCount());
             setCompanionInfo(companionSystem.getCompanions());
             const gears = inventory.getItemCount("gear");
@@ -2499,7 +2517,7 @@ export const Game: React.FC = () => {
             setDexCaughtIds(bioSystem.getDexCaughtIds());
           }
 
-          if (player.getStats().health <= 0 && !deathHandledRef.current) {
+          if (player.getHealth() <= 0 && !deathHandledRef.current) {
             deathHandledRef.current = true;
             setGamePhase("gameover");
             // Pause music so the menu/game-over screen isn't drowned in track audio.
@@ -2621,6 +2639,7 @@ export const Game: React.FC = () => {
           engineRef.current = null;
         }
         playerRef.current = null;
+        if (weaponsRef.current) { try { weaponsRef.current.dispose(); } catch {} }
         weaponsRef.current = null;
         if (enemyHealthBarsRef.current) { try { enemyHealthBarsRef.current.dispose(); } catch {} }
         enemyHealthBarsRef.current = null;
@@ -2775,7 +2794,7 @@ export const Game: React.FC = () => {
     // Without this, the stale PlayerController keeps responding to input
     // against disposed Babylon meshes, causing the post-restart freeze.
     if (playerRef.current) { try { playerRef.current.dispose(); } catch {} playerRef.current = null; }
-    weaponsRef.current = null;
+    if (weaponsRef.current) { try { weaponsRef.current.dispose(); } catch {} weaponsRef.current = null; }
     if (combatSystemRef.current) { try { combatSystemRef.current.dispose(); } catch {} combatSystemRef.current = null; }
     if (specialWeaponsRef.current) { try { specialWeaponsRef.current.dispose(); } catch {} specialWeaponsRef.current = null; }
     if (elementalSpecialsRef.current) { try { elementalSpecialsRef.current.dispose(); } catch {} elementalSpecialsRef.current = null; }
@@ -3600,6 +3619,7 @@ export const Game: React.FC = () => {
         playerRef.current.setMounted(null);
       }
       if (playerRef.current) playerRef.current.dispose();
+      if (weaponsRef.current) weaponsRef.current.dispose();
       if (combatSystemRef.current) combatSystemRef.current.dispose();
       if (specialWeaponsRef.current) specialWeaponsRef.current.dispose();
       if (elementalSpecialsRef.current) elementalSpecialsRef.current.dispose();
@@ -3609,13 +3629,15 @@ export const Game: React.FC = () => {
       if (companionRef.current) companionRef.current.dispose();
       if (capsuleRef.current) capsuleRef.current.dispose();
       if (shopRef.current) shopRef.current.dispose();
+      if (gardenRef.current) gardenRef.current.dispose();
+      if (mapRef.current) mapRef.current.dispose();
       if (buildingRef.current) buildingRef.current.dispose();
       if (prefabRef.current) prefabRef.current.dispose();
       if (pickupRef.current) pickupRef.current.dispose();
       if (bioRef.current) bioRef.current.dispose();
       if (mountainRingRef.current) { try { mountainRingRef.current.dispose(); } catch {} mountainRingRef.current = null; }
       if (alienFoliageRef.current) { try { alienFoliageRef.current.dispose(); } catch {} alienFoliageRef.current = null; }
-    if (earthFoliageRef.current) { try { earthFoliageRef.current.dispose(); } catch {} earthFoliageRef.current = null; }
+      if (earthFoliageRef.current) { try { earthFoliageRef.current.dispose(); } catch {} earthFoliageRef.current = null; }
       if (vehicleRef.current) vehicleRef.current.dispose();
       if (propSystemRef.current) propSystemRef.current.dispose();
       atvHitCooldownRef.current.clear();

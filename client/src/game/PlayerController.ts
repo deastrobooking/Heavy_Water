@@ -230,6 +230,7 @@ export class PlayerController implements IDamageable {
   private armorEnergyRegen: number = 25;
 
   private hasFlightArmor: boolean = false;
+  private flightEntryTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Superman Flight — premium SPECIALS unlock layered ON TOP of the
   // standard flight-armor mode. Triggered by pressing KeyL + Space
@@ -498,6 +499,10 @@ export class PlayerController implements IDamageable {
       window.removeEventListener("keyup", this.keyUpHandler);
       this.keyUpHandler = null;
     }
+    if (this.flightEntryTimer) {
+      clearTimeout(this.flightEntryTimer);
+      this.flightEntryTimer = null;
+    }
     if (this.animationSystem) {
       this.animationSystem.dispose();
     }
@@ -549,7 +554,9 @@ export class PlayerController implements IDamageable {
       } else if (this.jumpCount === 3 && this.hasFlightArmor) {
         this.velocity.y = this.tripleJumpLaunchForce;
         console.log("[PlayerController] Jump 3 - LAUNCH into sky!");
-        setTimeout(() => {
+        if (this.flightEntryTimer) clearTimeout(this.flightEntryTimer);
+        this.flightEntryTimer = setTimeout(() => {
+          this.flightEntryTimer = null;
           if (!this.isGrounded && this.hasFlightArmor && this.armorEnergy > 0) {
             this.enterFlightMode();
           }
@@ -1855,8 +1862,16 @@ export class PlayerController implements IDamageable {
     return { ...this.stats };
   }
 
+  getHealth(): number {
+    return this.stats.health;
+  }
+
   getPosition(): BABYLON.Vector3 {
     return this.meshRoot.position.clone();
+  }
+
+  copyPositionToRef(ref: BABYLON.Vector3): BABYLON.Vector3 {
+    return ref.copyFrom(this.meshRoot.position);
   }
 
   getRotation(): BABYLON.Vector3 {
