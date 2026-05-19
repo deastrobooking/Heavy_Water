@@ -51,8 +51,12 @@ export class MichiganTerrainSystem {
   private spawnedAerialUnits: AerialUnit[] = [];
   private observer: BABYLON.Observer<BABYLON.Scene> | null = null;
   private previousEnemyMax: number | null = null;
+  private terrainContentSeeded = false;
 
-  private static readonly HEIGHTMAP_URL = "/textures/miheightmap.png";
+  private static readonly HEIGHTMAP_URLS = [
+    "/textures/miheightmap.png",
+    "/textures/MIHEIGHTMAP.PNG",
+  ];
   private static readonly GRASS_TEXTURE_URL = "/textures/grass.png";
   private static readonly CENTER = new BABYLON.Vector3(3000, 0, 1500);
   private static readonly TERRAIN_WIDTH = 1800;
@@ -191,21 +195,13 @@ export class MichiganTerrainSystem {
     const terrainMat = this.createTerrainMaterial();
     this.terrainMaterial = terrainMat;
 
-    const terrain = BABYLON.MeshBuilder.CreateGroundFromHeightMap(
+    const terrain = BABYLON.MeshBuilder.CreateGround(
       "miTerrain",
-      MichiganTerrainSystem.HEIGHTMAP_URL,
       {
         width: MichiganTerrainSystem.TERRAIN_WIDTH,
         height: MichiganTerrainSystem.TERRAIN_DEPTH,
         subdivisions: MichiganTerrainSystem.SUBDIVISIONS,
-        minHeight: MichiganTerrainSystem.MIN_HEIGHT,
-        maxHeight: MichiganTerrainSystem.MAX_HEIGHT,
-        colorFilter: MichiganTerrainSystem.HEIGHT_COLOR_FILTER,
-        onReady: (mesh) => {
-          mesh.refreshBoundingInfo();
-          mesh.isPickable = true;
-          mesh.receiveShadows = true;
-        },
+        updatable: true,
       },
       this.scene,
     );
@@ -216,6 +212,9 @@ export class MichiganTerrainSystem {
     terrain.receiveShadows = true;
     this.terrain = terrain;
 
+    // Start with shaped fallback land immediately so the player never sees
+    // a flat blue placeholder while the image request resolves.
+    this.useProceduralHeightFallback(terrainMat, false);
     this.loadHeightmapData(terrainMat);
   }
 
@@ -280,22 +279,36 @@ export class MichiganTerrainSystem {
     this.ownedMaterials.push(mat);
   }
 
-  private loadHeightmapData(terrainMat: TerrainMaterial): void {
+  private loadHeightmapData(terrainMat: TerrainMaterial, urlIndex: number = 0): void {
+    const url = MichiganTerrainSystem.HEIGHTMAP_URLS[urlIndex];
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
       if (this.disposed) return;
       const width = img.naturalWidth || img.width;
       const height = img.naturalHeight || img.height;
-      if (width <= 0 || height <= 0) return;
+      if (width <= 0 || height <= 0) {
+        this.useProceduralHeightFallback(terrainMat);
+        return;
+      }
 
       const canvas = document.createElement("canvas");
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.drawImage(img, 0, 0, width, height);
-      const source = ctx.getImageData(0, 0, width, height);
+      if (!ctx) {
+        this.useProceduralHeightFallback(terrainMat);
+        return;
+      }
+      let source: ImageData;
+      try {
+        ctx.drawImage(img, 0, 0, width, height);
+        source = ctx.getImageData(0, 0, width, height);
+      } catch (err) {
+        console.warn("[MichiganTerrainSystem] Could not sample heightmap pixels; using procedural fallback", err);
+        this.useProceduralHeightFallback(terrainMat);
+        return;
+      }
       const values = new Float32Array(width * height);
 
       const mix = new BABYLON.DynamicTexture(
@@ -314,8 +327,13 @@ export class MichiganTerrainSystem {
           source.data[j + 1],
           source.data[j + 2],
         );
-        const worldHeight = MichiganTerrainSystem.MIN_HEIGHT +
+        let worldHeight = MichiganTerrainSystem.MIN_HEIGHT +
           luminance * (MichiganTerrainSystem.MAX_HEIGHT - MichiganTerrainSystem.MIN_HEIGHT);
+        const px = i % width;
+        const py = Math.floor(i / width);
+        const localX = (px / Math.max(1, width - 1) - 0.5) * MichiganTerrainSystem.TERRAIN_WIDTH;
+        const localZ = ((1 - py / Math.max(1, height - 1)) - 0.5) * MichiganTerrainSystem.TERRAIN_DEPTH;
+        worldHeight = this.applySpawnClearing(localX, localZ, worldHeight);
         values[i] = worldHeight;
         this.writeTierMixPixel(mixImage.data, j, worldHeight);
       }
@@ -324,17 +342,128 @@ export class MichiganTerrainSystem {
       mix.update(false);
       this.configureMixTexture(mix);
       terrainMat.mixTexture = mix;
-      this.heightData = { width, height, values };
       this.ownedTextures.push(mix);
-      this.spawnRareWildlife();
-      this.buildPowerBlooms();
-      this.buildWildsOutposts();
-      this.spawnWildsDangerLayer();
+      this.finishHeightData({ width, height, values }, `heightmap ${url}`);
     };
     img.onerror = () => {
-      console.warn("[MichiganTerrainSystem] Could not load heightmap data for material mix");
+      if (urlIndex + 1 < MichiganTerrainSystem.HEIGHTMAP_URLS.length) {
+        this.loadHeightmapData(terrainMat, urlIndex + 1);
+        return;
+      }
+      console.warn("[MichiganTerrainSystem] Could not load heightmap image; using procedural fallback terrain");
+      this.useProceduralHeightFallback(terrainMat);
     };
-    img.src = MichiganTerrainSystem.HEIGHTMAP_URL;
+    img.src = url;
+  }
+
+  private finishHeightData(data: HeightData, sourceLabel: string): void {
+    if (this.disposed) return;
+    this.heightData = data;
+    this.applyHeightDataToTerrain(data);
+    this.seedTerrainContentOnce();
+    console.log(`[MichiganTerrainSystem] Terrain ready from ${sourceLabel}`);
+    this.bus.emit(GameEvents.UI_MESSAGE, `MI WILDS TERRAIN READY - ${sourceLabel.toUpperCase()}`);
+  }
+
+  private seedTerrainContentOnce(): void {
+    if (this.terrainContentSeeded) return;
+    this.terrainContentSeeded = true;
+    this.spawnRareWildlife();
+    this.buildPowerBlooms();
+    this.buildWildsOutposts();
+    this.spawnWildsDangerLayer();
+  }
+
+  private applyHeightDataToTerrain(data: HeightData): void {
+    const terrain = this.terrain;
+    if (!terrain) return;
+    const positions = terrain.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+    const indices = terrain.getIndices();
+    if (!positions || !indices) return;
+
+    for (let i = 0; i < positions.length; i += 3) {
+      const localX = positions[i];
+      const localZ = positions[i + 2];
+      const u = (localX + MichiganTerrainSystem.TERRAIN_WIDTH / 2) / MichiganTerrainSystem.TERRAIN_WIDTH;
+      const v = 1 - ((localZ + MichiganTerrainSystem.TERRAIN_DEPTH / 2) / MichiganTerrainSystem.TERRAIN_DEPTH);
+      positions[i + 1] = MichiganTerrainSystem.sampleHeightData(data, u, v);
+    }
+
+    const normals: number[] = [];
+    BABYLON.VertexData.ComputeNormals(positions, indices, normals);
+    terrain.updateVerticesData(BABYLON.VertexBuffer.PositionKind, positions);
+    terrain.setVerticesData(BABYLON.VertexBuffer.NormalKind, normals);
+    terrain.refreshBoundingInfo();
+  }
+
+  private useProceduralHeightFallback(terrainMat: TerrainMaterial, seedContent: boolean = true): void {
+    const width = 257;
+    const height = 193;
+    const values = new Float32Array(width * height);
+    const mix = new BABYLON.DynamicTexture(
+      "miTerrainProceduralMix",
+      { width, height },
+      this.scene,
+      false,
+    );
+    const mixCtx = mix.getContext();
+    const mixImage = new ImageData(width, height);
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const u = x / Math.max(1, width - 1);
+        const v = y / Math.max(1, height - 1);
+        const localX = (u - 0.5) * MichiganTerrainSystem.TERRAIN_WIDTH;
+        const localZ = ((1 - v) - 0.5) * MichiganTerrainSystem.TERRAIN_DEPTH;
+        const h = this.proceduralHeight(localX, localZ);
+        const idx = y * width + x;
+        values[idx] = h;
+        this.writeTierMixPixel(mixImage.data, idx * 4, h);
+      }
+    }
+
+    mixCtx.putImageData(mixImage, 0, 0);
+    mix.update(false);
+    this.configureMixTexture(mix);
+    terrainMat.mixTexture = mix;
+    this.ownedTextures.push(mix);
+    const data = { width, height, values };
+    if (seedContent) {
+      this.finishHeightData(data, "procedural fallback");
+    } else {
+      this.heightData = data;
+      this.applyHeightDataToTerrain(data);
+    }
+  }
+
+  private applySpawnClearing(localX: number, localZ: number, worldHeight: number): number {
+    const dist = Math.sqrt(localX * localX + localZ * localZ);
+    const landingPad = 1 - MichiganTerrainSystem.smoothstep(55, 165, dist);
+    if (landingPad <= 0) return worldHeight;
+    const dryHeight = MichiganTerrainSystem.SEA_LEVEL + 7.5;
+    return Math.max(worldHeight, BABYLON.Scalar.Lerp(worldHeight, dryHeight, landingPad));
+  }
+
+  private proceduralHeight(localX: number, localZ: number): number {
+    const nx = localX / (MichiganTerrainSystem.TERRAIN_WIDTH / 2);
+    const nz = localZ / (MichiganTerrainSystem.TERRAIN_DEPTH / 2);
+    const radial = Math.sqrt(nx * nx + nz * nz);
+    const rolling =
+      Math.sin(localX * 0.009) * 7.0 +
+      Math.cos(localZ * 0.012) * 5.5 +
+      Math.sin((localX - localZ) * 0.006) * 6.0 +
+      (MichiganTerrainSystem.noise2(Math.floor(localX / 32), Math.floor(localZ / 32), 77) - 0.5) * 7.0;
+    const foothills = MichiganTerrainSystem.smoothstep(0.42, 1.0, radial) * 42;
+    const westernMarsh = MichiganTerrainSystem.gaussian(localX + 455, localZ - 120, 185) * -28;
+    const southernLake = MichiganTerrainSystem.gaussian(localX - 120, localZ + 420, 230) * -24;
+    const peakA = MichiganTerrainSystem.gaussian(localX - 520, localZ + 210, 210) * 42;
+    const peakB = MichiganTerrainSystem.gaussian(localX + 660, localZ + 350, 190) * 34;
+    const raw = 8 + rolling + foothills + westernMarsh + southernLake + peakA + peakB;
+    return BABYLON.Scalar.Clamp(
+      this.applySpawnClearing(localX, localZ, raw),
+      MichiganTerrainSystem.MIN_HEIGHT,
+      MichiganTerrainSystem.MAX_HEIGHT,
+    );
   }
 
   private sampleTerrainPosition(dx: number, dz: number, lift: number = 0.6): BABYLON.Vector3 {
@@ -802,6 +931,29 @@ export class MichiganTerrainSystem {
   private static noise2(x: number, y: number, seed: number): number {
     const n = Math.sin(x * 12.9898 + y * 78.233 + seed * 37.719) * 43758.5453;
     return n - Math.floor(n);
+  }
+
+  private static sampleHeightData(data: HeightData, u: number, v: number): number {
+    const px = BABYLON.Scalar.Clamp(u, 0, 1) * (data.width - 1);
+    const py = BABYLON.Scalar.Clamp(v, 0, 1) * (data.height - 1);
+    const x0 = Math.floor(px);
+    const y0 = Math.floor(py);
+    const x1 = Math.min(data.width - 1, x0 + 1);
+    const y1 = Math.min(data.height - 1, y0 + 1);
+    const tx = px - x0;
+    const ty = py - y0;
+
+    const h00 = data.values[y0 * data.width + x0];
+    const h10 = data.values[y0 * data.width + x1];
+    const h01 = data.values[y1 * data.width + x0];
+    const h11 = data.values[y1 * data.width + x1];
+    const hx0 = BABYLON.Scalar.Lerp(h00, h10, tx);
+    const hx1 = BABYLON.Scalar.Lerp(h01, h11, tx);
+    return BABYLON.Scalar.Lerp(hx0, hx1, ty);
+  }
+
+  private static gaussian(x: number, z: number, radius: number): number {
+    return Math.exp(-(x * x + z * z) / Math.max(1, radius * radius));
   }
 
   private static smoothstep(edge0: number, edge1: number, x: number): number {
