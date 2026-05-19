@@ -144,6 +144,10 @@ const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
 };
 
 export class EnemyUnit implements IDamageable {
+  // Shared scratch Vector3s — safe because update() is fully synchronous
+  // (no re-entrant calls from within a single FSM tick).
+  private static readonly _dirScratch    = new BABYLON.Vector3();
+  private static readonly _lookAtScratch = new BABYLON.Vector3();
   mesh: BABYLON.Mesh;
   type: EnemyType;
   health: number;
@@ -355,9 +359,9 @@ export class EnemyUnit implements IDamageable {
 
   private updatePatrol(dt: number, playerPos: BABYLON.Vector3): number {
     const frameScale = enemyFrameScale(dt);
-    const dir = this.patrolTarget.subtract(this.mesh.position);
-    dir.y = 0;
-    const dist = dir.length();
+    const dx = this.patrolTarget.x - this.mesh.position.x;
+    const dz = this.patrolTarget.z - this.mesh.position.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
     if (dist < 1) {
       this.fsm.changeState("idle");
       this.idleTimer = 1 + Math.random() * 2;
@@ -365,10 +369,11 @@ export class EnemyUnit implements IDamageable {
     }
 
     const step = Math.min(dist, this.config.patrolSpeed * frameScale);
-    dir.scaleInPlace(1 / dist);
-    this.mesh.position.x += dir.x * step;
-    this.mesh.position.z += dir.z * step;
-    this.faceDirection(dir);
+    const inv  = step / dist;
+    this.mesh.position.x += dx * inv;
+    this.mesh.position.z += dz * inv;
+    EnemyUnit._dirScratch.set(dx, 0, dz);
+    this.faceDirection(EnemyUnit._dirScratch);
     this.checkForPlayer(playerPos);
 
     if (this.type === "drone") {
@@ -382,8 +387,10 @@ export class EnemyUnit implements IDamageable {
 
   private updateChase(dt: number, playerPos: BABYLON.Vector3): number {
     const frameScale = enemyFrameScale(dt);
-    const dir = playerPos.subtract(this.mesh.position);
-    const dist = dir.length();
+    const cdx = playerPos.x - this.mesh.position.x;
+    const cdy = playerPos.y - this.mesh.position.y;
+    const cdz = playerPos.z - this.mesh.position.z;
+    const dist = Math.sqrt(cdx * cdx + cdy * cdy + cdz * cdz);
 
     if (this.type === "commander") {
       // Only chase upward when the player is ACTUALLY airborne. Without
@@ -410,15 +417,14 @@ export class EnemyUnit implements IDamageable {
       return 0;
     }
 
-    const moveDir = dir.clone();
-    moveDir.y = 0;
-    const horizDist = moveDir.length();
+    const horizDist = Math.sqrt(cdx * cdx + cdz * cdz);
     if (horizDist > 0.001) {
       const step = Math.min(horizDist, this.config.chaseSpeed * frameScale);
-      moveDir.scaleInPlace(1 / horizDist);
-      this.mesh.position.x += moveDir.x * step;
-      this.mesh.position.z += moveDir.z * step;
-      this.faceDirection(moveDir);
+      const inv  = step / horizDist;
+      this.mesh.position.x += cdx * inv;
+      this.mesh.position.z += cdz * inv;
+      EnemyUnit._dirScratch.set(cdx, 0, cdz);
+      this.faceDirection(EnemyUnit._dirScratch);
     }
 
     if (this.type === "drone") {
@@ -451,7 +457,12 @@ export class EnemyUnit implements IDamageable {
       return 0;
     }
 
-    this.faceDirection(playerPos.subtract(this.mesh.position));
+    EnemyUnit._dirScratch.set(
+      playerPos.x - this.mesh.position.x,
+      playerPos.y - this.mesh.position.y,
+      playerPos.z - this.mesh.position.z,
+    );
+    this.faceDirection(EnemyUnit._dirScratch);
 
     if (this.attackTimer <= 0) {
       this.attackTimer = this.config.attackCooldown;
@@ -504,25 +515,22 @@ export class EnemyUnit implements IDamageable {
     const heightDiff = this.targetFlightHeight - this.mesh.position.y;
     this.mesh.position.y += heightDiff * scaledFrameLerp(0.08, frameScale);
 
-    const dir = playerPos.subtract(this.mesh.position);
-    const horizDist = new BABYLON.Vector3(dir.x, 0, dir.z).length();
+    const fdx = playerPos.x - this.mesh.position.x;
+    const fdz = playerPos.z - this.mesh.position.z;
+    const horizDist = Math.sqrt(fdx * fdx + fdz * fdz);
 
     if (Math.abs(heightDiff) < 1) {
       this.fsm.changeState("hovering");
       return 0;
     }
 
-    if (horizDist > 5) {
-      const moveDir = dir.clone();
-      moveDir.y = 0;
-      const moveDist = moveDir.length();
-      if (moveDist > 0.001) {
-        const step = Math.min(moveDist, this.config.chaseSpeed * 1.5 * frameScale);
-        moveDir.scaleInPlace(1 / moveDist);
-        this.mesh.position.x += moveDir.x * step;
-        this.mesh.position.z += moveDir.z * step;
-        this.faceDirection(moveDir);
-      }
+    if (horizDist > 5 && horizDist > 0.001) {
+      const step = Math.min(horizDist, this.config.chaseSpeed * 1.5 * frameScale);
+      const inv  = step / horizDist;
+      this.mesh.position.x += fdx * inv;
+      this.mesh.position.z += fdz * inv;
+      EnemyUnit._dirScratch.set(fdx, 0, fdz);
+      this.faceDirection(EnemyUnit._dirScratch);
     }
 
     return 0;
@@ -532,8 +540,13 @@ export class EnemyUnit implements IDamageable {
     const frameScale = enemyFrameScale(dt);
     this.mesh.position.y += Math.sin(Date.now() * 0.003) * 0.03 * frameScale;
 
-    const dir = playerPos.subtract(this.mesh.position);
-    const dist = dir.length();
+    const ds = EnemyUnit._dirScratch;
+    ds.set(
+      playerPos.x - this.mesh.position.x,
+      playerPos.y - this.mesh.position.y,
+      playerPos.z - this.mesh.position.z,
+    );
+    const dist = ds.length();
 
     if (dist <= this.config.attackRange * 1.5) {
       this.fsm.changeState("attack");
@@ -541,15 +554,13 @@ export class EnemyUnit implements IDamageable {
       return 0;
     }
 
-    const moveDir = dir.clone();
-    const moveDist = moveDir.length();
-    if (moveDist > 0.001) {
-      const step = Math.min(moveDist, this.config.chaseSpeed * 1.2 * frameScale);
-      moveDir.scaleInPlace(1 / moveDist);
-      this.mesh.position.x += moveDir.x * step;
-      this.mesh.position.y += moveDir.y * step;
-      this.mesh.position.z += moveDir.z * step;
-      this.faceDirection(dir);
+    if (dist > 0.001) {
+      const step = Math.min(dist, this.config.chaseSpeed * 1.2 * frameScale);
+      const inv  = step / dist;
+      this.mesh.position.x += ds.x * inv;
+      this.mesh.position.y += ds.y * inv;
+      this.mesh.position.z += ds.z * inv;
+      this.faceDirection(ds);
     }
 
     if (dist > this.config.chaseRange) {
@@ -584,11 +595,13 @@ export class EnemyUnit implements IDamageable {
       return false;
     }
 
-    const toPlayer = playerPos.subtract(this.mesh.position);
-    toPlayer.y = 0;
-    toPlayer.normalize();
+    const tpDx = playerPos.x - this.mesh.position.x;
+    const tpDz = playerPos.z - this.mesh.position.z;
+    const tpLen = Math.sqrt(tpDx * tpDx + tpDz * tpDz) || 1;
+    const tpNx = tpDx / tpLen;
+    const tpNz = tpDz / tpLen;
     const side = Math.random() > 0.5 ? 1 : -1;
-    this.dodgeDirection = new BABYLON.Vector3(-toPlayer.z * side, 0, toPlayer.x * side);
+    this.dodgeDirection = new BABYLON.Vector3(-tpNz * side, 0, tpNx * side);
     this.dodgeTimer = 0.3;
     this.dodgeCooldown = 2.0;
     this.fsm.changeState("dodging");
@@ -613,9 +626,12 @@ export class EnemyUnit implements IDamageable {
 
   private faceDirection(dir: BABYLON.Vector3): void {
     if (dir.lengthSquared() < 0.001) return;
-    const target = this.mesh.position.add(dir);
-    target.y = this.mesh.position.y;
-    this.mesh.lookAt(target);
+    EnemyUnit._lookAtScratch.set(
+      this.mesh.position.x + dir.x,
+      this.mesh.position.y,
+      this.mesh.position.z + dir.z,
+    );
+    this.mesh.lookAt(EnemyUnit._lookAtScratch);
   }
 
   private getRandomPatrolPoint(): BABYLON.Vector3 {
@@ -746,6 +762,7 @@ export class EnemyUnit implements IDamageable {
       credits: this.config.credits,
       experience: this.config.experienceValue,
       position: this.mesh.position.clone(),
+      meshUniqueId: this.mesh.uniqueId,
     };
 
     if (this.type === "commander") {

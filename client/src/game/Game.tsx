@@ -2122,6 +2122,8 @@ export const Game: React.FC = () => {
           player.addExperience(data.experience);
           totalKillsLocal += 1;
           showMessage(`+${data.credits} CREDITS | +${data.experience} XP`, 1000);
+          // Remove dead enemy from ATV cooldown map so it never grows unbounded.
+          if (data?.meshUniqueId != null) atvHitCooldownRef.current.delete(data.meshUniqueId);
         });
 
         bus.on(GameEvents.PLAYER_DODGE, () => {
@@ -2174,6 +2176,11 @@ export const Game: React.FC = () => {
         beamSabre.setDamageRouter(routeHit);
         meleeArsenal.setDamageRouter(routeHit);
         megaCannon.setDamageRouter(routeHit);
+
+        // Both melee systems now query a curated list instead of scanning
+        // the full scene.meshes array on every slash/swing/special hit check.
+        beamSabre.setHittableMeshProvider(() => enemyMeshScratch);
+        meleeArsenal.setHittableMeshProvider(() => enemyMeshScratch);
 
         let lastTime = performance.now();
         let waveTimer = 0;

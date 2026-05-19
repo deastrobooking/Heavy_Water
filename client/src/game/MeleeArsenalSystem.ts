@@ -165,6 +165,15 @@ export class MeleeArsenalSystem {
   setAimOriginProvider(fn: () => BABYLON.Vector3): void { this.aimOriginProvider = fn; }
   setDamageRouter(fn: (mesh: BABYLON.AbstractMesh, dmg: number) => void): void { this.damageRouter = fn; }
 
+  /** Curated list provider — avoids scanning scene.meshes on every swing/special. */
+  private hittableMeshProvider: (() => BABYLON.AbstractMesh[]) | null = null;
+  setHittableMeshProvider(fn: () => BABYLON.AbstractMesh[]): void {
+    this.hittableMeshProvider = fn;
+  }
+  private getTargets(): BABYLON.AbstractMesh[] {
+    return this.hittableMeshProvider ? this.hittableMeshProvider() : this.scene.meshes;
+  }
+
   /** Schedule a deferred callback that auto-prunes its own handle from
    *  `w.timers` when it fires. Replaces the leaky pattern of pushing
    *  every setTimeout handle into the array without ever removing it,
@@ -597,7 +606,7 @@ export class MeleeArsenalSystem {
     const dmg = cfg.baseDamage * dmgMul;
 
     const hits: { mesh: BABYLON.AbstractMesh; dist: number }[] = [];
-    for (const mesh of this.scene.meshes) {
+    for (const mesh of this.getTargets()) {
       if (!this.isHittable(mesh)) continue;
       const toMesh = mesh.position.subtract(aim);
       const dist = toMesh.length();
@@ -679,7 +688,7 @@ export class MeleeArsenalSystem {
     const cfg = w.config;
     const aim = this.getAimOrigin();
     const candidates: { mesh: BABYLON.AbstractMesh; dist: number }[] = [];
-    for (const mesh of this.scene.meshes) {
+    for (const mesh of this.getTargets()) {
       if (!this.isHittable(mesh)) continue;
       const dist = BABYLON.Vector3.Distance(aim, mesh.position);
       if (dist < 18) candidates.push({ mesh, dist });
@@ -763,7 +772,7 @@ export class MeleeArsenalSystem {
     let n = 0;
     const tickFn = () => {
       const here = this.getAimOrigin();
-      for (const mesh of this.scene.meshes) {
+      for (const mesh of this.getTargets()) {
         if (!this.isHittable(mesh)) continue;
         const meshHitR = (mesh.metadata as any)?.hitRadius ?? 1.5;
         const dist = BABYLON.Vector3.Distance(here, mesh.position);
@@ -823,7 +832,7 @@ export class MeleeArsenalSystem {
         const cfg = w.config;
         const dmg = cfg.baseDamage * this.levelDamageMul(w) * 0.7;
         const now = performance.now();
-        for (const mesh of this.scene.meshes) {
+        for (const mesh of this.getTargets()) {
           if (!this.isHittable(mesh)) continue;
           const dist = BABYLON.Vector3.Distance(here, mesh.position);
           if (Math.abs(dist - RING_R) < TOL) {
@@ -858,7 +867,7 @@ export class MeleeArsenalSystem {
         w.shockRingMesh.scaling.set(radius, 1, radius);
         const cfg = w.config;
         const dmg = cfg.baseDamage * this.levelDamageMul(w) * 1.4;
-        for (const mesh of this.scene.meshes) {
+        for (const mesh of this.getTargets()) {
           if (!this.isHittable(mesh)) continue;
           if (w.shockRingHits.has(mesh)) continue;
           // Vertical gate so a ground shockwave can't hit aerial targets

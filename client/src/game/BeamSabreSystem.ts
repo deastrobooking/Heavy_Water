@@ -57,6 +57,17 @@ export class BeamSabreSystem {
     return this.aimOriginProvider ? this.aimOriginProvider() : this.camera.position;
   }
 
+  /** Curated list provider — avoids scanning scene.meshes (O(all meshes))
+   *  on every slash/spin/wave hit check. Game.tsx wires this to the same
+   *  enemyMeshScratch list used by WeaponsSystem. */
+  private hittableMeshProvider: (() => BABYLON.AbstractMesh[]) | null = null;
+  setHittableMeshProvider(fn: () => BABYLON.AbstractMesh[]): void {
+    this.hittableMeshProvider = fn;
+  }
+  private getTargets(): BABYLON.AbstractMesh[] {
+    return this.hittableMeshProvider ? this.hittableMeshProvider() : this.scene.meshes;
+  }
+
   private sabreMesh: BABYLON.Mesh | null = null;
   private energyWaves: EnergyWave[] = [];
   private bus: EventBus;
@@ -370,7 +381,7 @@ export class BeamSabreSystem {
     const hitRadius = 7 * giantMul;
     const dmg = this.sabre.damage * giantMul;
 
-    const list = targets && targets.length ? targets : this.scene.meshes;
+    const list = targets && targets.length ? targets : this.getTargets();
     for (const mesh of list) {
       if (!this.isHittable(mesh)) continue;
 
@@ -577,7 +588,7 @@ export class BeamSabreSystem {
     const hitR = 12 * giantMul;
     const dmg = this.sabre.damage * 2.0 * giantMul;
 
-    for (const mesh of this.scene.meshes) {
+    for (const mesh of this.getTargets()) {
       if (!this.isHittable(mesh)) continue;
       const dist = BABYLON.Vector3.Distance(origin, mesh.position);
       const meshHitR = (mesh.metadata as any)?.hitRadius ?? 1.5;
@@ -654,7 +665,7 @@ export class BeamSabreSystem {
       const origin = this.getAimOrigin().add(forward.scale(3.2 * giantMul));
       const hitRadius = 7 * giantMul * radiusMul;
       const dmg = this.sabre.damage * giantMul * dmgMul;
-      for (const mesh of this.scene.meshes) {
+      for (const mesh of this.getTargets()) {
         if (!this.isHittable(mesh)) continue;
         const dist = BABYLON.Vector3.Distance(origin, mesh.position);
         const meshHitR = (mesh.metadata as any)?.hitRadius ?? 1.5;
@@ -718,7 +729,7 @@ export class BeamSabreSystem {
     const origin = this.getAimOrigin().add(forward.scale(3.2 * giantMul));
     const hitRadius = 9 * giantMul;
     const dmg = this.sabre.damage * 1.8 * giantMul;
-    for (const mesh of this.scene.meshes) {
+    for (const mesh of this.getTargets()) {
       if (!this.isHittable(mesh)) continue;
       const dist = BABYLON.Vector3.Distance(origin, mesh.position);
       const meshHitR = (mesh.metadata as any)?.hitRadius ?? 1.5;
@@ -968,7 +979,7 @@ export class BeamSabreSystem {
 
       const targets = enemies && enemies.length
         ? enemies
-        : this.scene.meshes.filter(m => this.isHittable(m));
+        : this.getTargets();
 
       let consumed = false;
       for (const mesh of targets) {
