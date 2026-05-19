@@ -179,6 +179,7 @@ export class PlayerController implements IDamageable {
 
   private shieldRegenCooldown: number = 0;
   private playerUpgradeLevels: Record<string, number> = {};
+  private petBondBoosts = { damageMul: 1, fireRateMul: 1, damageReduction: 0 };
 
   setCameraMode(mode: "first" | "third"): void {
     this.cameraMode = mode;
@@ -1058,6 +1059,7 @@ export class PlayerController implements IDamageable {
         n.startsWith("step_") || n.startsWith("rooftop_") || n === "mainHighway" ||
         n === "crossHighway" || n === "spaceport" ||
         n.startsWith("extRamp") || n.startsWith("rt_seg") || n.startsWith("rt_ramp") ||
+        n === "miTerrain" || n === "sanctuaryTerrain" ||
         // Nature ring: mountain cones (main peak, side ridges, snow cap) and
         // hidden-temple stepped pyramids are all stand-on / climbable.
         // Cones produce slanted surfaces, so the existing per-frame ray-down
@@ -1068,7 +1070,11 @@ export class PlayerController implements IDamageable {
 
     if (hit && hit.hit && hit.pickedPoint) {
       const platSurface = hit.pickedPoint.y;
-      if (platSurface > surfaceY) {
+      if (hit.pickedMesh?.name === "miTerrain" || hit.pickedMesh?.name === "sanctuaryTerrain") {
+        // Heightmap / sanctuary terrain can dip below the default city
+        // ground baseline, so it must be allowed to lower surfaceY.
+        surfaceY = platSurface;
+      } else if (platSurface > surfaceY) {
         surfaceY = platSurface;
       }
     }
@@ -1341,9 +1347,8 @@ export class PlayerController implements IDamageable {
     // the existing 70%-armor-absorb pipeline. Capped at 30% inside
     // getPlayerBoosts() to keep the player from going invincible.
     const drLvl = this.playerUpgradeLevels["damageReduction"] ?? 0;
-    if (drLvl > 0) {
-      amount *= (1 - Math.min(0.30, 0.03 * drLvl));
-    }
+    const totalReduction = Math.min(0.45, Math.min(0.30, 0.03 * drLvl) + this.petBondBoosts.damageReduction);
+    if (totalReduction > 0) amount *= (1 - totalReduction);
 
     this.shieldRegenCooldown = this.stats.shieldRegenDelay;
 
@@ -1562,10 +1567,16 @@ export class PlayerController implements IDamageable {
     const frLvl = this.playerUpgradeLevels["fireRateBoost"] ?? 0;
     const drLvl = this.playerUpgradeLevels["damageReduction"] ?? 0;
     return {
-      damageMul: 1 + 0.05 * dmgLvl,
-      fireRateMul: 1 + 0.04 * frLvl,
-      damageReduction: Math.min(0.30, 0.03 * drLvl),
+      damageMul: (1 + 0.05 * dmgLvl) * this.petBondBoosts.damageMul,
+      fireRateMul: (1 + 0.04 * frLvl) * this.petBondBoosts.fireRateMul,
+      damageReduction: Math.min(0.45, Math.min(0.30, 0.03 * drLvl) + this.petBondBoosts.damageReduction),
     };
+  }
+
+  setPetBondBoosts(boosts: { damageMul: number; fireRateMul: number; damageReduction: number }): void {
+    this.petBondBoosts.damageMul = Math.max(1, boosts.damageMul || 1);
+    this.petBondBoosts.fireRateMul = Math.max(1, boosts.fireRateMul || 1);
+    this.petBondBoosts.damageReduction = Math.max(0, Math.min(0.15, boosts.damageReduction || 0));
   }
 
   private recomputeUpgradeStats(): void {

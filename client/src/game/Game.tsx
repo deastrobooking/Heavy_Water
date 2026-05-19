@@ -64,6 +64,7 @@ import { SwarmsLairSystem } from "./SwarmsLairSystem";
 import { SaginawLabSystem } from "./SaginawLabSystem";
 import { ZugIslandSystem } from "./ZugIslandSystem";
 import { AnnArborSystem } from "./AnnArborSystem";
+import { MichiganTerrainSystem } from "./MichiganTerrainSystem";
 import { setPlayerIsFlyingProvider as setEnemyPlayerIsFlyingProvider } from "./EnemySystem";
 import { RESCUE_DEFS } from "./RescueSystem";
 import { loadProgress, saveProgress, ProgressSnapshot } from "./ProgressSync";
@@ -171,6 +172,7 @@ export const Game: React.FC = () => {
   const saginawLabSystemRef = useRef<SaginawLabSystem | null>(null);
   const zugIslandSystemRef = useRef<ZugIslandSystem | null>(null);
   const annArborSystemRef = useRef<AnnArborSystem | null>(null);
+  const michiganTerrainSystemRef = useRef<MichiganTerrainSystem | null>(null);
   // Long-lived progress mirrors for the Pontiac Lab → Swarms Lair chain.
   // PontiacLabSystem is rebuilt on every L6 entry, so the freed-animal id
   // set must outlive it here in Game.tsx (read on next mount, written on
@@ -318,6 +320,7 @@ export const Game: React.FC = () => {
   const [gardenOpen, setGardenOpen] = useState(false);
   const [gardenStructure, setGardenStructure] = useState<BaseStructure | null>(null);
   const [capturedCreatures, setCapturedCreatures] = useState<CapturedCreature[]>([]);
+  const [petBondSummary, setPetBondSummary] = useState("Pet Bonds: +0% DMG, +0% FIRE, -0% DMG TAKEN");
   // Persistent "ever caught" species ids for the dex completion UI. Only
   // grows; survives DEPLOY which removes a creature from the live roster.
   const [dexCaughtIds, setDexCaughtIds] = useState<string[]>([]);
@@ -1338,13 +1341,45 @@ export const Game: React.FC = () => {
             spaceLevelSystemRef.current = null;
           }
 
+          // Mount/dispose the Michigan Wilds heightmap side-zone (Level 11).
+          // It owns the MIHEIGHTMAP terrain + TerrainMaterial tiering and
+          // hides the city so existing city-level materials stay untouched.
+          const isMichiganTerrain = typeof payload?.level === "number"
+            && LevelSystem.isMichiganTerrain(payload.level as WorldLevel);
+          if (isMichiganTerrain && !michiganTerrainSystemRef.current) {
+            michiganTerrainSystemRef.current = new MichiganTerrainSystem(
+              scene,
+              {
+                city: cityGenerator,
+                worldVisibles: [
+                  mountainRingRef.current,
+                  alienFoliageRef.current,
+                  earthFoliageRef.current,
+                  propSystemRef.current,
+                ],
+                lodCull,
+                bio: bioRef.current,
+                inventory,
+                playerPos: () => player.getPosition(),
+                enemy: enemySystem,
+                aerial: aerialEnemySystem,
+              },
+            );
+          } else if (!isMichiganTerrain && michiganTerrainSystemRef.current) {
+            const targetKeepsWorldHidden =
+              isSanctuary || isLab || isLair || isSaginawLab ||
+              isZugIsland || isAnnArbor || isSpacelike;
+            try { michiganTerrainSystemRef.current.dispose(!targetKeepsWorldHidden); } catch {}
+            michiganTerrainSystemRef.current = null;
+          }
+
           // Combat-only progression: bump waves + seed the next fortress.
           // Skipped while peaceful (sanctuary), spacelike (orbital combat
           // is owned by AerialEnemySystem, no ground fortresses), or in
           // the Swarms Lair (its own self-contained arena — boss + minions
           // are spawned by SwarmsLairSystem itself, no city fortress to
           // seed).
-          if (!isPeaceful && !isSpacelike && !isLair && !isSaginawLab && !isZugIsland && !isAnnArbor && payload?.level >= 2) {
+          if (!isPeaceful && !isSpacelike && !isLair && !isSaginawLab && !isZugIsland && !isAnnArbor && !isMichiganTerrain && payload?.level >= 2) {
             const baseWave = enemySystem.getWaveNumber() + 2;
             const targetWave = payload.level === 3 ? Math.max(baseWave, 9) : Math.max(baseWave, 5);
             enemySystem.jumpToWave(targetWave);
@@ -1511,10 +1546,10 @@ export const Game: React.FC = () => {
           () => player.getCameraPitch(),
         );
         // Vehicles drive on the ground, on the racetrack ramp (tilted slab),
-        // and on the sky racetrack ring — the city generator's analytic
-        // surface query handles all three.
+        // on the sky racetrack ring, and on side-zone heightmap terrain.
         vehicleSystem.setGroundHeightFn((x, z, currentY) =>
-          cityGenerator.getDriveableHeight(x, z, currentY ?? Infinity),
+          michiganTerrainSystemRef.current?.getDriveableHeight(x, z)
+            ?? cityGenerator.getDriveableHeight(x, z, currentY ?? Infinity),
         );
         vehicleSystem.setBuildingColliders(cityGenerator.getWallColliders());
         vehicleRef.current = vehicleSystem;
@@ -1965,6 +2000,10 @@ export const Game: React.FC = () => {
                 bioRef.current.loadDexCaughtIds(snap.bioDexCaughtIds);
                 setCapturedCreatures(bioRef.current.getCaptured());
                 setDexCaughtIds(bioRef.current.getDexCaughtIds());
+                const petBondBoosts = bioRef.current.getPetBondBonuses();
+                setPetBondSummary(petBondBoosts.summary);
+                player.setPetBondBoosts(petBondBoosts);
+                weapons.setPlayerBoosts(player.getPlayerBoosts());
               }
               // Hidden-temple looted state — keep raided temples dimmed
               // across reloads and (per-level) across deaths.
@@ -2522,6 +2561,10 @@ export const Game: React.FC = () => {
             setCompanionWeaponInfo(cwRows);
             setCapturedCreatures(bioSystem.getCaptured());
             setDexCaughtIds(bioSystem.getDexCaughtIds());
+            const petBondBoosts = bioSystem.getPetBondBonuses();
+            setPetBondSummary(petBondBoosts.summary);
+            player.setPetBondBoosts(petBondBoosts);
+            weapons.setPlayerBoosts(player.getPlayerBoosts());
           }
 
           if (player.getHealth() <= 0 && !deathHandledRef.current) {
@@ -2661,6 +2704,7 @@ export const Game: React.FC = () => {
         if (saginawLabSystemRef.current) { try { saginawLabSystemRef.current.dispose(); } catch {} saginawLabSystemRef.current = null; }
         if (zugIslandSystemRef.current) { try { zugIslandSystemRef.current.dispose(); } catch {} zugIslandSystemRef.current = null; }
         if (annArborSystemRef.current) { try { annArborSystemRef.current.dispose(); } catch {} annArborSystemRef.current = null; }
+        if (michiganTerrainSystemRef.current) { try { michiganTerrainSystemRef.current.dispose(); } catch {} michiganTerrainSystemRef.current = null; }
         if (friendlyNPCsRef.current) { try { friendlyNPCsRef.current.dispose(); } catch {} friendlyNPCsRef.current = null; }
         if (rescueSystemRef.current) { try { rescueSystemRef.current.dispose(); } catch {} rescueSystemRef.current = null; }
         if (multiplayerRef.current) { try { multiplayerRef.current.dispose(); } catch {} }
@@ -2834,6 +2878,7 @@ export const Game: React.FC = () => {
     if (saginawLabSystemRef.current) { try { saginawLabSystemRef.current.dispose(); } catch {} saginawLabSystemRef.current = null; }
     if (zugIslandSystemRef.current) { try { zugIslandSystemRef.current.dispose(); } catch {} zugIslandSystemRef.current = null; }
     if (annArborSystemRef.current) { try { annArborSystemRef.current.dispose(); } catch {} annArborSystemRef.current = null; }
+    if (michiganTerrainSystemRef.current) { try { michiganTerrainSystemRef.current.dispose(); } catch {} michiganTerrainSystemRef.current = null; }
     if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} gamepadRef.current = null; }
     if (aerialEnemyRef.current) { try { aerialEnemyRef.current.dispose(); } catch {} aerialEnemyRef.current = null; }
     if (smashAttackRef.current) { try { smashAttackRef.current.dispose(); } catch {} smashAttackRef.current = null; }
@@ -3011,6 +3056,13 @@ export const Game: React.FC = () => {
     if (bio) {
       setCapturedCreatures(bio.getCaptured());
       setDexCaughtIds(bio.getDexCaughtIds());
+      const petBondBoosts = bio.getPetBondBonuses();
+      setPetBondSummary(petBondBoosts.summary);
+      const player = playerRef.current;
+      if (player && weapons) {
+        player.setPetBondBoosts(petBondBoosts);
+        weapons.setPlayerBoosts(player.getPlayerBoosts());
+      }
     }
   }, []);
 
@@ -3337,10 +3389,21 @@ export const Game: React.FC = () => {
     if (ok) {
       showMessage(`DEPLOYED ${captured.name.toUpperCase()}`, 1800);
       bioRef.current.removeCaptured(id);
+      syncResourcesNow();
+      forceSaveRef.current?.();
     } else {
       showMessage("DEPLOY FAILED", 1500);
     }
-  }, [showMessage]);
+  }, [showMessage, syncResourcesNow]);
+
+  const handleGardenCare = useCallback((id: string) => {
+    const bio = bioRef.current;
+    if (!bio) return;
+    const result = bio.careForCaptured(id);
+    showMessage(result.message.toUpperCase(), result.ok ? 1500 : 1800);
+    syncResourcesNow();
+    if (result.ok) forceSaveRef.current?.();
+  }, [showMessage, syncResourcesNow]);
 
   useEffect(() => {
     if (gamePhase !== "playing") return;
@@ -3669,6 +3732,7 @@ export const Game: React.FC = () => {
       if (saginawLabSystemRef.current) { try { saginawLabSystemRef.current.dispose(); } catch {} saginawLabSystemRef.current = null; }
       if (zugIslandSystemRef.current) { try { zugIslandSystemRef.current.dispose(); } catch {} zugIslandSystemRef.current = null; }
       if (annArborSystemRef.current) { try { annArborSystemRef.current.dispose(); } catch {} annArborSystemRef.current = null; }
+      if (michiganTerrainSystemRef.current) { try { michiganTerrainSystemRef.current.dispose(); } catch {} michiganTerrainSystemRef.current = null; }
       if (aerialEnemyRef.current) aerialEnemyRef.current.dispose();
       if (smashAttackRef.current) { try { smashAttackRef.current.dispose(); } catch {} smashAttackRef.current = null; }
       if (gamepadRef.current) gamepadRef.current.dispose();
@@ -3689,7 +3753,11 @@ export const Game: React.FC = () => {
     const ls = levelSystemRef.current;
     const player = playerRef.current;
     if (!ls || !player) return;
-    if (level < 1 || level > 10) return;
+    if (level < 1 || level > 11) return;
+    if (ls.getCurrentLevel() === 4 && level >= 1 && level <= 3) {
+      showMessage("ASHUR SANCTUARY DOES NOT OPEN DIRECTLY TO DETROIT", 2200);
+      return;
+    }
     const sp = LevelSystem.getSpawnPointFor(level as WorldLevel);
     // Spacelike levels need a high spawn Y so the player wakes up amid the
     // 25–105 m asteroid band (the orbital fighter is auto-entered there);
@@ -3718,14 +3786,16 @@ export const Game: React.FC = () => {
     return () => { handleFastTravelRef.current = null; };
   }, [handleFastTravel]);
 
-  // Travel-tab rows — derived from LevelSystem so adding a level-5 later only
-  // requires extending LEVEL_DEFS. Currently every destination is unlocked;
-  // add a `locked` flag here later if we want to gate by campaign progress.
+  // Travel-tab rows — derived from LevelSystem so adding a level later only
+  // requires extending LEVEL_DEFS. Ashur intentionally avoids direct city
+  // routes so the sanctuary keeps its protected, out-of-the-way feel.
   const travelDestinations = useMemo(() => {
-    return LevelSystem.getAllLevels().map((lvl) => ({
-      level: lvl,
-      name: LevelSystem.getDisplayNameFor(lvl),
-      description: lvl === 4
+    return LevelSystem.getAllLevels().map((lvl) => {
+      const blocksDetroitFromAshur = currentWorldLevel === 4 && lvl >= 1 && lvl <= 3;
+      return {
+        level: lvl,
+        name: LevelSystem.getDisplayNameFor(lvl),
+        description: lvl === 4
         ? "Peaceful side-zone. Rehab rescued Animatons, farm bio-crops, help the Village of Earth."
         : lvl === 5
         ? "Orbital Front — starfield combat. Asteroids, evil ships, drone-orbited motherships."
@@ -3737,14 +3807,22 @@ export const Game: React.FC = () => {
         ? "Saginaw Underwater Lab — flooded endgame arena. Captains only, plus spider-tank missile mid-bosses."
         : lvl === 9
         ? "Zug Island — Legion stronghold. Endless waves of titans, captains, and spider tanks. Hardest zone in the game."
+        : lvl === 10
+        ? "Ann Arbor Apocalypse — mothership crash site with maxed captains and a full ground swarm."
+        : lvl === 11
+        ? "Michigan Wilds — MIHEIGHTMAP terrain with flooded lowlands, grass foothills, and rocky peaks."
         : lvl === 1
         ? "Star City Front — first-stage Detroit defense. Rescue the captured ally."
         : lvl === 2
         ? "Hold the Line — captains have invaded. Take the second fortress."
         : "Purge the Void — the final command tower.",
-      locked: false,
-    }));
-  }, []);
+        locked: blocksDetroitFromAshur,
+        lockReason: blocksDetroitFromAshur
+          ? "Ashur keeps Detroit gates closed. Travel through the wilds or another outpost."
+          : undefined,
+      };
+    });
+  }, [currentWorldLevel]);
 
   // Per-weapon Power-Jewel rows for the WEAPONS tab. Re-derives whenever
   // any inventory count changes (which the WEAPONS tab already triggers
@@ -3932,10 +4010,12 @@ export const Game: React.FC = () => {
           gardenCapacityMax={Math.max(15, baseRef.current?.getGardenCaptureCap() ?? 15)}
           gardenCaptured={capturedCreatures}
           gardenDexCaughtIds={dexCaughtIds}
+          petBondSummary={petBondSummary}
           bioEssenceCount={resourceCounts.bioEssence}
           gardenUpgradeCost={gardenUpgradeCost}
           gardenCanUpgrade={gardenCanUpgrade}
           onGardenDeploy={handleGardenDeploy}
+          onGardenCare={handleGardenCare}
           onGardenUpgrade={handleGardenUpgrade}
           onGardenClose={() => setGardenOpen(false)}
           planMode={planMode}

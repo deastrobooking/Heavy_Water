@@ -18,9 +18,11 @@ interface GardenCaptureUIProps {
    *  by the BioCreatureSystem before it reaches us. */
   dexCaughtIds: string[];
   bioEssenceCount: number;
+  petBondSummary?: string;
   upgradeCost: { gears: number; nano: number; cores: number } | null;
   canUpgradeGarden: boolean;
   onDeploy: (id: string) => void;
+  onCare: (id: string) => void;
   onUpgradeGarden: () => void;
   onClose: () => void;
 }
@@ -42,7 +44,7 @@ const RARITY_COLOR: Record<Rarity, string> = {
 
 export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
   open, level, maxLevel, captureBonus, capacityMax, captured, dexCaughtIds, bioEssenceCount,
-  upgradeCost, canUpgradeGarden, onDeploy, onUpgradeGarden, onClose,
+  petBondSummary, upgradeCost, canUpgradeGarden, onDeploy, onCare, onUpgradeGarden, onClose,
 }) => {
   const [tab, setTab] = useState<Tab>("roster");
   // Per-roster-row cursor for keyboard + gamepad. Only the ROSTER tab
@@ -225,6 +227,9 @@ export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
             <div className="text-lime-500 text-xs">
               Lvl {level}/{maxLevel} · Roster {captured.length}/{capacityMax} · Capture +{(captureBonus * 100).toFixed(0)}% · Dex <b className="text-lime-200">{dexCount}/{dexTotal}</b>
             </div>
+            {petBondSummary && (
+              <div className="text-cyan-300 text-[11px] mt-1">{petBondSummary}</div>
+            )}
           </div>
           <div className="text-xs font-mono text-lime-300">
             BIO ESSENCE: <b>{bioEssenceCount}</b> <span className="text-zinc-500">(used by capture orbs)</span>
@@ -262,6 +267,7 @@ export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
             <RosterView
               captured={captured}
               onDeploy={onDeploy}
+              onCare={onCare}
               selectedId={rosterCurId}
               setRowRef={(id, el) => {
                 if (el) rosterRowRefs.current.set(id, el);
@@ -320,10 +326,11 @@ const TypeTab: React.FC<{ active: boolean; color: string; label: string; onClick
 const RosterView: React.FC<{
   captured: CapturedCreature[];
   onDeploy: (id: string) => void;
+  onCare: (id: string) => void;
   selectedId: string | null;
   setRowRef: (id: string, el: HTMLDivElement | null) => void;
   onHover: (id: string) => void;
-}> = ({ captured, onDeploy, selectedId, setRowRef, onHover }) => {
+}> = ({ captured, onDeploy, onCare, selectedId, setRowRef, onHover }) => {
   if (captured.length === 0) {
     return <div className="text-center text-zinc-500 py-8 text-sm">Garden roster empty. Find wild bio-creatures and capture them.</div>;
   }
@@ -353,6 +360,8 @@ const RosterView: React.FC<{
                   >{tp.toUpperCase()}</span>
                   <div className={`text-[10px] ${RARITY_COLOR[rarity]}`}>{RARITY_STARS[rarity]}</div>
                   <div className="text-lime-400 text-xs font-mono">LVL {c.level}</div>
+                  <div className="text-cyan-300 text-xs font-mono">BOND {c.bondLevel ?? 0}</div>
+                  <div className="text-emerald-300 text-[10px] uppercase">CARE {c.care ?? 0}/3</div>
                   <div className="text-zinc-500 text-[10px] uppercase">{role}</div>
                 </div>
                 <div className="grid grid-cols-3 gap-2 mt-2 text-[11px]">
@@ -361,12 +370,20 @@ const RosterView: React.FC<{
                   <Mini label="SPD" value={c.speed.toFixed(2)} />
                 </div>
               </div>
-              <button
-                onClick={() => onDeploy(c.id)}
-                className="ml-3 px-4 py-2 rounded text-xs font-bold tracking-wider bg-lime-500 hover:bg-lime-400 text-black"
-              >
-                DEPLOY
-              </button>
+              <div className="ml-3 flex flex-col gap-2">
+                <button
+                  onClick={() => onCare(c.id)}
+                  className="px-4 py-2 rounded text-xs font-bold tracking-wider bg-cyan-500 hover:bg-cyan-400 text-black"
+                >
+                  CARE
+                </button>
+                <button
+                  onClick={() => onDeploy(c.id)}
+                  className="px-4 py-2 rounded text-xs font-bold tracking-wider bg-lime-500 hover:bg-lime-400 text-black"
+                >
+                  DEPLOY
+                </button>
+              </div>
             </div>
           </div>
         );

@@ -82,12 +82,11 @@ export interface ProgressSnapshot {
   beamSabreLevel?: number;
   /** Per-element elemental specials levels. */
   elementalLevels?: Record<string, number>;
-  /** Active world level (1 = "RESCUE THE ALLY", 2 = "HOLD THE LINE",
-   *  3 = "PURGE THE VOID"). Persisted so logging out mid-campaign returns
-   *  the player to the same level with matching sky tint, captain variant,
-   *  and fortress placement. Older saves wrote only `1 | 2` — those still
-   *  load (LevelSystem clamps unknown values to 1). */
-  worldLevel?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+  /** Active world level. Persisted so logging out mid-campaign or inside
+   *  a side-zone returns the player to the same destination with matching
+   *  sky tint, world swap, and spawn placement. Older saves wrote only
+   *  `1 | 2`; LevelSystem still clamps safely on load. */
+  worldLevel?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
   /** Hidden-temple ids the player has already raided across all levels.
    *  Each id is namespaced by level (e.g. "L1_temple_ne") so re-entering
    *  an earlier level keeps that level's loot history intact. Optional

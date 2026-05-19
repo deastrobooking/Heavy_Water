@@ -1,11 +1,10 @@
 # How to add a new world level
 
 A "world level" is a campaign or side-zone the player can warp to. Heavy
-Water already ships **seven** levels (three combat fronts, two peaceful
-side-zones, one space side-zone, one underground combat side-zone).
-Adding an eighth follows a tight, predictable pattern. This guide uses
-**Level 7 (Swarms Lair)** as the worked example because it is the most
-recent and exercises every wiring point.
+Water already ships multiple campaign fronts and side-zones. Adding the
+next one follows a tight, predictable pattern. This guide uses **Level 7
+(Swarms Lair)** as a worked example because it exercises every wiring
+point.
 
 ## Prereqs
 
@@ -22,7 +21,7 @@ File: [`client/src/game/LevelSystem.ts`](../../client/src/game/LevelSystem.ts)
 
 1. Bump the `WorldLevel` union:
    ```ts
-   export type WorldLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+   export type WorldLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
    ```
 2. Add the new entry to `LEVEL_DEFS` with a unique `displayName`,
    `banner`, `objective`, `difficultyMultiplier`, `skyTint`,

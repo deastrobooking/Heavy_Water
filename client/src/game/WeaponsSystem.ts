@@ -929,7 +929,7 @@ export class WeaponsSystem {
       try { projectile.mesh.dispose(); } catch {}
     }
     this.projectiles = [];
-    for (const mat of this.projectileMatCache.values()) {
+    for (const mat of Array.from(this.projectileMatCache.values())) {
       try { mat.dispose(); } catch {}
     }
     this.projectileMatCache.clear();

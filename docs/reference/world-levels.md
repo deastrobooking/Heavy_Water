@@ -8,10 +8,14 @@ Source: [`client/src/game/LevelSystem.ts`](../../client/src/game/LevelSystem.ts)
 | 1 | DETROIT — Star City Front | Combat (open world) | Inferno | Tutorial-tier; fortress at `(380, -120)` |
 | 2 | DETROIT — Hold the Line | Combat (open world) | Plague | Burnt-amber re-tint; fortress at `(-360, -360)` |
 | 3 | DETROIT — Purge the Void | Combat (open world) | Void | Deep night/violet re-tint; fortress at `(-120, 420)` |
-| 4 | ASHUR SANCTUARY | Peaceful side-zone | — | Owned by [`SanctuarySystem.ts`](../../client/src/game/SanctuarySystem.ts) |
+| 4 | ASHUR SANCTUARY | Peaceful side-zone | — | Owned by [`SanctuarySystem.ts`](../../client/src/game/SanctuarySystem.ts); rolling village terrain, farm loop, pet clinic |
 | 5 | ORBITAL FRONT | Spacelike combat | Void variant | Owned by [`SpaceLevelSystem.ts`](../../client/src/game/SpaceLevelSystem.ts) |
 | 6 | PONTIAC SECRET LAB | Peaceful side-zone | — | Owned by [`PontiacLabSystem.ts`](../../client/src/game/PontiacLabSystem.ts); cave hatch warps to L7 |
 | 7 | SWARMS LAIR | Underground combat side-zone | General Voidcrown | Owned by [`SwarmsLairSystem.ts`](../../client/src/game/SwarmsLairSystem.ts) |
+| 8 | SAGINAW UNDERWATER LAB | Flooded combat side-zone | Frost variant | Owned by [`SaginawLabSystem.ts`](../../client/src/game/SaginawLabSystem.ts) |
+| 9 | ZUG ISLAND — LEGION | Industrial combat side-zone | Inferno variant | Owned by [`ZugIslandSystem.ts`](../../client/src/game/ZugIslandSystem.ts) |
+| 10 | ANN ARBOR APOCALYPSE | City combat side-zone | Void variant | Owned by [`AnnArborSystem.ts`](../../client/src/game/AnnArborSystem.ts) |
+| 11 | MICHIGAN WILDS | Heightmap terrain side-zone | Wilds walkers | Owned by [`MichiganTerrainSystem.ts`](../../client/src/game/MichiganTerrainSystem.ts); uses `MIHEIGHTMAP.png`; rare pets, power blooms, giant walkers, rogue labs, rescue cages, and mothership patrols |
 
 ## Per-level fields (from `LevelDef`)
 
@@ -34,6 +38,7 @@ Source: [`client/src/game/LevelSystem.ts`](../../client/src/game/LevelSystem.ts)
 LevelSystem.isPeaceful(level)   // L4, L6
 LevelSystem.isSpacelike(level)  // L5
 LevelSystem.isLair(level)       // L7
+LevelSystem.isMichiganTerrain(level) // L11
 ```
 
 `Game.tsx` reads these everywhere it gates by zone type.
@@ -47,7 +52,7 @@ LevelSystem.isLair(level)       // L7
 - Per-level milestones:
   - `swarmsGeneralDefeated` (L7)
   - `freedLabAnimalIds[]` (L6)
-  - `rescuedSyntheticIds[]` (L1/L2/L3/L5)
+  - `rescuedSyntheticIds[]` (L1/L2/L3/L5/L11)
   - `legendaryCompanionGranted` (cross-level)
   - others as added
 

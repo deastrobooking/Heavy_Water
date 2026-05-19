@@ -236,6 +236,50 @@ export const RESCUE_DEFS: Record<number, RescueDef[]> = {
       hair: c(0.85, 0.70, 1.0),
     },
   ],
+  11: [
+    {
+      id: "L11_ranger_maple",
+      name: "RANGER MAPLE",
+      title: "MI Wilds Rescue Scout",
+      position: { x: 2590, y: 8, z: 1765 },
+      lines: [
+        "The labs are moving through the treeline. Every night, a new tower wakes up.",
+        "I marked the power blooms before they caged me. Follow the cyan flare.",
+        "Those giant walkers are not patrols. They're hunting rare Animatons.",
+      ],
+      primary: c(0.35, 0.85, 0.45),
+      secondary: c(0.85, 0.95, 0.45),
+      hair: c(0.72, 0.95, 0.55),
+    },
+    {
+      id: "L11_dr_heron",
+      name: "DR. HERON",
+      title: "Sanctuary Field Surgeon",
+      position: { x: 3235, y: 8, z: 1140 },
+      lines: [
+        "They were cutting bond cores out of rescued pets. I tried to stop them.",
+        "The clinic at Ashur can reverse the damage, but it needs Bio Crop and feed.",
+        "Bring the rare ones home. They remember who helped them.",
+      ],
+      primary: c(0.80, 0.95, 1.0),
+      secondary: c(0.20, 0.75, 0.90),
+      hair: c(0.90, 0.95, 1.0),
+    },
+    {
+      id: "L11_pilot_cedar",
+      name: "PILOT CEDAR",
+      title: "Downed Mothership Cartographer",
+      position: { x: 3520, y: 10, z: 1760 },
+      lines: [
+        "I got inside the mothership before it tore itself open over the wilds.",
+        "There are more carriers above the clouds. The wrecks here are only scouts.",
+        "Free me and I'll mark their flight lanes for the sanctuary.",
+      ],
+      primary: c(0.95, 0.65, 0.25),
+      secondary: c(0.45, 0.55, 0.95),
+      hair: c(1.0, 0.85, 0.40),
+    },
+  ],
 };
 
 export class RescueSystem {

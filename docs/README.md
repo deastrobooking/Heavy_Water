@@ -68,7 +68,7 @@ public surface, key collaborators, and where to look for "what runs when".
 Lookup tables for things you'll search for often.
 
 - [Game events](reference/game-events.md) — every `GameEvents.*` constant
-- [World levels](reference/world-levels.md) — the seven `WorldLevel`s
+- [World levels](reference/world-levels.md) — every `WorldLevel`
 - [HTTP API](reference/http-api.md) — every Express route
 - [WebSocket protocol](reference/websocket-protocol.md) — multiplayer messages
 - [Database schema](reference/database-schema.md) — every Drizzle table

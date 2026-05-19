@@ -1,19 +1,22 @@
 # Levels & zones
 
-Heavy Water has **seven** world levels. Three are open-world combat
-fronts (L1/L2/L3), one is a peaceful sanctuary (L4), one is a spacelike
-combat arena (L5), one is a peaceful indoor lab (L6), one is an
-underground combat cave (L7).
+Heavy Water has **eleven** world levels. Three are open-world combat
+fronts (L1/L2/L3), with side-zones for the sanctuary, orbit, Pontiac
+Lab, Swarms Lair, Saginaw, Zug Island, Ann Arbor, and Michigan Wilds.
 
 ## Components
 
 | File | Role |
 |---|---|
 | [`LevelSystem.ts`](../../client/src/game/LevelSystem.ts) | Owns `WorldLevel`, `LEVEL_DEFS`, `forceStart`, helpers (`isPeaceful`, `isSpacelike`, `isLair`). Emits `LEVEL_STARTED` / `LEVEL_COMPLETED`. |
-| [`SanctuarySystem.ts`](../../client/src/game/SanctuarySystem.ts) | L4 — peaceful village + farm + NPCs. |
+| [`SanctuarySystem.ts`](../../client/src/game/SanctuarySystem.ts) | L4 — peaceful village, rolling terrain, pet clinic, farm, and NPCs. |
 | [`SpaceLevelSystem.ts`](../../client/src/game/SpaceLevelSystem.ts) | L5 — orbital combat. |
 | [`PontiacLabSystem.ts`](../../client/src/game/PontiacLabSystem.ts) | L6 — secret lab interior + caged animals + cave hatch. |
 | [`SwarmsLairSystem.ts`](../../client/src/game/SwarmsLairSystem.ts) | L7 — underground arena + General Voidcrown boss. |
+| [`SaginawLabSystem.ts`](../../client/src/game/SaginawLabSystem.ts) | L8 — flooded combat lab. |
+| [`ZugIslandSystem.ts`](../../client/src/game/ZugIslandSystem.ts) | L9 — industrial Legion arena. |
+| [`AnnArborSystem.ts`](../../client/src/game/AnnArborSystem.ts) | L10 — city combat zone with mothership crash site. |
+| [`MichiganTerrainSystem.ts`](../../client/src/game/MichiganTerrainSystem.ts) | L11 — MIHEIGHTMAP terrain, water/grass/rock tiers, rare pets, power blooms, giant walkers, labs, rescue pockets, and mothership patrol landmarks. |
 | [`Game.tsx`](../../client/src/game/Game.tsx) | Mounts/disposes the right side-zone system on each `LEVEL_STARTED`. |
 | [`LevelSerializer.ts`](../../client/src/game/LevelSerializer.ts) | Serializes editor-built levels for prefab export. |
 
@@ -33,6 +36,7 @@ Game.tsx LEVEL_STARTED handler:
   • dispose previous side-zone system (if any)
   • mount new side-zone system (if isPeaceful/isSpacelike/isLair)
   • gate enemy spawner on peacefulness
+  • seed per-zone rescues and side-zone encounter layers
   • set sky theme, time-of-day, city tint per LEVEL_DEFS
   • set wave intensity by difficultyMultiplier
 ```

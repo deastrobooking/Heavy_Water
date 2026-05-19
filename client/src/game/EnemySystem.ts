@@ -9,7 +9,10 @@ import { HUMANOID_PRESETS } from "./HumanoidPresets";
 import { BossVariant, BossVariantId, BOSS_VARIANTS, getBossVariant } from "./BossVariants";
 import { getEnemyStyleOverrides } from "./CharacterEditor";
 
-export type EnemyType = "drone" | "soldier" | "heavy" | "insectoid" | "hybrid" | "commander" | "captain" | "tank" | "titan" | "spider_tank";
+export type EnemyType =
+  | "drone" | "soldier" | "heavy" | "insectoid" | "hybrid"
+  | "commander" | "captain" | "tank" | "titan" | "spider_tank"
+  | "wilds_titan" | "wilds_transformer";
 export type EnemyAIState = "idle" | "patrol" | "chase" | "attack" | "stunned" | "dead" | "flying" | "hovering" | "dodging";
 
 /** Module-level provider so EnemyUnit instances can ask "is the player
@@ -131,6 +134,19 @@ const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     maxHealth: 900, attackDamage: 38, defense: 22, movementSpeed: 2.4, attackCooldown: 2.6,
     knockbackForce: 1300, experienceValue: 220, detectionRange: 22, chaseRange: 35,
     attackRange: 9, patrolSpeed: 0.04, chaseSpeed: 0.07, credits: 140,
+  },
+  // Michigan Wilds apex walkers: giant versions of the classic Titan /
+  // Transformer silhouettes. Spawned by MichiganTerrainSystem as landmarks
+  // and minibosses rather than regular wave fodder.
+  wilds_titan: {
+    maxHealth: 1800, attackDamage: 55, defense: 30, movementSpeed: 2.0, attackCooldown: 2.7,
+    knockbackForce: 1750, experienceValue: 460, detectionRange: 42, chaseRange: 65,
+    attackRange: 12, patrolSpeed: 0.035, chaseSpeed: 0.060, credits: 320,
+  },
+  wilds_transformer: {
+    maxHealth: 2200, attackDamage: 62, defense: 34, movementSpeed: 2.2, attackCooldown: 2.5,
+    knockbackForce: 1900, experienceValue: 560, detectionRange: 46, chaseRange: 70,
+    attackRange: 13, patrolSpeed: 0.038, chaseSpeed: 0.065, credits: 420,
   },
   // Spider Tank — Saginaw Lab mid-boss. Six-legged walker with a missile
   // turret on top. Stays at long range (32 m) and lobs homing tracking
@@ -432,15 +448,14 @@ export class EnemyUnit implements IDamageable {
     } else if (this.type === "commander") {
       const targetY = Math.max(this.patrolOrigin.y, 1.5);
       this.mesh.position.y += (targetY - this.mesh.position.y) * scaledFrameLerp(0.05, frameScale);
+    } else if (this.keepAirborneY != null) {
+      // Dedicated side-zones can pin large enemies to a custom terrain
+      // height (Michigan Wilds heightmap, Ann Arbor saucer deck, etc.).
+      this.mesh.position.y = this.keepAirborneY;
     } else if (this.type === "spider_tank") {
       // Body sits 3.5 m up so the six legs reach the ground without the
       // chassis sinking when chase code touches Y.
       this.mesh.position.y = 3.5;
-    } else if (this.keepAirborneY != null) {
-      // Throne captains on the Ann Arbor saucer deck: stay on the deck
-      // instead of snapping to ground so the player has to actually fly
-      // up and pick them off.
-      this.mesh.position.y = this.keepAirborneY;
     } else {
       this.mesh.position.y = 1.5;
     }
@@ -1444,6 +1459,8 @@ export class EnemySystem {
       // Titan reuses the TankTitan robot preset but is upscaled + tougher
       // when the EnemyUnit constructor runs (config + per-spawn scale).
       titan: ["TankTitan"],
+      wilds_titan: ["TankTitan", "BruteForge", "MegaUnitX"],
+      wilds_transformer: ["OptimusForge", "GuardianUnit", "ScoutPrime", "ScoutCompanion", "SparkPup", "NeonCat"],
       // Spider tank is parametric; this entry is just a fallback so the
       // exhaustive Record type compiles. createEnemyMesh short-circuits
       // to createSpiderTankMesh above before it ever reads this entry.
@@ -1466,10 +1483,14 @@ export class EnemySystem {
       const root = this.robotFactory.createRobot(preset, position);
 
       const hitboxH = type === "hybrid" ? 3.5
+        : type === "wilds_transformer" ? 7.2
+        : type === "wilds_titan" ? 6.4
         : type === "titan" ? 4.5
         : type === "heavy" ? 3
         : 2;
       const hitboxR = type === "hybrid" ? 0.8
+        : type === "wilds_transformer" ? 1.85
+        : type === "wilds_titan" ? 1.65
         : type === "titan" ? 1.2
         : type === "heavy" ? 0.7
         : 0.5;
@@ -1489,6 +1510,10 @@ export class EnemySystem {
       // Scale titans up to read as a true heavy mid-boss alongside captains.
       if (type === "titan") {
         root.scaling.setAll(1.6);
+      } else if (type === "wilds_titan") {
+        root.scaling.setAll(2.35);
+      } else if (type === "wilds_transformer") {
+        root.scaling.setAll(2.65);
       }
 
       return hitbox;

@@ -195,7 +195,7 @@ export class EnemyHealthBarSystem {
     }
 
     this.staleEnemies.length = 0;
-    for (const enemy of this.bars.keys()) {
+    for (const enemy of Array.from(this.bars.keys())) {
       if (!live.has(enemy) || !enemy.isAlive) {
         this.staleEnemies.push(enemy);
       }

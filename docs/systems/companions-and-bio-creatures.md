@@ -62,6 +62,20 @@ Player throws capture orb (CombatSystem) → CAPTURE_ORB_THROWN
 plant and rear captured species. Garden output ties into
 `CraftingSystem`.
 
+Captured bio-creatures now also carry `bondLevel` and `care`. The Bio
+Garden roster can feed a captured pet with `animaton_feed` or `bio_crop`;
+every three care points raises its bond, level, HP, attack, and speed.
+`BioCreatureSystem.getPetBondBonuses()` converts the captured roster into
+passive player bonuses: offensive pets boost damage, electric/psychic/
+crystal pets boost fire rate, and water/grass/ice/steel pets reduce
+incoming damage. `Game.tsx` pushes those bonuses into
+`PlayerController` and `WeaponsSystem`.
+
+Ashur Sanctuary is the primary care loop: its farm yields Bio Crop and
+sometimes Animaton Feed, and the visible pet clinic marks the in-world
+hospital for rescued Animatons. Michigan Wilds is the rare-pet hunting
+loop, seeding rare/legendary species plus power blooms.
+
 ### Adding a species or companion
 
 See [`how-to/add-a-companion-or-creature.md`](../how-to/add-a-companion-or-creature.md).

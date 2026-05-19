@@ -21,6 +21,15 @@ export interface CapturedCreature {
   hp: number;
   attackPower: number;
   speed: number;
+  bondLevel: number;
+  care: number;
+}
+
+export interface PetBondBonuses {
+  damageMul: number;
+  fireRateMul: number;
+  damageReduction: number;
+  summary: string;
 }
 
 interface ActiveCreature {
@@ -267,7 +276,7 @@ export class BioCreatureSystem {
         c.position.z += (dz / d) * sp * dt;
       }
       const flying = isFlyer(c.species.archetype);
-      const baseY = flying ? 2.4 : 0.6;
+      const baseY = c.homePoint.y + (flying ? 1.8 : 0.6);
       c.position.y = baseY + Math.sin(c.bobTimer) * (flying ? 0.3 : 0.1);
       c.hitbox.position.copyFrom(c.position);
       if (d > 0.05) {
@@ -322,6 +331,8 @@ export class BioCreatureSystem {
         hp: baseStats.hp,
         attackPower: baseStats.attack,
         speed: baseStats.speed,
+        bondLevel: 0,
+        care: 0,
       };
       this.captured.push(cap);
       // Permanent dex flag (only valid known species — guards legacy/unknown ids).
@@ -380,6 +391,8 @@ export class BioCreatureSystem {
         hp: typeof e.hp === "number" ? e.hp : fallback.hp,
         attackPower: typeof e.attackPower === "number" ? e.attackPower : fallback.attack,
         speed: typeof e.speed === "number" ? e.speed : fallback.speed,
+        bondLevel: typeof e.bondLevel === "number" ? Math.max(0, Math.min(10, Math.floor(e.bondLevel))) : 0,
+        care: typeof e.care === "number" ? Math.max(0, Math.min(3, Math.floor(e.care))) : 0,
       };
       this.captured.push(cap);
       this.dexCaughtIds.add(sp.id); // restoring a creature also flags the dex
@@ -400,6 +413,73 @@ export class BioCreatureSystem {
     if (idx < 0) return null;
     const [c] = this.captured.splice(idx, 1);
     return c;
+  }
+
+  careForCaptured(id: string): { ok: boolean; message: string } {
+    const c = this.captured.find(p => p.id === id);
+    if (!c) return { ok: false, message: "Pet not found." };
+
+    const feedId = this.inventory.getItemCount("animaton_feed") > 0 ? "animaton_feed" : "bio_crop";
+    if (this.inventory.getItemCount(feedId) < 1) {
+      return { ok: false, message: "Need Bio Crop or Animaton Feed from the farm." };
+    }
+
+    this.inventory.removeItem(feedId, 1);
+    const feedPower = feedId === "animaton_feed" ? 2 : 1;
+    c.care = Math.min(3, (c.care ?? 0) + feedPower);
+    if (c.care >= 3 && c.bondLevel < 10) {
+      c.care = 0;
+      c.bondLevel += 1;
+      c.level += 1;
+      c.hp += 8;
+      c.attackPower += 2;
+      c.speed += 0.03;
+      this.bus.emit(GameEvents.UI_MESSAGE, { message: `${c.name} bonded with you! Bond Lv ${c.bondLevel}` });
+    } else {
+      this.bus.emit(GameEvents.UI_MESSAGE, { message: `${c.name} recovered at the sanctuary clinic.` });
+    }
+    return { ok: true, message: `${c.name} cared for.` };
+  }
+
+  getPetBondBonuses(): PetBondBonuses {
+    let damage = 0;
+    let fireRate = 0;
+    let reduction = 0;
+
+    for (const c of this.captured) {
+      const sp = getSpeciesById(c.speciesId);
+      if (!sp) continue;
+      const rarityMul = sp.rarity === "legendary" ? 2.2 : sp.rarity === "rare" ? 1.6 : sp.rarity === "uncommon" ? 1.25 : 1.0;
+      const bond = Math.max(0, c.bondLevel ?? 0);
+      const level = Math.max(1, c.level ?? 1);
+      const power = rarityMul * (0.0025 + bond * 0.0015 + level * 0.0004);
+      switch (sp.elementalType) {
+        case "flame":
+        case "dragon":
+        case "evil":
+          damage += power;
+          break;
+        case "electric":
+        case "psychic":
+        case "crystal":
+          fireRate += power * 0.8;
+          break;
+        case "water":
+        case "grass":
+        case "ice":
+        case "steel":
+        case "normal":
+        default:
+          reduction += power * 0.55;
+          break;
+      }
+    }
+
+    const damageMul = 1 + Math.min(0.25, damage);
+    const fireRateMul = 1 + Math.min(0.18, fireRate);
+    const damageReduction = Math.min(0.15, reduction);
+    const summary = `Pet Bonds: +${Math.round((damageMul - 1) * 100)}% DMG, +${Math.round((fireRateMul - 1) * 100)}% FIRE, -${Math.round(damageReduction * 100)}% DMG TAKEN`;
+    return { damageMul, fireRateMul, damageReduction, summary };
   }
 
   getSpecies(id: string): BioCreatureSpecies | null {
@@ -708,12 +788,20 @@ function applyRarityFlair(s: RobotStyle, rarity: import("./BioSpecies").Rarity):
       s.scale *= 1.08;
       s.extraPlating = Math.max(s.extraPlating, 1);
       s.shoulderPadSize = Math.max(s.shoulderPadSize, 0.25);
+      s.hasPanelLines = true;
+      s.panelLineDensity = (s.panelLineDensity ?? 1.0) * 1.15;
       break;
     case "legendary":
       s.scale *= 1.18;
       s.extraPlating = Math.max(s.extraPlating, 2);
       s.shoulderPadSize = Math.max(s.shoulderPadSize, 0.32);
       s.panelLineDensity = (s.panelLineDensity ?? 1.0) * 1.3;
+      s.hasHorns = s.hasHorns || true;
+      s.hornLength = Math.max(s.hornLength, 0.42);
+      s.hasShield = s.hasShield || true;
+      s.shieldSize = Math.max(s.shieldSize, 0.8);
+      s.hasCannons = s.hasCannons || true;
+      s.cannonSize = Math.max(s.cannonSize, 0.26);
       break;
     case "uncommon":
     case "common":

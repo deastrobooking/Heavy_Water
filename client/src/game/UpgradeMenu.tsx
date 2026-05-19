@@ -39,7 +39,7 @@ export interface SpecialUpgradeInfo {
 
 /** One destination listed in the TRAVEL tab. */
 export interface TravelDestinationInfo {
-  /** WorldLevel id (1–4). Kept as plain number so this module doesn't need to
+  /** WorldLevel id. Kept as plain number so this module doesn't need to
    *  import the LevelSystem type-circularly. */
   level: number;
   /** Display name shown in the row. */

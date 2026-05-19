@@ -11,7 +11,7 @@ import { BossVariantId } from "./BossVariants";
  *  bio-crops, and runs errands for the nearby Village of Earth. It does not
  *  appear in the L1→L2→L3 progression chain; it's reached from the new TRAVEL
  *  tab on the upgrade menu and acts as the player's home base. */
-export type WorldLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+export type WorldLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 
 /** Persisted shape used by ProgressSync. */
 export interface LevelSnapshot {
@@ -266,6 +266,20 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     completeSubtitle: "The mothership is dead. Ann Arbor breathes.",
     timeOfDay: 21.5, // late-evening apocalypse
   },
+  11: {
+    level: 11,
+    displayName: "MICHIGAN WILDS",
+    banner: "MICHIGAN WILDS — HEIGHTMAP FRONTIER",
+    objective: "Explore flooded lowlands, grass foothills, and rocky peaks generated from MIHEIGHTMAP.",
+    difficultyMultiplier: 0.0,
+    skyTint: { r: 0.80, g: 1.00, b: 1.08 },
+    bossVariantId: "frost",
+    fortressCenter: { x: 9999, z: 9999 },
+    spawnPoint: { x: 3000, z: 1500 },
+    completeSubtitle: "The wilds settle back into the mist.",
+    peaceful: true,
+    timeOfDay: 14.5,
+  },
   7: {
     level: 7,
     displayName: "SWARMS LAIR",
@@ -472,7 +486,7 @@ export class LevelSystem {
 
   /** All known levels — used by the TRAVEL tab. */
   static getAllLevels(): WorldLevel[] {
-    return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
   }
 
   /** `true` for Ann Arbor Apocalypse (Level 10) — a medium-sized
@@ -483,6 +497,14 @@ export class LevelSystem {
    *  AnnArborSystem rather than the standard wave/fortress chain. */
   static isAnnArbor(level: WorldLevel): boolean {
     return level === 10;
+  }
+
+  /** `true` for Michigan Wilds (Level 11) — a heightmap terrain side-zone
+   *  generated from MIHEIGHTMAP.png. It hides the city and keeps the city
+   *  material pipeline untouched while TerrainMaterial handles lowland /
+   *  foothill / mountain texture mixing. */
+  static isMichiganTerrain(level: WorldLevel): boolean {
+    return level === 11;
   }
 
   /** `true` for the Saginaw Underwater Lab (Level 8) — a flooded indoor
@@ -542,7 +564,8 @@ export class LevelSystem {
   applyLoadedState(snap: Partial<LevelSnapshot> | null | undefined): void {
     let lvl: WorldLevel = 1;
     const raw = snap && typeof snap.worldLevel === "number" ? snap.worldLevel : 1;
-    if (raw >= 10) lvl = 10;
+    if (raw >= 11) lvl = 11;
+    else if (raw === 10) lvl = 10;
     else if (raw === 9) lvl = 9;
     else if (raw === 8) lvl = 8;
     else if (raw === 7) lvl = 7;
@@ -559,11 +582,12 @@ export class LevelSystem {
       return;
     }
     // Levels 4 (sanctuary), 5 (orbital), 6 (Pontiac Lab), 7 (Swarms Lair),
-    // 8 (Saginaw Lab) are side-content — don't auto-mark L1/L2/L3 as
+    // 8 (Saginaw Lab), 9 (Zug Island), 10 (Ann Arbor), and 11 (Michigan
+    // Wilds) are side-content — don't auto-mark L1/L2/L3 as
     // cleared just because the player saved there; that would let them
     // skip the campaign on re-entry. Only treat the main chain (1→2→3)
     // as cleared-on-load.
-    if (lvl === 4 || lvl === 5 || lvl === 6 || lvl === 7 || lvl === 8 || lvl === 9 || lvl === 10) {
+    if (lvl === 4 || lvl === 5 || lvl === 6 || lvl === 7 || lvl === 8 || lvl === 9 || lvl === 10 || lvl === 11) {
       this.advanceTo(lvl);
       return;
     }

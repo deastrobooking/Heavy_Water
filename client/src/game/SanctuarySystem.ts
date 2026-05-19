@@ -135,6 +135,7 @@ export class SanctuarySystem {
     this.buildSign();
     this.buildPerimeter();
     this.buildVillage();
+    this.buildPetClinic();
     // Wilder additions — mountains ring the valley, an alien cave sits on
     // its eastern edge as an adventure pocket, and dense L-system foliage
     // + wandering bio-critters bring the place to life. Order matters
@@ -304,22 +305,46 @@ export class SanctuarySystem {
     this.hiddenVisibles = [];
   }
 
-  /** Build a large green-grass disc centred on the sanctuary so the player
-   *  visually stands on rolling plains rather than the city's hidden
-   *  ground. 1500 m diameter is wider than the camera's far-cull at this
-   *  altitude, so the player never sees a hard edge — even when wandering
-   *  outside the perimeter ring to look at the surrounding sky. */
+  /** Build a real rolling terrain patch centred on the sanctuary so the
+   *  player walks on a shaped valley instead of a flat hidden-city stand-in.
+   *  The inner village/farm circle is flattened for readable props while
+   *  the outer terrain rolls upward into foothills before the mountain ring. */
   private buildGrassPlains(): void {
     const c = SanctuarySystem.CENTER;
     const ground = BABYLON.MeshBuilder.CreateGround(
-      "sanctuaryGrass",
-      { width: 1500, height: 1500, subdivisions: 1 },
+      "sanctuaryTerrain",
+      { width: 1500, height: 1500, subdivisions: 96, updatable: true },
       this.scene,
     );
-    ground.position.set(c.x, 0.02, c.z);
+    ground.position.set(c.x, -0.08, c.z);
     ground.parent = this.root;
-    ground.isPickable = false;
-    ground.receiveShadows = false;
+    ground.isPickable = true;
+    ground.receiveShadows = true;
+
+    const positions = ground.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+    const indices = ground.getIndices();
+    if (positions && indices) {
+      for (let i = 0; i < positions.length; i += 3) {
+        const x = positions[i];
+        const z = positions[i + 2];
+        const dist = Math.sqrt(x * x + z * z);
+        const villageFlatten = BABYLON.Scalar.Clamp((dist - 30) / 95, 0, 1);
+        const ripple =
+          Math.sin(x * 0.020) * 0.85 +
+          Math.cos(z * 0.016) * 0.65 +
+          Math.sin((x + z) * 0.011) * 0.50 +
+          (SanctuarySystem.noise2(Math.floor(x / 18), Math.floor(z / 18), 91) - 0.5) * 0.55;
+        const foothill = SanctuarySystem.smoothstep(230, 690, dist) * 10.5;
+        const dip = (1 - SanctuarySystem.smoothstep(0, 150, dist)) * -0.18;
+        positions[i + 1] = ripple * villageFlatten + foothill + dip;
+      }
+      const normals: number[] = [];
+      BABYLON.VertexData.ComputeNormals(positions, indices, normals);
+      ground.updateVerticesData(BABYLON.VertexBuffer.PositionKind, positions);
+      ground.setVerticesData(BABYLON.VertexBuffer.NormalKind, normals);
+      ground.refreshBoundingInfo();
+    }
+
     const mat = new BABYLON.StandardMaterial("sanctuaryGrassMat", this.scene);
     // Warm-meadow green: lifted from a reference frontier-village palette
     // so it reads "cozy farm" rather than "alien biome".
@@ -498,6 +523,11 @@ export class SanctuarySystem {
     beamMat.diffuseColor = new BABYLON.Color3(0.30, 0.20, 0.12);
     beamMat.specularColor = new BABYLON.Color3(0, 0, 0);
 
+    const trimMat = new BABYLON.StandardMaterial("villageTrimMat", scene);
+    trimMat.diffuseColor = new BABYLON.Color3(0.92, 0.82, 0.60);
+    trimMat.emissiveColor = new BABYLON.Color3(0.08, 0.06, 0.03);
+    trimMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
     const stoneMat = new BABYLON.StandardMaterial("villageStoneMat", scene);
     stoneMat.diffuseColor = new BABYLON.Color3(0.62, 0.60, 0.55);
     stoneMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
@@ -519,6 +549,11 @@ export class SanctuarySystem {
     const hayMat = new BABYLON.StandardMaterial("villageHayMat", scene);
     hayMat.diffuseColor = new BABYLON.Color3(0.92, 0.78, 0.32);
     hayMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const bloomMat = new BABYLON.StandardMaterial("villageFlowerMat", scene);
+    bloomMat.diffuseColor = new BABYLON.Color3(0.95, 0.35, 0.58);
+    bloomMat.emissiveColor = new BABYLON.Color3(0.22, 0.04, 0.10);
+    bloomMat.specularColor = new BABYLON.Color3(0, 0, 0);
 
     // ---- helper: build one cottage at (x,z) with a yaw rotation ----
     const buildCottage = (x: number, z: number, yaw: number, idx: number) => {
@@ -573,7 +608,77 @@ export class SanctuarySystem {
         win.parent = this.root;
         win.material = winMat;
         win.isPickable = false;
+
+        const box = BABYLON.MeshBuilder.CreateBox(`cottageFlowerBox_${idx}_${sgn}`,
+          { width: 1.05, height: 0.22, depth: 0.24 }, scene);
+        const boxOff = right.scale(sgn * (W / 2 - 1.2)).add(fwd.scale(1.10));
+        box.position.set(x + boxOff.x, 1.02, z + boxOff.z);
+        box.rotation.y = yaw;
+        box.parent = this.root;
+        box.material = beamMat;
+        box.isPickable = false;
+
+        for (let b = 0; b < 3; b++) {
+          const bloom = BABYLON.MeshBuilder.CreateSphere(`cottageBloom_${idx}_${sgn}_${b}`,
+            { diameter: 0.18, segments: 8 }, scene);
+          const bloomOff = right.scale(sgn * (W / 2 - 1.2) + (b - 1) * 0.24).add(fwd.scale(1.18));
+          bloom.position.set(x + bloomOff.x, 1.18, z + bloomOff.z);
+          bloom.parent = this.root;
+          bloom.material = bloomMat;
+          bloom.isPickable = false;
+        }
       }
+
+      const foundation = BABYLON.MeshBuilder.CreateBox(`cottageFoundation_${idx}`,
+        { width: W + 0.45, height: 0.35, depth: D + 0.45 }, scene);
+      foundation.position.set(x, 0.18, z);
+      foundation.rotation.y = yaw;
+      foundation.parent = this.root;
+      foundation.material = stoneMat;
+      foundation.isPickable = false;
+
+      const porch = BABYLON.MeshBuilder.CreateBox(`cottagePorch_${idx}`,
+        { width: 2.2, height: 0.22, depth: 1.25 }, scene);
+      const porchOff = fwd.scale(1.20);
+      porch.position.set(x + porchOff.x, 0.30, z + porchOff.z);
+      porch.rotation.y = yaw;
+      porch.parent = this.root;
+      porch.material = beamMat;
+      porch.isPickable = false;
+
+      const awning = BABYLON.MeshBuilder.CreateBox(`cottageAwning_${idx}`,
+        { width: 2.4, height: 0.18, depth: 0.95 }, scene);
+      const awningOff = fwd.scale(1.15);
+      awning.position.set(x + awningOff.x, 2.25, z + awningOff.z);
+      awning.rotation.y = yaw;
+      awning.rotation.x = -0.18;
+      awning.parent = this.root;
+      awning.material = roofMat;
+      awning.isPickable = false;
+
+      for (const sgn of [-1, 1]) {
+        const trim = BABYLON.MeshBuilder.CreateBox(`cottageRoofTrim_${idx}_${sgn}`,
+          { width: W * 0.82, height: 0.16, depth: 0.16 }, scene);
+        const trimOff = new BABYLON.Vector3(0, 0, 0)
+          .add(right.scale(0))
+          .add(fwd.scale(sgn * (D / 2 + 0.08)));
+        trim.position.set(x + trimOff.x, H + 0.38, z + trimOff.z);
+        trim.rotation.y = yaw;
+        trim.rotation.z = sgn * 0.52;
+        trim.parent = this.root;
+        trim.material = trimMat;
+        trim.isPickable = false;
+      }
+
+      const chimneySide = right.scale((idx % 2 === 0 ? 1 : -1) * (W / 2 - 1.1));
+      const chimneyBack = fwd.scale(-0.55);
+      const chimney = BABYLON.MeshBuilder.CreateBox(`cottageChimney_${idx}`,
+        { width: 0.7, height: 1.7, depth: 0.7 }, scene);
+      chimney.position.set(x + chimneySide.x + chimneyBack.x, H + 1.45, z + chimneySide.z + chimneyBack.z);
+      chimney.rotation.y = yaw;
+      chimney.parent = this.root;
+      chimney.material = stoneMat;
+      chimney.isPickable = false;
     };
 
     // Four cottages around the sanctuary plaza, doors facing the plinth.
@@ -714,6 +819,128 @@ export class SanctuarySystem {
     plazaLight.intensity = 0.35;
     plazaLight.includeOnlyWithLayerMask = 0xFFFFFFFF;
     plazaLight.parent = this.root;
+  }
+
+  /** Sanctuary pet hospital: a visible mini-game anchor for feeding,
+   *  bonding, and recovering captured Animatons. The interaction itself
+   *  is still the Garden UI, but the world now shows where care happens. */
+  private buildPetClinic(): void {
+    const c = SanctuarySystem.CENTER;
+    const scene = this.scene;
+    const x = c.x + 23;
+    const z = c.z - 18;
+    const yaw = -0.28;
+
+    const wallMat = new BABYLON.StandardMaterial("clinicWallMat", scene);
+    wallMat.diffuseColor = new BABYLON.Color3(0.86, 0.92, 0.90);
+    wallMat.emissiveColor = new BABYLON.Color3(0.08, 0.10, 0.10);
+    wallMat.specularColor = new BABYLON.Color3(0.1, 0.12, 0.12);
+
+    const roofMat = new BABYLON.StandardMaterial("clinicRoofMat", scene);
+    roofMat.diffuseColor = new BABYLON.Color3(0.14, 0.55, 0.62);
+    roofMat.emissiveColor = new BABYLON.Color3(0.02, 0.13, 0.16);
+    roofMat.specularColor = new BABYLON.Color3(0.05, 0.12, 0.14);
+
+    const glowMat = new BABYLON.StandardMaterial("clinicGlowMat", scene);
+    glowMat.diffuseColor = new BABYLON.Color3(0.25, 0.95, 1.0);
+    glowMat.emissiveColor = new BABYLON.Color3(0.15, 0.75, 0.95);
+    glowMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const bedMat = new BABYLON.StandardMaterial("clinicBedMat", scene);
+    bedMat.diffuseColor = new BABYLON.Color3(0.42, 0.70, 0.55);
+    bedMat.emissiveColor = new BABYLON.Color3(0.04, 0.12, 0.08);
+    bedMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const body = BABYLON.MeshBuilder.CreateBox("sanctuaryPetClinic",
+      { width: 9, height: 3.8, depth: 6.4 }, scene);
+    body.position.set(x, 1.9, z);
+    body.rotation.y = yaw;
+    body.parent = this.root;
+    body.material = wallMat;
+    body.isPickable = false;
+
+    const roof = BABYLON.MeshBuilder.CreateCylinder("sanctuaryClinicRoof", {
+      diameter: 0,
+      diameterTop: 9.8,
+      diameterBottom: 0.1,
+      height: 7.2,
+      tessellation: 4,
+    }, scene);
+    roof.rotation.x = Math.PI / 2;
+    roof.rotation.y = yaw;
+    roof.position.set(x, 4.45, z);
+    roof.parent = this.root;
+    roof.material = roofMat;
+    roof.isPickable = false;
+
+    const fwd = new BABYLON.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+    const right = new BABYLON.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+
+    const door = BABYLON.MeshBuilder.CreateBox("sanctuaryClinicDoor",
+      { width: 1.45, height: 2.35, depth: 0.18 }, scene);
+    const doorPos = fwd.scale(3.31);
+    door.position.set(x + doorPos.x, 1.17, z + doorPos.z);
+    door.rotation.y = yaw;
+    door.parent = this.root;
+    door.material = glowMat;
+    door.isPickable = false;
+
+    const signBase = BABYLON.MeshBuilder.CreateBox("sanctuaryClinicSign",
+      { width: 2.6, height: 1.25, depth: 0.16 }, scene);
+    const signPos = fwd.scale(3.43).add(right.scale(-2.2));
+    signBase.position.set(x + signPos.x, 3.0, z + signPos.z);
+    signBase.rotation.y = yaw;
+    signBase.parent = this.root;
+    signBase.material = wallMat;
+    signBase.isPickable = false;
+
+    const crossH = BABYLON.MeshBuilder.CreateBox("sanctuaryClinicCrossH",
+      { width: 1.55, height: 0.32, depth: 0.20 }, scene);
+    crossH.position.copyFrom(signBase.position);
+    crossH.position.y += 0.02;
+    crossH.rotation.y = yaw;
+    crossH.parent = this.root;
+    crossH.material = glowMat;
+    crossH.isPickable = false;
+
+    const crossV = BABYLON.MeshBuilder.CreateBox("sanctuaryClinicCrossV",
+      { width: 0.34, height: 1.05, depth: 0.22 }, scene);
+    crossV.position.copyFrom(signBase.position);
+    crossV.rotation.y = yaw;
+    crossV.parent = this.root;
+    crossV.material = glowMat;
+    crossV.isPickable = false;
+
+    for (const side of [-1, 1]) {
+      const wingPos = fwd.scale(-0.6).add(right.scale(side * 4.15));
+      const pod = BABYLON.MeshBuilder.CreateCylinder(`sanctuaryHealPod_${side}`,
+        { diameter: 1.15, height: 2.6, tessellation: 18 }, scene);
+      pod.position.set(x + wingPos.x, 1.35, z + wingPos.z);
+      pod.rotation.z = Math.PI / 2;
+      pod.rotation.y = yaw;
+      pod.parent = this.root;
+      pod.material = glowMat;
+      pod.isPickable = false;
+
+      const bedPos = fwd.scale(4.4).add(right.scale(side * 3.3));
+      const bed = BABYLON.MeshBuilder.CreateBox(`sanctuaryPetBed_${side}`,
+        { width: 2.3, height: 0.35, depth: 1.4 }, scene);
+      bed.position.set(x + bedPos.x, 0.28, z + bedPos.z);
+      bed.rotation.y = yaw;
+      bed.parent = this.root;
+      bed.material = bedMat;
+      bed.isPickable = false;
+    }
+
+    const clinicLight = new BABYLON.PointLight(
+      "sanctuaryClinicLight",
+      new BABYLON.Vector3(x, 3.3, z),
+      scene,
+    );
+    clinicLight.diffuse = new BABYLON.Color3(0.35, 0.95, 1.0);
+    clinicLight.intensity = 0.85;
+    clinicLight.range = 16;
+    clinicLight.parent = this.root;
   }
 
   /** Stone pedestal + glowing cyan orb that registers as a synthetic
@@ -1197,6 +1424,16 @@ export class SanctuarySystem {
       }
     });
   }
+
+  private static noise2(x: number, y: number, seed: number): number {
+    const n = Math.sin(x * 12.9898 + y * 78.233 + seed * 37.719) * 43758.5453;
+    return n - Math.floor(n);
+  }
+
+  private static smoothstep(edge0: number, edge1: number, x: number): number {
+    const t = BABYLON.Scalar.Clamp((x - edge0) / (edge1 - edge0), 0, 1);
+    return t * t * (3 - 2 * t);
+  }
 }
 
 // ============================================================================
@@ -1439,10 +1676,19 @@ class FarmingSystem {
       return;
     }
     if (plot.stage === 3) {
-      // Each grown plot yields 2 bio-crops. Harvest resets the plot.
+      // Each grown plot yields 2 bio-crops, with a clinic-feed bonus so the
+      // farming loop plugs directly into pet bonding instead of feeling like
+      // a disconnected resource drip. Harvest resets the plot.
       this.inventory.addItem(ITEM_DEFINITIONS.bio_crop, 2);
+      const feedBonus = Math.random() < 0.45;
+      if (feedBonus) this.inventory.addItem(ITEM_DEFINITIONS.animaton_feed, 1);
       this.setStage(plot, 0);
-      this.bus.emit(GameEvents.UI_MESSAGE, "Harvested 2× Bio Crop.");
+      this.bus.emit(
+        GameEvents.UI_MESSAGE,
+        feedBonus
+          ? "Harvested 2x Bio Crop + 1 Animaton Feed."
+          : "Harvested 2x Bio Crop.",
+      );
       return;
     }
     // Stage 1 or 2 — show time remaining via the prompt; nothing to do.
