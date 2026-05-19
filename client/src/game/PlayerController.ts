@@ -8,7 +8,10 @@ import { HUMANOID_PRESETS } from "./HumanoidPresets";
 import { equipArmorSet, deserializeArmorSet, EquippedArmor, ArmorSetSerialized, DEFAULT_ARMOR_SET } from "./RobotArmorSystem";
 import type { WallCollider, FloorPlatform } from "./CityGenerator";
 
-export type PlayerState = "idle" | "moving" | "sprinting" | "dodging" | "attacking" | "stunned" | "dead" | "jetpack" | "flying" | "hovering";
+export type PlayerState = "idle" | "moving" | "sprinting" | "dodging" | "attacking" | "stunned" | "dead" | "jetpack" | "flying" | "hovering" | "swimming";
+
+type TerrainHeightProvider = (x: number, z: number, currentY?: number) => number | null | undefined;
+type WaterSurfaceProvider = (x: number, z: number) => number | null | undefined;
 
 export interface PlayerStats {
   health: number;
@@ -104,6 +107,14 @@ export class PlayerController implements IDamageable {
   private jumpForce: number = 0.5;
   private gravity: number = 0.02;
   private groundY: number = 1;
+  private terrainHeightProvider: TerrainHeightProvider | null = null;
+  private waterSurfaceProvider: WaterSurfaceProvider | null = null;
+  private isSwimming: boolean = false;
+  private swimSpeed: number = 0.18;
+  private swimSprintSpeed: number = 0.28;
+  private swimAscendSpeed: number = 0.12;
+  private swimDiveSpeed: number = 0.10;
+  private swimDrag: number = 0.86;
 
   health: number = 250;
   maxHealth: number = 250;
@@ -289,42 +300,46 @@ export class PlayerController implements IDamageable {
   private setupStateMachine(): void {
     this.stateMachine.addState({
       name: "idle",
-      transitions: ["moving", "sprinting", "dodging", "attacking", "stunned", "dead", "jetpack", "flying", "hovering"],
+      transitions: ["moving", "sprinting", "dodging", "attacking", "stunned", "dead", "jetpack", "flying", "hovering", "swimming"],
     });
     this.stateMachine.addState({
       name: "moving",
-      transitions: ["idle", "sprinting", "dodging", "attacking", "stunned", "dead", "jetpack", "flying", "hovering"],
+      transitions: ["idle", "sprinting", "dodging", "attacking", "stunned", "dead", "jetpack", "flying", "hovering", "swimming"],
     });
     this.stateMachine.addState({
       name: "sprinting",
-      transitions: ["idle", "moving", "dodging", "attacking", "stunned", "dead", "jetpack", "flying", "hovering"],
+      transitions: ["idle", "moving", "dodging", "attacking", "stunned", "dead", "jetpack", "flying", "hovering", "swimming"],
     });
     this.stateMachine.addState({
       name: "dodging",
-      transitions: ["idle", "moving", "sprinting", "stunned", "dead"],
+      transitions: ["idle", "moving", "sprinting", "stunned", "dead", "swimming"],
     });
     this.stateMachine.addState({
       name: "attacking",
-      transitions: ["idle", "moving", "dodging", "stunned", "dead", "flying"],
+      transitions: ["idle", "moving", "dodging", "stunned", "dead", "flying", "swimming"],
     });
     this.stateMachine.addState({
       name: "stunned",
-      transitions: ["idle", "dead"],
+      transitions: ["idle", "dead", "swimming"],
     });
     this.stateMachine.addState({
       name: "dead",
     });
     this.stateMachine.addState({
       name: "jetpack",
-      transitions: ["idle", "moving", "stunned", "dead", "flying"],
+      transitions: ["idle", "moving", "stunned", "dead", "flying", "swimming"],
     });
     this.stateMachine.addState({
       name: "flying",
-      transitions: ["idle", "moving", "hovering", "stunned", "dead"],
+      transitions: ["idle", "moving", "hovering", "stunned", "dead", "swimming"],
     });
     this.stateMachine.addState({
       name: "hovering",
-      transitions: ["idle", "moving", "flying", "stunned", "dead"],
+      transitions: ["idle", "moving", "flying", "stunned", "dead", "swimming"],
+    });
+    this.stateMachine.addState({
+      name: "swimming",
+      transitions: ["idle", "moving", "sprinting", "stunned", "dead", "flying", "hovering"],
     });
   }
 
@@ -430,6 +445,9 @@ export class PlayerController implements IDamageable {
       }
 
       if (e.code === "Space") {
+        if (this.isSwimming) {
+          return;
+        }
         if (this.isFlying || this.isSupermanFlight) {
           return;
         }
@@ -699,6 +717,14 @@ export class PlayerController implements IDamageable {
     }
 
     this.stateMachine.update(deltaTime);
+    this.updateWaterContact();
+
+    if (this.isSwimming) {
+      this.updateSwimming(deltaTime);
+      this.updateCamera(deltaTime);
+      this.updateAnimations(deltaTime);
+      return;
+    }
 
     if (this.isFlying) {
       this.updateFlight(deltaTime);
@@ -846,6 +872,123 @@ export class PlayerController implements IDamageable {
     }
   }
 
+  private getAnalyticalGroundY(x: number, z: number, currentY: number = this.meshRoot.position.y): number | null {
+    if (!this.terrainHeightProvider) return null;
+    const h = this.terrainHeightProvider(x, z, currentY);
+    return typeof h === "number" && Number.isFinite(h) ? h : null;
+  }
+
+  private getWaterContact(): { waterY: number; groundY: number; depth: number } | null {
+    if (!this.waterSurfaceProvider) return null;
+    const x = this.meshRoot.position.x;
+    const z = this.meshRoot.position.z;
+    const waterY = this.waterSurfaceProvider(x, z);
+    if (typeof waterY !== "number" || !Number.isFinite(waterY)) return null;
+
+    const ground = this.getAnalyticalGroundY(x, z) ?? this.groundY;
+    const depth = waterY - ground;
+    if (depth < 1.05) return null;
+    return { waterY, groundY: ground, depth };
+  }
+
+  private updateWaterContact(): void {
+    const contact = this.getWaterContact();
+    const canSwim =
+      !!contact &&
+      !this.mountedVehicleRoot &&
+      !this.isFlying &&
+      !this.isSupermanFlight &&
+      !this.stateMachine.isInState("dead");
+
+    const submerged = canSwim && this.meshRoot.position.y <= contact!.waterY + 0.95;
+    if (!submerged) {
+      if (this.isSwimming) this.exitSwimming();
+      return;
+    }
+
+    if (!this.isSwimming) {
+      this.isSwimming = true;
+      this.isGrounded = false;
+      this.isJetpacking = false;
+      if (this.isDodging || this.isBoostDashing) this.isInvulnerable = false;
+      this.isDodging = false;
+      this.isBoostDashing = false;
+      this.dodgeTimer = 0;
+      this.boostDashTimer = 0;
+      this.cancelAirSmash();
+      this.velocity.y = Math.min(this.velocity.y, 0);
+      this.bus.emit(GameEvents.UI_MESSAGE, { text: "SWIMMING", duration: 1.1 });
+    }
+    this.stateMachine.changeState("swimming");
+  }
+
+  private exitSwimming(): void {
+    this.isSwimming = false;
+    if (!this.stateMachine.isInState("dead", "stunned")) {
+      this.stateMachine.changeState(this.isMoving() ? "moving" : "idle");
+    }
+  }
+
+  private updateSwimming(dt: number): void {
+    const contact = this.getWaterContact();
+    if (!contact) {
+      this.exitSwimming();
+      return;
+    }
+
+    const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
+    const right = this.camera.getDirection(BABYLON.Vector3.Right());
+    forward.y = 0;
+    right.y = 0;
+    if (forward.lengthSquared() < 0.0001) forward.set(0, 0, 1);
+    else forward.normalize();
+    if (right.lengthSquared() < 0.0001) right.set(1, 0, 0);
+    else right.normalize();
+
+    const target = BABYLON.Vector3.Zero();
+    const speed = this.isSprinting ? this.swimSprintSpeed : this.swimSpeed;
+    if (this.keys["KeyW"]) target.addInPlace(forward.scale(speed));
+    if (this.keys["KeyS"]) target.addInPlace(forward.scale(-speed * 0.75));
+    if (this.keys["KeyA"]) target.addInPlace(right.scale(-speed));
+    if (this.keys["KeyD"]) target.addInPlace(right.scale(speed));
+
+    this.velocity.x = this.velocity.x * this.swimDrag + target.x * (1 - this.swimDrag);
+    this.velocity.z = this.velocity.z * this.swimDrag + target.z * (1 - this.swimDrag);
+
+    const wantsUp = this.keys["Space"];
+    const wantsDown = this.keys["ControlLeft"] || this.keys["ControlRight"] || this.keys["ShiftRight"];
+    if (wantsUp) {
+      this.velocity.y += this.swimAscendSpeed;
+    } else if (wantsDown) {
+      this.velocity.y -= this.swimDiveSpeed;
+    } else {
+      const surfaceFloatY = contact.waterY + 0.35;
+      const buoyancy = (surfaceFloatY - this.meshRoot.position.y) * 0.018;
+      this.velocity.y = this.velocity.y * 0.82 + BABYLON.Scalar.Clamp(buoyancy, -0.035, 0.045);
+    }
+    this.velocity.y = BABYLON.Scalar.Clamp(this.velocity.y, -0.16, 0.18);
+
+    const frameScale = BABYLON.Scalar.Clamp(dt * 60, 0.35, 1.8);
+    this.meshRoot.position.addInPlace(this.velocity.scale(frameScale));
+
+    const minBodyY = contact.groundY + 0.75;
+    const maxBodyY = contact.waterY + 0.72;
+    if (this.meshRoot.position.y < minBodyY) {
+      this.meshRoot.position.y = minBodyY;
+      this.velocity.y = Math.max(0, this.velocity.y);
+    }
+    if (this.meshRoot.position.y > maxBodyY) {
+      this.meshRoot.position.y = maxBodyY;
+      this.velocity.y = Math.min(0, this.velocity.y);
+    }
+
+    this.isGrounded = false;
+    this.jumpCount = 0;
+    this.airMomentumX = this.velocity.x;
+    this.airMomentumZ = this.velocity.z;
+    this.stateMachine.changeState("swimming");
+  }
+
   /** Public accessor so the HUD can show a rocket-skate badge. */
   isRocketSkateMode(): boolean {
     return this.isRocketSkating;
@@ -902,8 +1045,13 @@ export class PlayerController implements IDamageable {
 
     this.meshRoot.position.addInPlace(this.velocity);
 
-    if (this.meshRoot.position.y < this.groundY + 1) {
-      this.meshRoot.position.y = this.groundY + 1;
+    const groundY = this.getAnalyticalGroundY(
+      this.meshRoot.position.x,
+      this.meshRoot.position.z,
+      this.meshRoot.position.y,
+    ) ?? this.groundY;
+    if (this.meshRoot.position.y < groundY + 1) {
+      this.meshRoot.position.y = groundY + 1;
       this.velocity.y = 0;
       this.isGrounded = true;
       this.jumpCount = 0;
@@ -1041,6 +1189,14 @@ export class PlayerController implements IDamageable {
     this.resolveWallCollisions();
 
     let surfaceY = this.groundY;
+    const analyticalGroundY = this.getAnalyticalGroundY(
+      this.meshRoot.position.x,
+      this.meshRoot.position.z,
+      this.meshRoot.position.y,
+    );
+    if (analyticalGroundY != null) {
+      surfaceY = analyticalGroundY;
+    }
     const rayLength = Math.max(8, Math.abs(this.velocity.y) * 20 + 5);
     const ray = new BABYLON.Ray(
       new BABYLON.Vector3(this.meshRoot.position.x, this.meshRoot.position.y, this.meshRoot.position.z),
@@ -1055,6 +1211,7 @@ export class PlayerController implements IDamageable {
     const hit = this.scene.pickWithRay(ray, (mesh) => {
       if (mesh.name === "player" || mesh.name.startsWith("char")) return false;
       const n = mesh.name;
+      if (analyticalGroundY != null && n === "ground") return false;
       return n === "ground" || n.startsWith("skyPlat_") || n.startsWith("bridge_seg") ||
         n.startsWith("step_") || n.startsWith("rooftop_") || n === "mainHighway" ||
         n === "crossHighway" || n === "spaceport" ||
@@ -1302,6 +1459,34 @@ export class PlayerController implements IDamageable {
 
   setPosition(pos: BABYLON.Vector3): void {
     this.meshRoot.position.copyFrom(pos);
+  }
+
+  teleportTo(pos: BABYLON.Vector3): void {
+    this.meshRoot.position.copyFrom(pos);
+    this.velocity.setAll(0);
+    this.airMomentumX = 0;
+    this.airMomentumZ = 0;
+    this.isGrounded = false;
+    this.isJetpacking = false;
+    this.isFlying = false;
+    this.isSupermanFlight = false;
+    this.isSwimming = false;
+    this.isDodging = false;
+    this.isBoostDashing = false;
+    this.dodgeTimer = 0;
+    this.boostDashTimer = 0;
+    this.cancelAirSmash();
+    this.jumpCount = 0;
+    this.meshRoot.rotation.x = 0;
+    this.stateMachine.forceState("idle");
+  }
+
+  setTerrainHeightProvider(provider: TerrainHeightProvider | null): void {
+    this.terrainHeightProvider = provider;
+  }
+
+  setWaterSurfaceProvider(provider: WaterSurfaceProvider | null): void {
+    this.waterSurfaceProvider = provider;
   }
 
   getCameraYaw(): number {
@@ -1792,8 +1977,13 @@ export class PlayerController implements IDamageable {
     this.meshRoot.rotation.x = -0.55;
 
     // Land cancels the mode and restores upright posture.
-    if (this.meshRoot.position.y < this.groundY + 1) {
-      this.meshRoot.position.y = this.groundY + 1;
+    const groundY = this.getAnalyticalGroundY(
+      this.meshRoot.position.x,
+      this.meshRoot.position.z,
+      this.meshRoot.position.y,
+    ) ?? this.groundY;
+    if (this.meshRoot.position.y < groundY + 1) {
+      this.meshRoot.position.y = groundY + 1;
       this.velocity.y = 0;
       this.isGrounded = true;
       this.jumpCount = 0;
@@ -1836,6 +2026,7 @@ export class PlayerController implements IDamageable {
   private mapPlayerStateToAnimation(): AnimationState {
     if (!this.isAlive) return "dead";
 
+    if (this.isSwimming) return "flyingHover";
     if (this.isDodging) return "dodgeRoll";
 
     const playerState = this.stateMachine.getState();
@@ -1914,6 +2105,10 @@ export class PlayerController implements IDamageable {
    *  jetpacking or in DBZ free-flight — those modes own velocity.y). */
   getIsJetpacking(): boolean {
     return this.isJetpacking;
+  }
+
+  getIsSwimming(): boolean {
+    return this.isSwimming;
   }
 
   /** True if the player is currently mid-smash. Lets external systems

@@ -38,7 +38,15 @@ export interface SpecialUpgradeInfo {
 }
 
 /** One destination listed in the TRAVEL tab. */
+export interface TravelWarpPoint {
+  x: number;
+  z: number;
+  y?: number;
+}
+
 export interface TravelDestinationInfo {
+  /** Stable row id. Defaults to `level` for normal level warps. */
+  id?: string;
   /** WorldLevel id. Kept as plain number so this module doesn't need to
    *  import the LevelSystem type-circularly. */
   level: number;
@@ -50,6 +58,8 @@ export interface TravelDestinationInfo {
   locked?: boolean;
   /** Lock reason — shown in place of the warp button when `locked`. */
   lockReason?: string;
+  /** Optional in-level destination, used for named open-world warp points. */
+  warpPoint?: TravelWarpPoint;
 }
 
 interface UpgradeMenuProps {
@@ -73,7 +83,7 @@ interface UpgradeMenuProps {
   onUpgradePlayer?: (id: string) => void;
   onUnlockSpecial?: (id: string) => void;
   onUpgradeCompanionWeapon?: (id: string) => void;
-  onFastTravel?: (level: number) => void;
+  onFastTravel?: (level: number, warpPoint?: TravelWarpPoint) => void;
   onClose: () => void;
   /** Per-weapon Power-Jewel state. When omitted the jewel slot UI is
    *  hidden — keeps backward compat with any caller that hasn't wired
@@ -190,10 +200,11 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
       }
     } else {
       for (const d of travelDestinations) {
+        const key = `t-${d.id ?? d.level}`;
         out.push({
-          key: `t-${d.level}`,
-          activate: () => onFastTravel?.(d.level),
-          canActivate: !d.locked && d.level !== currentLevel,
+          key,
+          activate: () => onFastTravel?.(d.level, d.warpPoint),
+          canActivate: !d.locked && (d.warpPoint != null || d.level !== currentLevel),
         });
       }
     }
@@ -643,13 +654,14 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
                 FAST TRAVEL — instantly relocate to any unlocked zone. Your build progress and inventory are preserved.
               </div>
               {travelDestinations.map(d => {
-                const isCurrent = d.level === currentLevel;
+                const rowKey = `t-${d.id ?? d.level}`;
+                const isCurrent = d.warpPoint == null && d.level === currentLevel;
                 const disabled = d.locked || isCurrent;
                 return (
                   <div
-                    ref={setRowRef(`t-${d.level}`)}
-                    key={d.level}
-                    className={`border rounded-lg p-3 transition ${isCurrent ? "bg-cyan-950/40 border-cyan-500" : d.locked ? "bg-zinc-900/60 border-zinc-800" : "bg-zinc-800/80 border-zinc-700 hover:border-cyan-500"}${ringClass(`t-${d.level}`)}`}
+                    ref={setRowRef(rowKey)}
+                    key={rowKey}
+                    className={`border rounded-lg p-3 transition ${isCurrent ? "bg-cyan-950/40 border-cyan-500" : d.locked ? "bg-zinc-900/60 border-zinc-800" : "bg-zinc-800/80 border-zinc-700 hover:border-cyan-500"}${ringClass(rowKey)}`}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
@@ -668,7 +680,7 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
                         ) : (
                           <button
                             disabled={disabled}
-                            onClick={() => onFastTravel?.(d.level)}
+                            onClick={() => onFastTravel?.(d.level, d.warpPoint)}
                             className="px-3 py-1.5 rounded text-xs font-bold tracking-wider bg-cyan-500 hover:bg-cyan-400 text-black"
                           >
                             WARP

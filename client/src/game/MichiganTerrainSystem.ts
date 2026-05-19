@@ -25,6 +25,24 @@ interface HeightData {
   values: Float32Array;
 }
 
+export interface MichiganWarpPoint {
+  id: string;
+  name: string;
+  description: string;
+  kind: "base" | "tower" | "lab";
+  x: number;
+  z: number;
+}
+
+interface MichiganWarpPointDef {
+  id: string;
+  name: string;
+  description: string;
+  kind: "base" | "tower" | "lab";
+  fx: number;
+  fz: number;
+}
+
 /**
  * Heightmap side-zone for the Michigan Wilds level.
  *
@@ -38,6 +56,7 @@ export class MichiganTerrainSystem {
   private handles: MichiganTerrainHandles;
   private root: BABYLON.TransformNode;
   private terrain: BABYLON.Mesh | null = null;
+  private water: BABYLON.Mesh | null = null;
   private terrainMaterial: TerrainMaterial | null = null;
   private heightData: HeightData | null = null;
   private hiddenVisibles: Array<{ setVisible(v: boolean): void }> = [];
@@ -59,15 +78,122 @@ export class MichiganTerrainSystem {
   ];
   private static readonly GRASS_TEXTURE_URL = "/textures/grass.png";
   private static readonly CENTER = new BABYLON.Vector3(3000, 0, 1500);
-  private static readonly TERRAIN_WIDTH = 1800;
-  private static readonly TERRAIN_DEPTH = 1350;
-  private static readonly SUBDIVISIONS = 256;
-  private static readonly MIN_HEIGHT = -18;
-  private static readonly MAX_HEIGHT = 82;
+  private static readonly HEIGHTMAP_PIXEL_WIDTH = 1448;
+  private static readonly HEIGHTMAP_PIXEL_HEIGHT = 1086;
+  private static readonly HEIGHTMAP_ASPECT =
+    MichiganTerrainSystem.HEIGHTMAP_PIXEL_WIDTH / MichiganTerrainSystem.HEIGHTMAP_PIXEL_HEIGHT;
+  private static readonly TERRAIN_DEPTH = 5400;
+  private static readonly TERRAIN_WIDTH =
+    MichiganTerrainSystem.TERRAIN_DEPTH * MichiganTerrainSystem.HEIGHTMAP_ASPECT;
+  private static readonly SUBDIVISIONS = 320;
+  private static readonly MIN_HEIGHT = -26;
+  private static readonly MAX_HEIGHT = 148;
   private static readonly SEA_LEVEL = 0;
+  private static readonly SAFE_SPAWN_Y = MichiganTerrainSystem.SEA_LEVEL + 18;
+  private static readonly SWIM_DEPTH = 1.1;
   private static readonly ROCK_START = 34;
   private static readonly ROCK_FULL = 58;
   private static readonly HEIGHT_COLOR_FILTER = new BABYLON.Color3(0.3, 0.59, 0.11);
+  private static readonly WARP_POINT_DEFS: MichiganWarpPointDef[] = [
+    {
+      id: "west-giant-base",
+      name: "West Giant Base",
+      description: "Enemy giant base in the western forest belt.",
+      kind: "base",
+      fx: -0.39,
+      fz: -0.08,
+    },
+    {
+      id: "north-ridge-base",
+      name: "North Ridge Base",
+      description: "Highland base with clear lines to the northern towers.",
+      kind: "base",
+      fx: 0.02,
+      fz: 0.39,
+    },
+    {
+      id: "southeast-marsh-base",
+      name: "Southeast Marsh Base",
+      description: "Floodplain base guarding the lowland approach.",
+      kind: "base",
+      fx: 0.37,
+      fz: -0.31,
+    },
+    {
+      id: "keweenaw-watchtower",
+      name: "Keweenaw Watchtower",
+      description: "Northern signal tower above the rock country.",
+      kind: "tower",
+      fx: -0.42,
+      fz: 0.43,
+    },
+    {
+      id: "central-firetower",
+      name: "Central Firetower",
+      description: "Tall scout tower near the open-world midpoint.",
+      kind: "tower",
+      fx: -0.04,
+      fz: -0.02,
+    },
+    {
+      id: "huron-watchtower",
+      name: "Huron Watchtower",
+      description: "Eastern tower watching the flooded Huron edge.",
+      kind: "tower",
+      fx: 0.43,
+      fz: 0.08,
+    },
+    {
+      id: "southline-watchtower",
+      name: "Southline Watchtower",
+      description: "Southern signal tower on the final wilds route.",
+      kind: "tower",
+      fx: -0.08,
+      fz: -0.45,
+    },
+    {
+      id: "marquette-rescue-lab",
+      name: "Marquette Rescue Lab",
+      description: "Remote lab holding rescued Animaton records.",
+      kind: "lab",
+      fx: -0.31,
+      fz: 0.25,
+    },
+    {
+      id: "lansing-field-lab",
+      name: "Lansing Field Lab",
+      description: "Central field lab for wilds bio-samples.",
+      kind: "lab",
+      fx: 0.19,
+      fz: -0.35,
+    },
+    {
+      id: "thumb-coast-lab",
+      name: "Thumb Coast Lab",
+      description: "Eastern rescue lab near the lowland waterline.",
+      kind: "lab",
+      fx: 0.39,
+      fz: 0.29,
+    },
+  ];
+
+  static getWarpPoints(): MichiganWarpPoint[] {
+    return MichiganTerrainSystem.WARP_POINT_DEFS.map((def) => {
+      const pos = MichiganTerrainSystem.getWarpWorldPosition(def);
+      return {
+        id: def.id,
+        name: def.name,
+        description: def.description,
+        kind: def.kind,
+        x: pos.x,
+        z: pos.z,
+      };
+    });
+  }
+
+  static getDefaultSpawnY(): number {
+    return MichiganTerrainSystem.SAFE_SPAWN_Y;
+  }
 
   constructor(scene: BABYLON.Scene, handles: MichiganTerrainHandles = {}) {
     this.scene = scene;
@@ -145,6 +271,7 @@ export class MichiganTerrainSystem {
     this.ownedTextures = [];
     this.heightData = null;
     this.terrain = null;
+    this.water = null;
     this.terrainMaterial = null;
     if (restoreOuterWorld) {
       try { this.handles.lodCull?.setSuppressed(false); } catch {}
@@ -154,6 +281,13 @@ export class MichiganTerrainSystem {
 
   getDriveableHeight(x: number, z: number): number | null {
     return this.getHeightAt(x, z);
+  }
+
+  getWaterSurfaceAt(x: number, z: number): number | null {
+    const ground = this.getHeightAt(x, z);
+    if (ground == null) return null;
+    if (ground > MichiganTerrainSystem.SEA_LEVEL - MichiganTerrainSystem.SWIM_DEPTH) return null;
+    return MichiganTerrainSystem.SEA_LEVEL;
   }
 
   getHeightAt(x: number, z: number): number | null {
@@ -220,19 +354,20 @@ export class MichiganTerrainSystem {
 
   private createTerrainMaterial(): TerrainMaterial {
     const material = new TerrainMaterial("miTerrainMat", this.scene);
+    const tileScale = MichiganTerrainSystem.TERRAIN_WIDTH / 1800;
     material.specularColor = new BABYLON.Color3(0.04, 0.045, 0.05);
     material.mixTexture = this.createFallbackMixTexture();
     material.diffuseTexture1 = this.createNoiseTexture(
       "miWaterbedTex",
       new BABYLON.Color3(0.05, 0.12, 0.16),
       new BABYLON.Color3(0.16, 0.22, 0.18),
-      72,
+      72 * tileScale,
       17,
     );
 
     const grass = new BABYLON.Texture(MichiganTerrainSystem.GRASS_TEXTURE_URL, this.scene);
-    grass.uScale = 95;
-    grass.vScale = 95;
+    grass.uScale = 95 * tileScale;
+    grass.vScale = 95 * tileScale;
     grass.wrapU = BABYLON.Texture.WRAP_ADDRESSMODE;
     grass.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
     this.ownedTextures.push(grass);
@@ -242,7 +377,7 @@ export class MichiganTerrainSystem {
       "miRockTex",
       new BABYLON.Color3(0.24, 0.25, 0.27),
       new BABYLON.Color3(0.56, 0.55, 0.50),
-      84,
+      84 * tileScale,
       41,
     );
 
@@ -256,7 +391,7 @@ export class MichiganTerrainSystem {
       {
         width: MichiganTerrainSystem.TERRAIN_WIDTH,
         height: MichiganTerrainSystem.TERRAIN_DEPTH,
-        subdivisions: 32,
+        subdivisions: 64,
       },
       this.scene,
     );
@@ -268,6 +403,7 @@ export class MichiganTerrainSystem {
     water.parent = this.root;
     water.isPickable = false;
     water.receiveShadows = false;
+    this.water = water;
 
     const mat = new BABYLON.StandardMaterial("miWaterMat", this.scene);
     mat.diffuseColor = new BABYLON.Color3(0.02, 0.26, 0.42);
@@ -438,26 +574,28 @@ export class MichiganTerrainSystem {
 
   private applySpawnClearing(localX: number, localZ: number, worldHeight: number): number {
     const dist = Math.sqrt(localX * localX + localZ * localZ);
-    const landingPad = 1 - MichiganTerrainSystem.smoothstep(55, 165, dist);
+    const padScale = MichiganTerrainSystem.TERRAIN_WIDTH / 1800;
+    const landingPad = 1 - MichiganTerrainSystem.smoothstep(55 * padScale, 165 * padScale, dist);
     if (landingPad <= 0) return worldHeight;
     const dryHeight = MichiganTerrainSystem.SEA_LEVEL + 7.5;
     return Math.max(worldHeight, BABYLON.Scalar.Lerp(worldHeight, dryHeight, landingPad));
   }
 
   private proceduralHeight(localX: number, localZ: number): number {
+    const s = MichiganTerrainSystem.TERRAIN_WIDTH / 1800;
     const nx = localX / (MichiganTerrainSystem.TERRAIN_WIDTH / 2);
     const nz = localZ / (MichiganTerrainSystem.TERRAIN_DEPTH / 2);
     const radial = Math.sqrt(nx * nx + nz * nz);
     const rolling =
-      Math.sin(localX * 0.009) * 7.0 +
-      Math.cos(localZ * 0.012) * 5.5 +
-      Math.sin((localX - localZ) * 0.006) * 6.0 +
-      (MichiganTerrainSystem.noise2(Math.floor(localX / 32), Math.floor(localZ / 32), 77) - 0.5) * 7.0;
+      Math.sin((localX * 0.009) / s) * 7.0 +
+      Math.cos((localZ * 0.012) / s) * 5.5 +
+      Math.sin(((localX - localZ) * 0.006) / s) * 6.0 +
+      (MichiganTerrainSystem.noise2(Math.floor(localX / (32 * s)), Math.floor(localZ / (32 * s)), 77) - 0.5) * 7.0;
     const foothills = MichiganTerrainSystem.smoothstep(0.42, 1.0, radial) * 42;
-    const westernMarsh = MichiganTerrainSystem.gaussian(localX + 455, localZ - 120, 185) * -28;
-    const southernLake = MichiganTerrainSystem.gaussian(localX - 120, localZ + 420, 230) * -24;
-    const peakA = MichiganTerrainSystem.gaussian(localX - 520, localZ + 210, 210) * 42;
-    const peakB = MichiganTerrainSystem.gaussian(localX + 660, localZ + 350, 190) * 34;
+    const westernMarsh = MichiganTerrainSystem.gaussian(localX + 455 * s, localZ - 120 * s, 185 * s) * -28;
+    const southernLake = MichiganTerrainSystem.gaussian(localX - 120 * s, localZ + 420 * s, 230 * s) * -24;
+    const peakA = MichiganTerrainSystem.gaussian(localX - 520 * s, localZ + 210 * s, 210 * s) * 42;
+    const peakB = MichiganTerrainSystem.gaussian(localX + 660 * s, localZ + 350 * s, 190 * s) * 34;
     const raw = 8 + rolling + foothills + westernMarsh + southernLake + peakA + peakB;
     return BABYLON.Scalar.Clamp(
       this.applySpawnClearing(localX, localZ, raw),
@@ -473,6 +611,25 @@ export class MichiganTerrainSystem {
     return new BABYLON.Vector3(x, (h ?? MichiganTerrainSystem.SEA_LEVEL) + lift, z);
   }
 
+  private sampleTerrainFraction(fx: number, fz: number, lift: number = 0.6): BABYLON.Vector3 {
+    return this.sampleTerrainPosition(
+      fx * MichiganTerrainSystem.TERRAIN_WIDTH,
+      fz * MichiganTerrainSystem.TERRAIN_DEPTH,
+      lift,
+    );
+  }
+
+  private sampleWarpPoint(def: MichiganWarpPointDef, lift: number = 0.6): BABYLON.Vector3 {
+    return this.sampleTerrainFraction(def.fx, def.fz, lift);
+  }
+
+  private static getWarpWorldPosition(def: MichiganWarpPointDef): { x: number; z: number } {
+    return {
+      x: MichiganTerrainSystem.CENTER.x + def.fx * MichiganTerrainSystem.TERRAIN_WIDTH,
+      z: MichiganTerrainSystem.CENTER.z + def.fz * MichiganTerrainSystem.TERRAIN_DEPTH,
+    };
+  }
+
   private spawnRareWildlife(): void {
     const bio = this.handles.bio;
     if (!bio) return;
@@ -480,13 +637,13 @@ export class MichiganTerrainSystem {
     if (pool.length === 0) return;
 
     const offsets: Array<[number, number]> = [
-      [-620, -360], [-470, 240], [-280, -170], [-120, 420],
-      [  90, -360], [ 240, 150], [ 410, -210], [ 560, 310],
-      [-690, 120], [ 660, -420], [  20, 520], [ 520, 40],
+      [-0.45, -0.36], [-0.36, 0.31], [-0.25, -0.12], [-0.11, 0.44],
+      [ 0.07, -0.39], [ 0.22, 0.16], [ 0.34, -0.22], [ 0.44, 0.33],
+      [-0.48, 0.08], [ 0.47, -0.43], [ 0.01, 0.50], [ 0.40, 0.02],
     ];
-    offsets.forEach(([dx, dz], i) => {
+    offsets.forEach(([fx, fz], i) => {
       const species = pool[(i * 7 + 3) % pool.length];
-      const pos = this.sampleTerrainPosition(dx, dz, 0.9);
+      const pos = this.sampleTerrainFraction(fx, fz, 0.9);
       if (pos.y < MichiganTerrainSystem.SEA_LEVEL + 0.8) {
         pos.y = MichiganTerrainSystem.SEA_LEVEL + 0.8;
       }
@@ -501,16 +658,16 @@ export class MichiganTerrainSystem {
 
   private buildPowerBlooms(): void {
     const entries: Array<[number, number, keyof typeof ITEM_DEFINITIONS, number, BABYLON.Color3]> = [
-      [-520, -230, "bio_seed", 4, new BABYLON.Color3(0.35, 1.0, 0.45)],
-      [-300,  360, "bio_essence", 3, new BABYLON.Color3(0.35, 0.9, 1.0)],
-      [ -40, -470, "animaton_feed", 2, new BABYLON.Color3(1.0, 0.72, 0.28)],
-      [ 260,  320, "power_jewel_rough", 1, new BABYLON.Color3(1.0, 0.32, 0.72)],
-      [ 480, -160, "bio_essence", 4, new BABYLON.Color3(0.45, 0.85, 1.0)],
-      [ 700,  260, "power_jewel_cut", 1, new BABYLON.Color3(1.0, 0.25, 0.95)],
+      [-0.38, -0.22, "bio_seed", 4, new BABYLON.Color3(0.35, 1.0, 0.45)],
+      [-0.25,  0.34, "bio_essence", 3, new BABYLON.Color3(0.35, 0.9, 1.0)],
+      [-0.04, -0.47, "animaton_feed", 2, new BABYLON.Color3(1.0, 0.72, 0.28)],
+      [ 0.22,  0.31, "power_jewel_rough", 1, new BABYLON.Color3(1.0, 0.32, 0.72)],
+      [ 0.36, -0.16, "bio_essence", 4, new BABYLON.Color3(0.45, 0.85, 1.0)],
+      [ 0.47,  0.24, "power_jewel_cut", 1, new BABYLON.Color3(1.0, 0.25, 0.95)],
     ];
 
-    entries.forEach(([dx, dz, itemId, quantity, color], i) => {
-      const pos = this.sampleTerrainPosition(dx, dz, 1.35);
+    entries.forEach(([fx, fz, itemId, quantity, color], i) => {
+      const pos = this.sampleTerrainFraction(fx, fz, 1.35);
       const bloom = BABYLON.MeshBuilder.CreateSphere(`miPowerBloom_${i}`, { diameter: 1.7, segments: 14 }, this.scene);
       bloom.position.copyFrom(pos);
       bloom.parent = this.root;
@@ -539,22 +696,21 @@ export class MichiganTerrainSystem {
   }
 
   private buildWildsOutposts(): void {
-    const baseOffsets: Array<[number, number]> = [
-      [-610, -90],
-      [  70, 420],
-      [ 585, -260],
-    ];
-    baseOffsets.forEach(([dx, dz], i) => this.buildGiantBase(this.sampleTerrainPosition(dx, dz, 0.08), i));
+    let baseIndex = 0;
+    let labIndex = 0;
+    let towerIndex = 0;
+    for (const def of MichiganTerrainSystem.WARP_POINT_DEFS) {
+      if (def.kind === "base") {
+        this.buildGiantBase(this.sampleWarpPoint(def, 0.08), baseIndex++);
+      } else if (def.kind === "lab") {
+        this.buildRescueLab(this.sampleWarpPoint(def, 0.08), labIndex++);
+      } else {
+        this.buildWatchTower(this.sampleWarpPoint(def, 0.08), towerIndex++);
+      }
+    }
 
-    const labOffsets: Array<[number, number]> = [
-      [-410, 265],
-      [ 235, -360],
-      [ 520, 260],
-    ];
-    labOffsets.forEach(([dx, dz], i) => this.buildRescueLab(this.sampleTerrainPosition(dx, dz, 0.08), i));
-
-    this.buildMothershipWreck(this.sampleTerrainPosition(-120, -530, 3.0), 0, -0.38);
-    this.buildMothershipWreck(this.sampleTerrainPosition(660, 85, 4.0), 1, 0.55);
+    this.buildMothershipWreck(this.sampleTerrainFraction(-0.12, -0.50, 3.0), 0, -0.38);
+    this.buildMothershipWreck(this.sampleTerrainFraction(0.46, 0.07, 4.0), 1, 0.55);
   }
 
   private buildGiantBase(pos: BABYLON.Vector3, idx: number): void {
@@ -672,6 +828,58 @@ export class MichiganTerrainSystem {
     light.parent = root;
   }
 
+  private buildWatchTower(pos: BABYLON.Vector3, idx: number): void {
+    const scene = this.scene;
+    const metalMat = this.makeMaterial(`miTowerMetalMat_${idx}`, new BABYLON.Color3(0.28, 0.30, 0.32), new BABYLON.Color3(0.02, 0.04, 0.05));
+    const deckMat = this.makeMaterial(`miTowerDeckMat_${idx}`, new BABYLON.Color3(0.38, 0.26, 0.16), new BABYLON.Color3(0.05, 0.03, 0.01));
+    const beaconMat = this.makeMaterial(`miTowerBeaconMat_${idx}`, new BABYLON.Color3(0.95, 0.76, 0.28), new BABYLON.Color3(0.9, 0.42, 0.08));
+
+    const root = new BABYLON.TransformNode(`miWatchTower_${idx}`, scene);
+    root.parent = this.root;
+    root.position.copyFrom(pos);
+    root.rotation.y = idx * 0.65;
+
+    for (let i = 0; i < 4; i++) {
+      const sx = i < 2 ? -1 : 1;
+      const sz = i % 2 === 0 ? -1 : 1;
+      const leg = BABYLON.MeshBuilder.CreateCylinder(`miTowerLeg_${idx}_${i}`, {
+        diameter: 0.8,
+        height: 26,
+        tessellation: 6,
+      }, scene);
+      leg.position.set(sx * 4.2, 13, sz * 4.2);
+      leg.rotation.z = sx * 0.08;
+      leg.rotation.x = -sz * 0.08;
+      leg.parent = root;
+      leg.material = metalMat;
+      leg.isPickable = false;
+    }
+
+    const deck = BABYLON.MeshBuilder.CreateBox(`miTowerDeck_${idx}`, { width: 12, height: 1.4, depth: 12 }, scene);
+    deck.position.set(0, 25.5, 0);
+    deck.parent = root;
+    deck.material = deckMat;
+    deck.isPickable = false;
+
+    const cabin = BABYLON.MeshBuilder.CreateBox(`miTowerCabin_${idx}`, { width: 8, height: 5, depth: 8 }, scene);
+    cabin.position.set(0, 28.7, 0);
+    cabin.parent = root;
+    cabin.material = deckMat;
+    cabin.isPickable = false;
+
+    const beacon = BABYLON.MeshBuilder.CreateSphere(`miTowerBeacon_${idx}`, { diameter: 2.4, segments: 12 }, scene);
+    beacon.position.set(0, 33.4, 0);
+    beacon.parent = root;
+    beacon.material = beaconMat;
+    beacon.isPickable = false;
+
+    const light = new BABYLON.PointLight(`miTowerLight_${idx}`, new BABYLON.Vector3(0, 34, 0), scene);
+    light.diffuse = new BABYLON.Color3(1.0, 0.65, 0.20);
+    light.intensity = 0.8;
+    light.range = 42;
+    light.parent = root;
+  }
+
   private buildMothershipWreck(pos: BABYLON.Vector3, idx: number, yaw: number): void {
     const scene = this.scene;
     const hullMat = this.makeMaterial(`miMothershipHullMat_${idx}`, new BABYLON.Color3(0.12, 0.09, 0.18), new BABYLON.Color3(0.04, 0.02, 0.08));
@@ -713,19 +921,19 @@ export class MichiganTerrainSystem {
     const enemy = this.handles.enemy;
     if (enemy) {
       const encounters: Array<[EnemyType, number, number]> = [
-        ["wilds_titan", -580, -80],
-        ["wilds_transformer", -430, 250],
-        ["titan", -255, -260],
-        ["captain", -120, 350],
-        ["tank", 110, -380],
-        ["wilds_transformer", 250, 265],
-        ["heavy", 390, -120],
-        ["hybrid", 520, 260],
-        ["wilds_titan", 620, -260],
-        ["commander", 705, 80],
+        ["wilds_titan", -0.40, -0.07],
+        ["wilds_transformer", -0.32, 0.24],
+        ["titan", -0.23, -0.26],
+        ["captain", -0.12, 0.35],
+        ["tank", 0.10, -0.38],
+        ["wilds_transformer", 0.25, 0.26],
+        ["heavy", 0.31, -0.12],
+        ["hybrid", 0.39, 0.28],
+        ["wilds_titan", 0.39, -0.31],
+        ["commander", 0.47, 0.08],
       ];
-      for (const [type, dx, dz] of encounters) {
-        const pos = this.sampleTerrainPosition(dx, dz, type.startsWith("wilds_") ? 3.2 : 1.6);
+      for (const [type, fx, fz] of encounters) {
+        const pos = this.sampleTerrainFraction(fx, fz, type.startsWith("wilds_") ? 3.2 : 1.6);
         try {
           const unit = enemy.spawnEnemyAt(type, pos);
           if (unit) {
@@ -741,9 +949,9 @@ export class MichiganTerrainSystem {
     const aerial = this.handles.aerial;
     if (aerial) {
       const anchors = [
-        this.sampleTerrainPosition(-160, -510, 0),
-        this.sampleTerrainPosition(620, 60, 0),
-        this.sampleTerrainPosition(180, 350, 0),
+        this.sampleTerrainFraction(-0.16, -0.48, 0),
+        this.sampleTerrainFraction(0.43, 0.06, 0),
+        this.sampleTerrainFraction(0.16, 0.36, 0),
       ];
       for (const anchor of anchors) {
         try {

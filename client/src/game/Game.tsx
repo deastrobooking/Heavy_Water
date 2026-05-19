@@ -74,6 +74,7 @@ import { GameUI } from "./GameUI";
 import { MainMenu, SaveSummary } from "./MainMenu";
 import { CharacterEditor, refreshEnemyStyleOverrides } from "./CharacterEditor";
 import AuthUI from "./AuthUI";
+import type { TravelWarpPoint } from "./UpgradeMenu";
 
 type GamePhase = "auth" | "menu" | "playing" | "paused" | "gameover";
 const MAX_FRAME_DELTA_MS = 100;
@@ -264,7 +265,7 @@ export const Game: React.FC = () => {
   // `initializeGame` (which closes over earlier scope) can call helpers
   // that are defined LATER in React-scope (handleFastTravel) or built
   // alongside doSaveProgress (tryGrantLegendaryCompanion).
-  const handleFastTravelRef = useRef<((level: number) => void) | null>(null);
+  const handleFastTravelRef = useRef<((level: number, warpPoint?: TravelWarpPoint) => void) | null>(null);
   const tryGrantLegendaryCompanionRef = useRef<(() => void) | null>(null);
 
   const [gamePhase, setGamePhase] = useState<GamePhase>("auth");
@@ -541,6 +542,12 @@ export const Game: React.FC = () => {
         const player = new PlayerController(scene, engine.getCamera());
         player.setBuildingColliders(cityGenerator.getWallColliders());
         player.setFloorPlatforms(cityGenerator.getFloorPlatforms());
+        player.setTerrainHeightProvider((x, z, currentY) =>
+          michiganTerrainSystemRef.current?.getHeightAt(x, z) ?? null,
+        );
+        player.setWaterSurfaceProvider((x, z) =>
+          michiganTerrainSystemRef.current?.getWaterSurfaceAt(x, z) ?? null,
+        );
         playerRef.current = player;
         // Wire the EnemySystem flying-state provider so commanders /
         // captains / titans only chase upward when the player is
@@ -1347,6 +1354,8 @@ export const Game: React.FC = () => {
           const isMichiganTerrain = typeof payload?.level === "number"
             && LevelSystem.isMichiganTerrain(payload.level as WorldLevel);
           if (isMichiganTerrain && !michiganTerrainSystemRef.current) {
+            player.setBuildingColliders([]);
+            player.setFloorPlatforms([]);
             michiganTerrainSystemRef.current = new MichiganTerrainSystem(
               scene,
               {
@@ -1371,6 +1380,8 @@ export const Game: React.FC = () => {
               isZugIsland || isAnnArbor || isSpacelike;
             try { michiganTerrainSystemRef.current.dispose(!targetKeepsWorldHidden); } catch {}
             michiganTerrainSystemRef.current = null;
+            player.setBuildingColliders(cityGenerator.getWallColliders());
+            player.setFloorPlatforms(cityGenerator.getFloorPlatforms());
           }
 
           // Combat-only progression: bump waves + seed the next fortress.
@@ -3749,7 +3760,7 @@ export const Game: React.FC = () => {
   // `LevelSystem.forceStart` which re-fires `LEVEL_STARTED` — that handler
   // applies sky tint, mounts/dismantles the sanctuary, and clears boss-spawn
   // gates. We then teleport the player to the level's `spawnPoint`.
-  const handleFastTravel = useCallback((level: number) => {
+  const handleFastTravel = useCallback((level: number, warpPoint?: TravelWarpPoint) => {
     const ls = levelSystemRef.current;
     const player = playerRef.current;
     if (!ls || !player) return;
@@ -3759,12 +3770,21 @@ export const Game: React.FC = () => {
       return;
     }
     const sp = LevelSystem.getSpawnPointFor(level as WorldLevel);
+    const targetX = warpPoint?.x ?? sp.x;
+    const targetZ = warpPoint?.z ?? sp.z;
     // Spacelike levels need a high spawn Y so the player wakes up amid the
     // 25–105 m asteroid band (the orbital fighter is auto-entered there);
     // ground levels (including the indoor Swarms Lair) keep the slight 2 m
     // nudge above terrain so they don't fall through if they don't have
     // flight armor.
-    const spawnY = LevelSystem.isSpacelike(level as WorldLevel) ? 60 : 2;
+    const miHeight = LevelSystem.isMichiganTerrain(level as WorldLevel)
+      ? michiganTerrainSystemRef.current?.getHeightAt(targetX, targetZ)
+      : null;
+    const spawnY = LevelSystem.isSpacelike(level as WorldLevel)
+      ? 60
+      : LevelSystem.isMichiganTerrain(level as WorldLevel)
+      ? (warpPoint?.y ?? ((miHeight ?? MichiganTerrainSystem.getDefaultSpawnY()) + 3))
+      : 2;
     // CRITICAL ORDER: teleport BEFORE forceStart. `forceStart` synchronously
     // emits LEVEL_STARTED, which mounts SpaceLevelSystem; that system reads
     // `playerPosProvider()` immediately to spawn/auto-mount the orbital
@@ -3772,10 +3792,21 @@ export const Game: React.FC = () => {
     // If we forceStart first, all of those things spawn at the player's
     // *previous* world position, then we teleport away and the level reads
     // empty.
-    player.setPosition(new BABYLON.Vector3(sp.x, spawnY, sp.z));
+    player.teleportTo(new BABYLON.Vector3(targetX, spawnY, targetZ));
     ls.forceStart(level as WorldLevel);
+    if (LevelSystem.isMichiganTerrain(level as WorldLevel)) {
+      requestAnimationFrame(() => {
+        const p = playerRef.current;
+        const mi = michiganTerrainSystemRef.current;
+        if (!p || !mi) return;
+        const h = mi.getHeightAt(targetX, targetZ);
+        if (h == null) return;
+        const cur = p.getPosition();
+        p.teleportTo(new BABYLON.Vector3(targetX, Math.max(cur.y, h + 3), targetZ));
+      });
+    }
     setUpgradeMenuOpen(false);
-    showMessage(`WARPED TO ${LevelSystem.getDisplayNameFor(level as WorldLevel)}`, 2200);
+    showMessage(`WARPED TO ${warpPoint ? "MI WILDS WARP POINT" : LevelSystem.getDisplayNameFor(level as WorldLevel)}`, 2200);
   }, [showMessage]);
 
   // Bridge handleFastTravel into a ref so EventBus listeners wired
@@ -3790,7 +3821,7 @@ export const Game: React.FC = () => {
   // requires extending LEVEL_DEFS. Ashur intentionally avoids direct city
   // routes so the sanctuary keeps its protected, out-of-the-way feel.
   const travelDestinations = useMemo(() => {
-    return LevelSystem.getAllLevels().map((lvl) => {
+    const levelRows = LevelSystem.getAllLevels().map((lvl) => {
       const blocksDetroitFromAshur = currentWorldLevel === 4 && lvl >= 1 && lvl <= 3;
       return {
         level: lvl,
@@ -3822,6 +3853,14 @@ export const Game: React.FC = () => {
           : undefined,
       };
     });
+    const miWarpRows = MichiganTerrainSystem.getWarpPoints().map((wp) => ({
+      id: `mi-${wp.id}`,
+      level: 11,
+      name: `MI WILDS - ${wp.name}`,
+      description: `${wp.kind.toUpperCase()} WARP - ${wp.description}`,
+      warpPoint: { x: wp.x, z: wp.z } satisfies TravelWarpPoint,
+    }));
+    return [...levelRows, ...miWarpRows];
   }, [currentWorldLevel]);
 
   // Per-weapon Power-Jewel rows for the WEAPONS tab. Re-derives whenever

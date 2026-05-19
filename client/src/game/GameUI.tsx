@@ -7,7 +7,7 @@ import { BlockType, BlockDefinition } from "./BuildingSystem";
 import { PrefabSummary } from "./PrefabSystem";
 import { CompanionUpgradeInfo } from "./CompanionSystem";
 import { CapturedCreature } from "./BioCreatureSystem";
-import { UpgradeMenu, type SpecialUpgradeInfo, type CompanionWeaponInfo, type TravelDestinationInfo, type WeaponJewelInfo } from "./UpgradeMenu";
+import { UpgradeMenu, type SpecialUpgradeInfo, type CompanionWeaponInfo, type TravelDestinationInfo, type TravelWarpPoint, type WeaponJewelInfo } from "./UpgradeMenu";
 import type { JewelTier } from "./JewelSystem";
 import type { PlayerUpgradeInfo } from "./PlayerController";
 import type { ElementalUpgradeInfo } from "./ElementalSpecialsSystem";
@@ -80,7 +80,7 @@ interface GameUIProps {
   upgradeMenuCurrentLevel?: number;
   onUnlockSpecial?: (id: string) => void;
   onUpgradeCompanionWeapon?: (id: string) => void;
-  onFastTravel?: (level: number) => void;
+  onFastTravel?: (level: number, warpPoint?: TravelWarpPoint) => void;
   onUpgradeMenuClose?: () => void;
   onUpgradeWeapon?: (type: string) => void;
   onUpgradeCompanion?: (id: string) => void;
@@ -911,7 +911,7 @@ export const GameUI: React.FC<GameUIProps> = ({
         onUpgradePlayer={(id) => onUpgradePlayer?.(id)}
         onUnlockSpecial={(id) => onUnlockSpecial?.(id)}
         onUpgradeCompanionWeapon={(id) => onUpgradeCompanionWeapon?.(id)}
-        onFastTravel={(lvl) => onFastTravel?.(lvl)}
+        onFastTravel={(lvl, warpPoint) => onFastTravel?.(lvl, warpPoint)}
         onClose={() => onUpgradeMenuClose?.()}
         weaponJewelInfo={weaponJewelInfo}
         onMountJewel={onMountJewel}
