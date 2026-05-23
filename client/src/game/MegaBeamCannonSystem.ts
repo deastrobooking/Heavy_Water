@@ -18,6 +18,9 @@ import { EventBus, GameEvents } from "./EventBus";
 interface CannonMissile {
   mesh: BABYLON.Mesh;
   velocity: BABYLON.Vector3;
+  target: BABYLON.AbstractMesh | null;
+  retargetTimer: number;
+  proximityScanTimer: number;
   lifetime: number;
   damage: number;
   trackingSpeed: number;
@@ -36,6 +39,7 @@ interface ActiveBeam {
   muzzleMesh: BABYLON.Mesh | null;
   light: BABYLON.PointLight | null;
   hit: Set<BABYLON.AbstractMesh>;
+  scanTimer: number;
 }
 
 export class MegaBeamCannonSystem {
@@ -47,6 +51,7 @@ export class MegaBeamCannonSystem {
 
   private missiles: CannonMissile[] = [];
   private beams: ActiveBeam[] = [];
+  private missileMaterial: BABYLON.StandardMaterial | null = null;
   // All time values are in SECONDS; Game.tsx feeds `dt` as deltaTime/1000.
   private cooldown: number = 0;
   private readonly cooldownDuration: number = 6;
@@ -62,6 +67,9 @@ export class MegaBeamCannonSystem {
   private readonly missileDamage: number = 90;
   private readonly missileExplosionRadius: number = 5;
   private readonly missileTrackingSpeed: number = 0.16;
+  private readonly beamDamageScanInterval: number = 0.08;
+  private readonly missileRetargetInterval: number = 0.12;
+  private readonly missileProximityScanInterval: number = 0.08;
 
   constructor(scene: BABYLON.Scene, camera: BABYLON.FreeCamera) {
     this.scene = scene;
@@ -199,12 +207,14 @@ export class MegaBeamCannonSystem {
       muzzleMesh,
       light,
       hit: new Set(),
+      scanTimer: 0,
     });
   }
 
   private spawnMissiles(origin: BABYLON.Vector3, forward: BABYLON.Vector3): void {
     const right = this.camera.getDirection(BABYLON.Vector3.Right()).normalize();
     const up = this.camera.getDirection(BABYLON.Vector3.Up()).normalize();
+    const missileMat = this.getMissileMaterial();
 
     for (let i = 0; i < this.missileCount; i++) {
       const mesh = BABYLON.MeshBuilder.CreateCylinder(`megaCannonMissile_${i}_${Date.now()}`, {
@@ -212,11 +222,7 @@ export class MegaBeamCannonSystem {
         diameter: 0.18,
         tessellation: 8,
       }, this.scene);
-      const mat = new BABYLON.StandardMaterial("megaCannonMissileMat", this.scene);
-      mat.emissiveColor = new BABYLON.Color3(1, 0.45, 0.85);
-      mat.diffuseColor = new BABYLON.Color3(1, 0.4, 0.85);
-      mat.specularColor = new BABYLON.Color3(0.5, 0.5, 0.5);
-      mesh.material = mat;
+      mesh.material = missileMat;
       mesh.isPickable = false;
       mesh.rotation.x = Math.PI / 2;
 
@@ -240,12 +246,30 @@ export class MegaBeamCannonSystem {
         // values (0.025/frame, max 1.4/frame) read naturally; we scale by
         // (dt * 60) when integrating position so it's framerate-independent.
         velocity: initialDir.scale(speed),
+        target: null,
+        retargetTimer: 0,
+        proximityScanTimer: 0,
         lifetime: 6.5,
         damage: this.missileDamage,
         trackingSpeed: this.missileTrackingSpeed,
         explosionRadius: this.missileExplosionRadius,
       });
     }
+  }
+
+  private getMissileMaterial(): BABYLON.StandardMaterial {
+    if (!this.missileMaterial) {
+      const mat = new BABYLON.StandardMaterial("megaCannonMissileMat", this.scene);
+      mat.emissiveColor = new BABYLON.Color3(1, 0.45, 0.85);
+      mat.diffuseColor = new BABYLON.Color3(1, 0.4, 0.85);
+      mat.specularColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+      this.missileMaterial = mat;
+    }
+    return this.missileMaterial;
+  }
+
+  private isLiveTarget(mesh: BABYLON.AbstractMesh | null | undefined): mesh is BABYLON.AbstractMesh {
+    return !!mesh && !mesh.isDisposed?.() && (typeof mesh.isEnabled !== "function" || mesh.isEnabled());
   }
 
   update(dt: number, enemies: BABYLON.AbstractMesh[], _playerPos: BABYLON.Vector3): { hitEnemy: BABYLON.AbstractMesh; damage: number }[] {
@@ -282,35 +306,39 @@ export class MegaBeamCannonSystem {
         beam.light.intensity = 10 * fade;
       }
 
-      // Damage pass: any enemy whose center sits within `beamRadius +
-      // enemyHitRadius` of the beam segment gets hit once.
-      const ox = beam.origin.x, oy = beam.origin.y, oz = beam.origin.z;
-      const dx = beam.direction.x, dy = beam.direction.y, dz = beam.direction.z;
-      const len = beam.length;
-      for (const e of enemies) {
-        if (!e || e.isDisposed?.() || beam.hit.has(e)) continue;
-        const ex = e.position.x - ox;
-        const ey = e.position.y - oy;
-        const ez = e.position.z - oz;
-        // Project onto beam direction
-        const proj = ex * dx + ey * dy + ez * dz;
-        if (proj < 0 || proj > len) continue;
-        // Perpendicular distance squared
-        const cx = ex - dx * proj;
-        const cy = ey - dy * proj;
-        const cz = ez - dz * proj;
-        const perpSq = cx * cx + cy * cy + cz * cz;
-        const meshHitR = (e.metadata as any)?.hitRadius ?? 1.5;
-        const hitR = beam.radius + meshHitR;
-        if (perpSq < hitR * hitR) {
-          beam.hit.add(e);
-          if (this.damageRouter) this.damageRouter(e, beam.damage);
-          hits.push({ hitEnemy: e, damage: beam.damage });
-          this.bus.emit(GameEvents.UI_DAMAGE_NUMBER, {
-            position: e.position.clone(),
-            damage: beam.damage,
-            isCritical: true,
-          });
+      // Damage pass: scan at 12.5 Hz instead of every render frame. Any
+      // enemy whose center sits within `beamRadius + enemyHitRadius` of the
+      // beam segment gets hit once, and new enemies can still enter the beam
+      // during the active window.
+      beam.scanTimer -= dt;
+      if (beam.scanTimer <= 0) {
+        beam.scanTimer = this.beamDamageScanInterval;
+        const ox = beam.origin.x, oy = beam.origin.y, oz = beam.origin.z;
+        const dx = beam.direction.x, dy = beam.direction.y, dz = beam.direction.z;
+        const len = beam.length;
+        for (const e of enemies) {
+          if (!this.isLiveTarget(e) || beam.hit.has(e)) continue;
+          const ex = e.position.x - ox;
+          const ey = e.position.y - oy;
+          const ez = e.position.z - oz;
+          const proj = ex * dx + ey * dy + ez * dz;
+          if (proj < 0 || proj > len) continue;
+          const cx = ex - dx * proj;
+          const cy = ey - dy * proj;
+          const cz = ez - dz * proj;
+          const perpSq = cx * cx + cy * cy + cz * cz;
+          const meshHitR = (e.metadata as any)?.hitRadius ?? 1.5;
+          const hitR = beam.radius + meshHitR;
+          if (perpSq < hitR * hitR) {
+            beam.hit.add(e);
+            if (this.damageRouter) this.damageRouter(e, beam.damage);
+            hits.push({ hitEnemy: e, damage: beam.damage });
+            this.bus.emit(GameEvents.UI_DAMAGE_NUMBER, {
+              position: e.position.clone(),
+              damage: beam.damage,
+              isCritical: true,
+            });
+          }
         }
       }
 
@@ -333,30 +361,38 @@ export class MegaBeamCannonSystem {
       const m = this.missiles[i];
       m.lifetime -= dt;
       if (m.lifetime <= 0) {
-        m.mesh.material?.dispose();
         m.mesh.dispose();
         this.missiles.splice(i, 1);
         continue;
       }
 
-      // Acquire nearest live enemy
-      let nearest: BABYLON.AbstractMesh | null = null;
-      let bestDistSq = Infinity;
-      const px = m.mesh.position.x;
-      const py = m.mesh.position.y;
-      const pz = m.mesh.position.z;
-      for (let k = 0; k < enemies.length; k++) {
-        const e = enemies[k];
-        if (!e || e.isDisposed?.()) continue;
-        const dx = e.position.x - px;
-        const dy = e.position.y - py;
-        const dz = e.position.z - pz;
-        const dSq = dx * dx + dy * dy + dz * dz;
-        if (dSq < bestDistSq) {
-          bestDistSq = dSq;
-          nearest = e;
+      // Acquire nearest live enemy on a short timer. The old version did a
+      // full nearest-target scan for every missile every frame, then did a
+      // second full collision scan. In dense levels that multiplied into a
+      // visible hitch exactly when the cannon fired.
+      m.retargetTimer -= dt;
+      if (!this.isLiveTarget(m.target) || m.retargetTimer <= 0) {
+        m.retargetTimer = this.missileRetargetInterval;
+        let nearest: BABYLON.AbstractMesh | null = null;
+        let bestDistSq = Infinity;
+        const px = m.mesh.position.x;
+        const py = m.mesh.position.y;
+        const pz = m.mesh.position.z;
+        for (let k = 0; k < enemies.length; k++) {
+          const e = enemies[k];
+          if (!this.isLiveTarget(e)) continue;
+          const dx = e.position.x - px;
+          const dy = e.position.y - py;
+          const dz = e.position.z - pz;
+          const dSq = dx * dx + dy * dy + dz * dz;
+          if (dSq < bestDistSq) {
+            bestDistSq = dSq;
+            nearest = e;
+          }
         }
+        m.target = nearest;
       }
+      const nearest = this.isLiveTarget(m.target) ? m.target : null;
 
       // Convert dt (seconds) into frames-at-60fps so the per-frame tuning
       // constants below behave the same regardless of actual framerate.
@@ -377,21 +413,36 @@ export class MegaBeamCannonSystem {
 
       m.mesh.position.addInPlace(m.velocity.scale(frames));
 
-      // Collision check
+      // Collision check. Check the current target every frame, and do a
+      // broader proximity sweep at 12.5 Hz to catch pass-through hits.
       let detonated = false;
-      for (let k = 0; k < enemies.length; k++) {
-        const e = enemies[k];
-        if (!e || e.isDisposed?.()) continue;
+      const checkImpact = (e: BABYLON.AbstractMesh): boolean => {
         const dx = e.position.x - m.mesh.position.x;
         const dy = e.position.y - m.mesh.position.y;
         const dz = e.position.z - m.mesh.position.z;
         const dSq = dx * dx + dy * dy + dz * dz;
         const meshHitR = (e.metadata as any)?.hitRadius ?? 1.5;
-        const trigger = (1.4 + meshHitR);
+        const trigger = 1.4 + meshHitR;
         if (dSq < trigger * trigger) {
           this.detonateMissile(m, enemies, hits);
-          detonated = true;
-          break;
+          return true;
+        }
+        return false;
+      };
+      if (nearest && checkImpact(nearest)) {
+        detonated = true;
+      } else {
+        m.proximityScanTimer -= dt;
+        if (m.proximityScanTimer <= 0) {
+          m.proximityScanTimer = this.missileProximityScanInterval;
+          for (let k = 0; k < enemies.length; k++) {
+            const e = enemies[k];
+            if (!this.isLiveTarget(e)) continue;
+            if (checkImpact(e)) {
+              detonated = true;
+              break;
+            }
+          }
         }
       }
       if (detonated) {
@@ -411,7 +462,7 @@ export class MegaBeamCannonSystem {
     const radius = m.explosionRadius;
     const radSq = radius * radius;
     for (const e of enemies) {
-      if (!e || e.isDisposed?.()) continue;
+      if (!this.isLiveTarget(e)) continue;
       const dx = e.position.x - center.x;
       const dy = e.position.y - center.y;
       const dz = e.position.z - center.z;
@@ -424,7 +475,6 @@ export class MegaBeamCannonSystem {
       }
     }
     this.spawnExplosion(center, radius);
-    m.mesh.material?.dispose();
     m.mesh.dispose();
   }
 
@@ -454,9 +504,10 @@ export class MegaBeamCannonSystem {
     }
     this.beams = [];
     for (const m of this.missiles) {
-      m.mesh.material?.dispose();
       m.mesh.dispose();
     }
     this.missiles = [];
+    this.missileMaterial?.dispose();
+    this.missileMaterial = null;
   }
 }

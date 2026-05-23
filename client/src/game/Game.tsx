@@ -80,6 +80,9 @@ import type { TravelWarpPoint } from "./UpgradeMenu";
 
 type GamePhase = "auth" | "menu" | "playing" | "paused" | "gameover";
 const MAX_FRAME_DELTA_MS = 100;
+const SPECIAL_TARGET_RADIUS = 280;
+const SPECIAL_TARGET_RADIUS_SQ = SPECIAL_TARGET_RADIUS * SPECIAL_TARGET_RADIUS;
+const SPECIAL_TARGET_HARD_CAP = 192;
 
 // One source of truth for the SPECIALS-tab unlocks. Used both for
 // affordability checks in `specialsList` and for charging in
@@ -361,6 +364,7 @@ export const Game: React.FC = () => {
   const [waveNumber, setWaveNumber] = useState(1);
   const [chestCount, setChestCount] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
+  const messageTimeoutRef = useRef<number | null>(null);
   // ---- Level / objective UI (driven by LevelSystem events) ----
   const [levelBanner, setLevelBanner] = useState<string>("LEVEL 1 — RESCUE THE ALLY");
   const [levelObjective, setLevelObjective] = useState<string>(
@@ -396,8 +400,15 @@ export const Game: React.FC = () => {
   const [buildMode, setBuildMode] = useState(false);
 
   const showMessage = useCallback((msg: string, duration: number = 2000) => {
+    if (messageTimeoutRef.current !== null) {
+      window.clearTimeout(messageTimeoutRef.current);
+      messageTimeoutRef.current = null;
+    }
     setMessage(msg);
-    setTimeout(() => setMessage(null), duration);
+    messageTimeoutRef.current = window.setTimeout(() => {
+      setMessage(null);
+      messageTimeoutRef.current = null;
+    }, duration);
   }, []);
 
   // Save summary surfaced on the main menu so the player can see at a
@@ -2415,6 +2426,7 @@ export const Game: React.FC = () => {
         let hudThrottleTimer = 0;
         let inventoryThrottleTimer = 0;
         const enemyMeshScratch: BABYLON.Mesh[] = [];
+        const specialTargetScratch: BABYLON.Mesh[] = [];
         const playerPositionScratch = new BABYLON.Vector3();
 
         engine.start(() => {
@@ -2455,6 +2467,20 @@ export const Game: React.FC = () => {
           if (versusModeRef.current.active && multiplayerRef.current) {
             enemyMeshes.push(...multiplayerRef.current.getRemoteHitMeshes());
           }
+          const specialTargets = specialTargetScratch;
+          specialTargets.length = 0;
+          for (let i = 0; i < enemyMeshes.length; i++) {
+            const mesh = enemyMeshes[i];
+            if (!mesh || mesh.isDisposed?.() || !mesh.isEnabled()) continue;
+            const pos = mesh.position;
+            const dx = pos.x - playerPos.x;
+            const dy = pos.y - playerPos.y;
+            const dz = pos.z - playerPos.z;
+            if (dx * dx + dy * dy + dz * dz <= SPECIAL_TARGET_RADIUS_SQ) {
+              specialTargets.push(mesh);
+              if (specialTargets.length >= SPECIAL_TARGET_HARD_CAP) break;
+            }
+          }
           const hits = weapons.update(enemyMeshes, dt);
 
           for (const hit of hits) {
@@ -2470,7 +2496,7 @@ export const Game: React.FC = () => {
           // Elemental specials (Lightning/Ice/Fireball tracking + Inferno/Wind/Psychic dome)
           // route through the same hit pipeline so they damage every category
           // and engage the aerial squadron just like normal weapon fire.
-          const elementalHits = elementalSpecials.update(dt, enemyMeshes, playerPos);
+          const elementalHits = elementalSpecials.update(dt, specialTargets, playerPos);
           for (const hit of elementalHits) {
             routeHit(hit.hitEnemy, hit.damage);
           }
@@ -2487,7 +2513,7 @@ export const Game: React.FC = () => {
           // Mega Beam Cannon (beam + weapon combo). Routes through the same
           // hit pipeline so the missiles + Kamehameha beam damage every
           // category and engage the aerial squadron just like normal fire.
-          const cannonHits = megaCannon.update(dt, enemyMeshes, playerPos);
+          const cannonHits = megaCannon.update(dt, specialTargets, playerPos);
           for (const hit of cannonHits) {
             // routeHit already invoked inside the system's damageRouter;
             // re-routing here would double-hit. We only use the returned
@@ -2955,6 +2981,7 @@ export const Game: React.FC = () => {
         if (invasionDirectorRef.current) { try { invasionDirectorRef.current.dispose(); } catch {} invasionDirectorRef.current = null; }
         if (autosaveTimerRef.current !== null) { window.clearInterval(autosaveTimerRef.current); autosaveTimerRef.current = null; }
         if (respawnTimeoutRef.current !== null) { window.clearTimeout(respawnTimeoutRef.current); respawnTimeoutRef.current = null; }
+        if (messageTimeoutRef.current !== null) { window.clearTimeout(messageTimeoutRef.current); messageTimeoutRef.current = null; }
         // Match handleRestart — these systems also need explicit dispose so
         // their EventBus subscriptions / scene refs don't leak between
         // failed-init retries.
@@ -3105,6 +3132,7 @@ export const Game: React.FC = () => {
     pvpHitCooldownRef.current.clear();
     if (autosaveTimerRef.current !== null) { window.clearInterval(autosaveTimerRef.current); autosaveTimerRef.current = null; }
     if (respawnTimeoutRef.current !== null) { window.clearTimeout(respawnTimeoutRef.current); respawnTimeoutRef.current = null; }
+    if (messageTimeoutRef.current !== null) { window.clearTimeout(messageTimeoutRef.current); messageTimeoutRef.current = null; }
     if (multiplayerRef.current) { try { multiplayerRef.current.dispose(); } catch {} multiplayerRef.current = null; }
     if (engineRef.current) {
       try { engineRef.current.dispose(); } catch {}
@@ -3929,6 +3957,7 @@ export const Game: React.FC = () => {
       if (invasionDirectorRef.current) { try { invasionDirectorRef.current.dispose(); } catch {} invasionDirectorRef.current = null; }
       if (autosaveTimerRef.current !== null) window.clearInterval(autosaveTimerRef.current);
       if (respawnTimeoutRef.current !== null) window.clearTimeout(respawnTimeoutRef.current);
+      if (messageTimeoutRef.current !== null) window.clearTimeout(messageTimeoutRef.current);
       if (effectsRef.current) effectsRef.current.dispose();
       if (explosionsRef.current) explosionsRef.current.dispose();
       if (propAudioRef.current) propAudioRef.current.dispose();

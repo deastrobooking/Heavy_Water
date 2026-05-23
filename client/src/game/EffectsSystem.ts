@@ -39,9 +39,9 @@ interface SmokePuffSlot {
   inUse: boolean;
 }
 
-const HIT_POOL_SIZE    = 8;
-const SPARKLE_POOL_SIZE = 6;
-const SMOKE_POOL_SIZE  = 4;
+const HIT_POOL_SIZE    = 16;
+const SPARKLE_POOL_SIZE = 8;
+const SMOKE_POOL_SIZE  = 8;
 const SPARKLE_COUNT    = 14;
 const SHARD_COUNT      = 8;
 const SMOKE_COUNT      = 3;
@@ -311,40 +311,9 @@ export class EffectsSystem {
       return;
     }
 
-    // Fallback — all slots busy.
-    const meshes: BABYLON.Mesh[] = [];
-    const vx: number[] = [], vy: number[] = [], vz: number[] = [];
-    for (let i = 0; i < count; i++) {
-      const star = BABYLON.MeshBuilder.CreateSphere(`sparkFb_${i}`, { diameter: 0.25 }, this.scene);
-      star.position.copyFrom(position);
-      const mat = new BABYLON.StandardMaterial(`sparkMatFb_${i}`, this.scene);
-      mat.emissiveColor = c;
-      mat.diffuseColor  = c;
-      mat.disableLighting = true;
-      star.material = mat;
-      meshes.push(star);
-      const angle = (i / count) * Math.PI * 2;
-      const elev  = (Math.random() - 0.3) * 1.4;
-      vx.push(Math.cos(angle) * (3 + Math.random() * 2));
-      vy.push(elev * 4 + 2);
-      vz.push(Math.sin(angle) * (3 + Math.random() * 2));
-    }
-    this.active.push({
-      meshes,
-      elapsed: 0,
-      duration: 0.9,
-      update: (e, dt, t) => {
-        const f = 1 - t;
-        for (let i = 0; i < e.meshes.length; i++) {
-          vy[i] -= 9 * dt;
-          e.meshes[i].position.x += vx[i] * dt;
-          e.meshes[i].position.y += vy[i] * dt;
-          e.meshes[i].position.z += vz[i] * dt;
-          e.meshes[i].scaling.setAll(0.4 + f * 1.2);
-          (e.meshes[i].material as BABYLON.StandardMaterial).alpha = f;
-        }
-      },
-    });
+    // Cosmetic overflow: drop the sparkle rather than allocating during a
+    // burst frame. Big specials can already be CPU/GPU heavy without pool
+    // fallback growth.
   }
 
   spawnCapture(position: BABYLON.Vector3, color?: BABYLON.Color3): void {
@@ -475,62 +444,8 @@ export class EffectsSystem {
       return;
     }
 
-    // Fallback — all slots busy.
-    const ring = BABYLON.MeshBuilder.CreateTorus(`hitRing_${Date.now()}`, { diameter: 0.6 * scale, thickness: 0.12 * scale, tessellation: 18 }, this.scene);
-    ring.position.copyFrom(position);
-    ring.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
-    const ringMat = new BABYLON.StandardMaterial(`hitRingMat_${Date.now()}`, this.scene);
-    ringMat.emissiveColor = c;
-    ringMat.diffuseColor  = c;
-    ringMat.disableLighting = true;
-    ringMat.alpha = 1;
-    ring.material = ringMat;
-
-    const flash = BABYLON.MeshBuilder.CreateSphere(`hitFlash_${Date.now()}`, { diameter: 0.45 * scale, segments: 8 }, this.scene);
-    flash.position.copyFrom(position);
-    const flashMat = new BABYLON.StandardMaterial(`hitFlashMat_${Date.now()}`, this.scene);
-    flashMat.emissiveColor = new BABYLON.Color3(1, 0.95, 0.85);
-    flashMat.diffuseColor  = new BABYLON.Color3(1, 0.95, 0.85);
-    flashMat.disableLighting = true;
-    flashMat.alpha = 0.95;
-    flash.material = flashMat;
-
-    const shards: BABYLON.Mesh[] = [];
-    const vx: number[] = [], vy: number[] = [], vz: number[] = [];
-    for (let i = 0; i < SHARD_COUNT; i++) {
-      const s = BABYLON.MeshBuilder.CreateBox(`hitShard_${i}_${Date.now()}`, { width: 0.08 * scale, height: 0.08 * scale, depth: 0.35 * scale }, this.scene);
-      s.position.copyFrom(position);
-      const sm = new BABYLON.StandardMaterial(`hitShardMat_${i}`, this.scene);
-      sm.emissiveColor = c;
-      sm.diffuseColor  = c;
-      sm.disableLighting = true;
-      s.material = sm;
-      shards.push(s);
-      const ang  = (i / SHARD_COUNT) * Math.PI * 2 + Math.random() * 0.4;
-      const elev = (Math.random() - 0.2) * 1.2;
-      vx.push(Math.cos(ang) * (5 + Math.random() * 3));
-      vy.push(elev * 3 + 1.5);
-      vz.push(Math.sin(ang) * (5 + Math.random() * 3));
-    }
-    this.active.push({
-      meshes: [ring, flash, ...shards],
-      elapsed: 0,
-      duration: 0.45,
-      update: (_e, dt, t) => {
-        ring.scaling.setAll(1 + t * 5 * scale);
-        (ring.material as BABYLON.StandardMaterial).alpha = 1 - t;
-        flash.scaling.setAll(1 + t * 1.4);
-        (flash.material as BABYLON.StandardMaterial).alpha = (1 - t) * 0.95;
-        for (let i = 0; i < shards.length; i++) {
-          vy[i] -= 12 * dt;
-          shards[i].position.x += vx[i] * dt;
-          shards[i].position.y += vy[i] * dt;
-          shards[i].position.z += vz[i] * dt;
-          (shards[i].material as BABYLON.StandardMaterial).alpha = 1 - t;
-          shards[i].scaling.setAll(1 - t * 0.5);
-        }
-      },
-    });
+    // Cosmetic overflow: hit impacts are nice feedback, but dropping extras
+    // is much better than allocating fresh meshes during a beam multi-hit.
   }
 
   spawnSmokePuff(
@@ -585,45 +500,8 @@ export class EffectsSystem {
       return;
     }
 
-    // Fallback — all slots busy.
-    const puffs: BABYLON.Mesh[] = [];
-    const vx: number[] = [], vy: number[] = [], vz: number[] = [];
-    const stamp = Date.now();
-    for (let i = 0; i < SMOKE_COUNT; i++) {
-      const p = BABYLON.MeshBuilder.CreateSphere(`smokeFb_${i}_${stamp}`, { diameter: 0.45 * scale, segments: 6 }, this.scene);
-      p.position.copyFrom(position);
-      p.position.x += (Math.random() - 0.5) * 0.35 * scale;
-      p.position.y += (Math.random() - 0.2) * 0.2  * scale;
-      p.position.z += (Math.random() - 0.5) * 0.35 * scale;
-      const mat = new BABYLON.StandardMaterial(`smokeMatFb_${i}_${stamp}`, this.scene);
-      mat.emissiveColor = c.scale(0.55);
-      mat.diffuseColor  = c;
-      mat.disableLighting = true;
-      mat.alpha = 0.65;
-      p.material = mat;
-      p.isPickable = false;
-      puffs.push(p);
-      vx.push((Math.random() - 0.5) * 0.9);
-      vy.push(rise * (0.7 + Math.random() * 0.6));
-      vz.push((Math.random() - 0.5) * 0.9);
-    }
-    this.active.push({
-      meshes: puffs,
-      elapsed: 0,
-      duration,
-      update: (_e, dt, t) => {
-        for (let i = 0; i < puffs.length; i++) {
-          vy[i] += 0.4 * dt;
-          vx[i] *= 1 - dt * 1.5;
-          vz[i] *= 1 - dt * 1.5;
-          puffs[i].position.x += vx[i] * dt;
-          puffs[i].position.y += vy[i] * dt;
-          puffs[i].position.z += vz[i] * dt;
-          puffs[i].scaling.setAll((1 + t * 1.8) * scale);
-          (puffs[i].material as BABYLON.StandardMaterial).alpha = 0.65 * (1 - t);
-        }
-      },
-    });
+    // Cosmetic overflow: missile volleys can emit many explosions at once;
+    // keep smoke pooled and bounded.
   }
 
   // ── Core update / dispose ─────────────────────────────────────────────────

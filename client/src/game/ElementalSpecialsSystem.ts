@@ -174,6 +174,7 @@ interface ActiveBeam {
   muzzleMesh: BABYLON.Mesh | null;
   light: BABYLON.PointLight | null;
   hit: Set<BABYLON.Mesh>;
+  scanTimer: number;
 }
 
 interface ActiveDome {
@@ -211,6 +212,7 @@ export class ElementalSpecialsSystem {
   // to the prior sluggish feel.
   private notifyAccumMs: number = 0;
   private notifyIntervalMs: number = 100;
+  private readonly beamDamageScanIntervalMs: number = 80;
 
   constructor(
     scene: BABYLON.Scene,
@@ -396,6 +398,10 @@ export class ElementalSpecialsSystem {
   }
 
   private lastEnemies: BABYLON.Mesh[] = [];
+
+  private isLiveTarget(mesh: BABYLON.Mesh | null | undefined): mesh is BABYLON.Mesh {
+    return !!mesh && !mesh.isDisposed() && mesh.isEnabled();
+  }
 
   private spawnTrackingStrike(
     kind: ElementalKind,
@@ -656,6 +662,7 @@ export class ElementalSpecialsSystem {
       muzzleMesh,
       light,
       hit: new Set(),
+      scanTimer: 0,
     });
   }
 
@@ -704,10 +711,16 @@ export class ElementalSpecialsSystem {
 
   private pickNearestEnemies(origin: BABYLON.Vector3, count: number, maxRange: number): BABYLON.Mesh[] {
     if (count <= 0) return [];
+    const maxRangeSq = maxRange * maxRange;
     const sorted = this.lastEnemies
-      .filter((e) => !e.isDisposed())
-      .map((e) => ({ e, d: BABYLON.Vector3.Distance(origin, e.position) }))
-      .filter((entry) => entry.d <= maxRange)
+      .filter((e) => this.isLiveTarget(e))
+      .map((e) => {
+        const dx = e.position.x - origin.x;
+        const dy = e.position.y - origin.y;
+        const dz = e.position.z - origin.z;
+        return { e, d: dx * dx + dy * dy + dz * dz };
+      })
+      .filter((entry) => entry.d <= maxRangeSq)
       .sort((a, b) => a.d - b.d)
       .slice(0, count)
       .map((entry) => entry.e);
@@ -751,7 +764,7 @@ export class ElementalSpecialsSystem {
       t.lifetime -= dtMs;
 
       // Reacquire target if disposed
-      if (t.target && t.target.isDisposed()) {
+      if (t.target && !this.isLiveTarget(t.target)) {
         t.target = this.pickNearestEnemies(t.mesh.position, 1, 60)[0] ?? null;
       }
 
@@ -778,14 +791,22 @@ export class ElementalSpecialsSystem {
       let detonated = false;
       const checkPos = t.mesh.position;
       const closeRadius = t.kind === "lightning" ? 2.0 : 1.6;
+      const closeRadiusSq = closeRadius * closeRadius;
+      const radiusSq = t.radius * t.radius;
 
       for (const e of enemies) {
-        if (e.isDisposed()) continue;
-        if (BABYLON.Vector3.Distance(checkPos, e.position) <= closeRadius) {
+        if (!this.isLiveTarget(e)) continue;
+        const dx = e.position.x - checkPos.x;
+        const dy = e.position.y - checkPos.y;
+        const dz = e.position.z - checkPos.z;
+        if (dx * dx + dy * dy + dz * dz <= closeRadiusSq) {
           // Detonate AoE around impact
           for (const aoeE of enemies) {
-            if (aoeE.isDisposed()) continue;
-            if (BABYLON.Vector3.Distance(checkPos, aoeE.position) <= t.radius && !t.alreadyHit.has(aoeE)) {
+            if (!this.isLiveTarget(aoeE)) continue;
+            const ax = aoeE.position.x - checkPos.x;
+            const ay = aoeE.position.y - checkPos.y;
+            const az = aoeE.position.z - checkPos.z;
+            if (ax * ax + ay * ay + az * az <= radiusSq && !t.alreadyHit.has(aoeE)) {
               t.alreadyHit.add(aoeE);
               hits.push({ hitEnemy: aoeE, damage: t.damage });
             }
@@ -797,6 +818,7 @@ export class ElementalSpecialsSystem {
       }
 
       if (detonated || t.lifetime <= 0 || t.mesh.position.y < -10) {
+        try { t.mesh.material?.dispose(); } catch {}
         t.mesh.dispose();
         this.activeTrackers.splice(i, 1);
       }
@@ -825,26 +847,32 @@ export class ElementalSpecialsSystem {
       }
       if (beam.light) beam.light.intensity = 10 * fade;
 
-      // One-tick damage to anything inside the beam cylinder.
-      const ox = beam.origin.x, oy = beam.origin.y, oz = beam.origin.z;
-      const dx = beam.direction.x, dy = beam.direction.y, dz = beam.direction.z;
-      const len = beam.length;
-      for (const e of enemies) {
-        if (!e || e.isDisposed() || beam.hit.has(e)) continue;
-        const ex = e.position.x - ox;
-        const ey = e.position.y - oy;
-        const ez = e.position.z - oz;
-        const proj = ex * dx + ey * dy + ez * dz;
-        if (proj < 0 || proj > len) continue;
-        const cx = ex - dx * proj;
-        const cy = ey - dy * proj;
-        const cz = ez - dz * proj;
-        const perpSq = cx * cx + cy * cy + cz * cz;
-        const meshHitR = (e.metadata as any)?.hitRadius ?? 1.5;
-        const hitR = beam.radius + meshHitR;
-        if (perpSq < hitR * hitR) {
-          beam.hit.add(e);
-          hits.push({ hitEnemy: e, damage: beam.damage });
+      // Damage scans at 12.5 Hz while the visual fades. The previous
+      // per-frame full-list scan was the biggest elemental hitch in dense
+      // wildland/city scenes.
+      beam.scanTimer -= dtMs;
+      if (beam.scanTimer <= 0) {
+        beam.scanTimer = this.beamDamageScanIntervalMs;
+        const ox = beam.origin.x, oy = beam.origin.y, oz = beam.origin.z;
+        const dx = beam.direction.x, dy = beam.direction.y, dz = beam.direction.z;
+        const len = beam.length;
+        for (const e of enemies) {
+          if (!this.isLiveTarget(e) || beam.hit.has(e)) continue;
+          const ex = e.position.x - ox;
+          const ey = e.position.y - oy;
+          const ez = e.position.z - oz;
+          const proj = ex * dx + ey * dy + ez * dz;
+          if (proj < 0 || proj > len) continue;
+          const cx = ex - dx * proj;
+          const cy = ey - dy * proj;
+          const cz = ez - dz * proj;
+          const perpSq = cx * cx + cy * cy + cz * cz;
+          const meshHitR = (e.metadata as any)?.hitRadius ?? 1.5;
+          const hitR = beam.radius + meshHitR;
+          if (perpSq < hitR * hitR) {
+            beam.hit.add(e);
+            hits.push({ hitEnemy: e, damage: beam.damage });
+          }
         }
       }
 
@@ -892,9 +920,13 @@ export class ElementalSpecialsSystem {
         d.tickTimer = d.tickIntervalMs;
         d.damageTicksRemaining--;
         const center2 = d.centerProvider();
+        const radiusSq = d.radius * d.radius;
         for (const e of enemies) {
-          if (e.isDisposed()) continue;
-          if (BABYLON.Vector3.Distance(center2, e.position) <= d.radius) {
+          if (!this.isLiveTarget(e)) continue;
+          const dx = e.position.x - center2.x;
+          const dy = e.position.y - center2.y;
+          const dz = e.position.z - center2.z;
+          if (dx * dx + dy * dy + dz * dz <= radiusSq) {
             // Each victim only gets full damage once per dome (avoid stacking large hits per tick),
             // but inferno/windstorm do reduced ticking damage on subsequent ticks.
             const isFirstHit = !d.victims.has(e);
@@ -906,6 +938,7 @@ export class ElementalSpecialsSystem {
       }
 
       if (d.elapsed >= d.totalLifetime) {
+        try { d.mesh.material?.dispose(); } catch {}
         d.mesh.dispose();
         d.light.dispose();
         this.activeDomes.splice(i, 1);
@@ -936,6 +969,7 @@ export class ElementalSpecialsSystem {
     const animate = () => {
       if (this.disposed) {
         try { burst.dispose(); } catch {}
+        try { mat.dispose(); } catch {}
         try { light.dispose(); } catch {}
         return;
       }
@@ -948,6 +982,7 @@ export class ElementalSpecialsSystem {
         this.scheduleRaf(animate);
       } else {
         try { burst.dispose(); } catch {}
+        try { mat.dispose(); } catch {}
         try { light.dispose(); } catch {}
       }
     };
@@ -1052,6 +1087,7 @@ export class ElementalSpecialsSystem {
     }
     this.pendingRafs.clear();
     for (const t of this.activeTrackers) {
+      try { t.mesh.material?.dispose(); } catch {}
       try { t.mesh.dispose(); } catch {}
     }
     this.activeTrackers = [];
@@ -1068,6 +1104,7 @@ export class ElementalSpecialsSystem {
     }
     this.activeBeams = [];
     for (const d of this.activeDomes) {
+      try { d.mesh.material?.dispose(); } catch {}
       try { d.mesh.dispose(); } catch {}
       try { d.light.dispose(); } catch {}
     }
