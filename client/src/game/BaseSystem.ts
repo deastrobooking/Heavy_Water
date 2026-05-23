@@ -2,7 +2,16 @@ import * as BABYLON from "@babylonjs/core";
 import { EventBus, GameEvents } from "./EventBus";
 import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
 
-export type BaseStructureKind = "lab" | "garden";
+export type BaseStructureKind =
+  | "lab"
+  | "garden"
+  | "workshop"
+  | "farm"
+  | "city_hall"
+  | "robot_foundry"
+  | "spaceport"
+  | "shipyard"
+  | "defense_grid";
 
 export interface BaseStructure {
   id: string;
@@ -29,13 +38,51 @@ const LAB_LEVEL_COMPANION_CAP = [3, 5, 8];
 // DB migration needed for the larger ceiling).
 const GARDEN_LEVEL_CAPTURE_CAP = [15, 30, 50];
 const GARDEN_LEVEL_CAPTURE_BONUS = [0, 0.15, 0.3];
+const BASE_STRUCTURE_KINDS: BaseStructureKind[] = [
+  "lab",
+  "garden",
+  "workshop",
+  "farm",
+  "city_hall",
+  "robot_foundry",
+  "spaceport",
+  "shipyard",
+  "defense_grid",
+];
+const SETTLEMENT_STRENGTH_BY_KIND: Record<BaseStructureKind, number> = {
+  lab: 4,
+  garden: 3,
+  workshop: 5,
+  farm: 4,
+  city_hall: 8,
+  robot_foundry: 9,
+  spaceport: 10,
+  shipyard: 14,
+  defense_grid: 12,
+};
 
 function upgradeCostFor(kind: BaseStructureKind, nextLevel: number): BaseStructureUpgradeCost {
   const tier = Math.max(1, nextLevel - 1);
-  if (kind === "lab") {
-    return { gears: 20 * tier, scrap: 20 * tier, energyCores: 2 * tier };
+  switch (kind) {
+    case "lab":
+      return { gears: 20 * tier, scrap: 20 * tier, energyCores: 2 * tier };
+    case "garden":
+      return { gears: 16 * tier, scrap: 12 * tier, energyCores: 1 * tier };
+    case "farm":
+      return { gears: 14 * tier, scrap: 18 * tier, energyCores: 1 * tier };
+    case "workshop":
+      return { gears: 28 * tier, scrap: 32 * tier, energyCores: 3 * tier };
+    case "city_hall":
+      return { gears: 40 * tier, scrap: 50 * tier, energyCores: 4 * tier };
+    case "robot_foundry":
+      return { gears: 55 * tier, scrap: 70 * tier, energyCores: 7 * tier };
+    case "spaceport":
+      return { gears: 70 * tier, scrap: 90 * tier, energyCores: 9 * tier };
+    case "shipyard":
+      return { gears: 95 * tier, scrap: 120 * tier, energyCores: 12 * tier };
+    case "defense_grid":
+      return { gears: 60 * tier, scrap: 85 * tier, energyCores: 8 * tier };
   }
-  return { gears: 16 * tier, scrap: 12 * tier, energyCores: 1 * tier };
 }
 
 export class BaseSystem {
@@ -129,6 +176,14 @@ export class BaseSystem {
     return GARDEN_LEVEL_CAPTURE_BONUS[Math.min(lvl, GARDEN_LEVEL_CAPTURE_BONUS.length) - 1];
   }
 
+  getSettlementStrength(): number {
+    let total = 0;
+    for (const s of this.structures) {
+      total += (SETTLEMENT_STRENGTH_BY_KIND[s.kind] ?? 1) * s.level;
+    }
+    return total;
+  }
+
   getUpgradeCost(id: string): BaseStructureUpgradeCost | null {
     const s = this.structures.find(x => x.id === id);
     if (!s) return null;
@@ -168,11 +223,13 @@ export class BaseSystem {
    * watch it reset to level 1 (and their companion cap fall from 8
    * back to 3) every time they logged back in.
    */
-  serialize(): Record<BaseStructureKind, number> {
-    return {
-      lab: this.getStructureLevel("lab"),
-      garden: this.getStructureLevel("garden"),
-    };
+  serialize(): Partial<Record<BaseStructureKind, number>> {
+    const snapshot: Partial<Record<BaseStructureKind, number>> = {};
+    for (const kind of BASE_STRUCTURE_KINDS) {
+      const level = this.getStructureLevel(kind);
+      if (level > 0) snapshot[kind] = level;
+    }
+    return snapshot;
   }
 
   /**

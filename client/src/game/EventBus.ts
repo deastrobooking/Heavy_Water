@@ -75,6 +75,19 @@ export const GameEvents = {
   BASE_STRUCTURE_UPGRADED: "base:structureUpgraded",
   BASE_INTERACT: "base:interact",
 
+  // ---- Rebuild / invasion endgame ----
+  /** Fired when a replayable zone moves through the long-term rebuild loop:
+   *  uncleared -> peaceful/purified -> threatened -> invaded. This is separate
+   *  from LevelSystem so campaign clears remain permanent and early levels
+   *  stay available for parts, XP, and patrols. */
+  ZONE_STATE_CHANGED: "world:zoneStateChanged",
+  /** Fired when the player enters the preparation window before an invasion. */
+  INVASION_WARNING: "invasion:warning",
+  /** Fired when a threatened zone tips into an active invasion. */
+  INVASION_STARTED: "invasion:started",
+  /** Fired when an invaded zone is defended and restored to peace. */
+  INVASION_RESOLVED: "invasion:resolved",
+
   CREATURE_SPAWNED: "creature:spawned",
   CREATURE_CAPTURED: "creature:captured",
   CAPTURE_ORB_THROWN: "creature:captureOrbThrown",

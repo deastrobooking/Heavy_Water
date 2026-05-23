@@ -65,6 +65,7 @@ import { SaginawLabSystem } from "./SaginawLabSystem";
 import { ZugIslandSystem } from "./ZugIslandSystem";
 import { AnnArborSystem } from "./AnnArborSystem";
 import { MichiganTerrainSystem } from "./MichiganTerrainSystem";
+import { InvasionDirectorSystem } from "./InvasionDirectorSystem";
 import { setPlayerIsFlyingProvider as setEnemyPlayerIsFlyingProvider } from "./EnemySystem";
 import { RESCUE_DEFS } from "./RescueSystem";
 import { loadProgress, saveProgress, ProgressSnapshot } from "./ProgressSync";
@@ -253,6 +254,7 @@ export const Game: React.FC = () => {
   // World-level progression (Level 1 → Level 2). Owned outside the engine
   // closure so the GameUI props + persistence layer can read it.
   const levelSystemRef = useRef<LevelSystem | null>(null);
+  const invasionDirectorRef = useRef<InvasionDirectorSystem | null>(null);
   const respawnTimeoutRef = useRef<number | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
   const lastSaveAtRef = useRef<number>(0);
@@ -1010,6 +1012,39 @@ export const Game: React.FC = () => {
         const levelSystem = new LevelSystem();
         levelSystemRef.current = levelSystem;
 
+        const invasionDirector = new InvasionDirectorSystem();
+        invasionDirector.setCurrentLevelProvider(() => levelSystemRef.current?.getCurrentLevel() ?? 1);
+        invasionDirector.setSettlementStrengthProvider(() => {
+          const baseStrength = baseRef.current?.getSettlementStrength() ?? 0;
+          const helperStrength = companionRef.current?.getCompanionCount() ?? 0;
+          const sanctuaryRoster = bioRef.current?.getCaptured?.().length ?? 0;
+          return baseStrength + helperStrength * 2 + Math.min(20, sanctuaryRoster);
+        });
+        invasionDirectorRef.current = invasionDirector;
+
+        const deployInvasionPressure = (payload: any): void => {
+          const targetLevel = typeof payload?.worldLevel === "number" ? payload.worldLevel as WorldLevel : null;
+          if (!targetLevel || levelSystem.getCurrentLevel() !== targetLevel) return;
+          const threat = typeof payload?.threatLevel === "number" ? Math.max(1, payload.threatLevel) : 1;
+          showMessage(`INVASION CONTACT - THREAT ${threat}`, 3000);
+          if (targetLevel >= 1 && targetLevel <= 3) {
+            enemySystem.setSpawningEnabled(true);
+            enemySystem.jumpToWave(Math.max(enemySystem.getWaveNumber() + 2, 3 + threat * 2));
+            const center = LevelSystem.getFortressCenterFor(targetLevel);
+            const target = new BABYLON.Vector3(center.x, 0, center.z);
+            const existing = enemyBaseSystem.getBossFortresses();
+            const hasFortress = existing.some(b => b.position.subtract(target).length() <= 5);
+            if (!hasFortress) enemyBaseSystem.spawnBossFortress(target);
+          }
+          if (LevelSystem.isSpacelike(targetLevel) || threat >= 3) {
+            aerialEnemySystem.engage();
+            try {
+              if (threat >= 5) aerialEnemySystem.spawnBattleship(player.getPosition());
+              else aerialEnemySystem.spawnFighter(player.getPosition());
+            } catch {}
+          }
+        };
+
         // BOSS FORTRESS turret-clear → spawn the BossCaptain at the spire,
         // themed to the *current* level's variant (inferno / plague / void).
         bus.on(GameEvents.BOSS_FORTRESS_TURRETS_CLEARED, (payload: any) => {
@@ -1038,6 +1073,17 @@ export const Game: React.FC = () => {
             subtitle: payload?.subtitle || payload?.banner || "Stand by — the war isn't over.",
           });
           window.setTimeout(() => setLevelCompleteOverlay(null), isFinal ? 6000 : 3200);
+        });
+
+        bus.on(GameEvents.INVASION_WARNING, () => {
+          if (forceSaveRef.current) forceSaveRef.current();
+        });
+        bus.on(GameEvents.INVASION_STARTED, (payload: any) => {
+          deployInvasionPressure(payload);
+          if (forceSaveRef.current) forceSaveRef.current();
+        });
+        bus.on(GameEvents.INVASION_RESOLVED, () => {
+          if (forceSaveRef.current) forceSaveRef.current();
         });
 
         // LEVEL_STARTED → swap banner + objective; re-apply sky/spawn rules
@@ -1155,6 +1201,11 @@ export const Game: React.FC = () => {
           // director (or no combat at all). Otherwise random Detroit drip
           // spawns bleed into labs, caves, orbital space, and heightmap zones.
           enemySystem.setSpawningEnabled(!usesCustomGroundDirector);
+
+          const activeInvasion = invasionDirectorRef.current?.getActiveInvasion();
+          if (activeInvasion?.worldLevel === nextWorldLevel) {
+            deployInvasionPressure(activeInvasion);
+          }
 
           // Refresh the rescue roster for the new level. RescueSystem skips
           // levels with no roster (peaceful zones), and prunes any rescuees
@@ -1820,6 +1871,10 @@ export const Game: React.FC = () => {
             // companion cap + garden capture cap/bonus, so losing them
             // on reload silently downgraded the player's whole base.
             baseStructureLevels: baseSystem.serialize(),
+            // Rebuild-era zone state: peaceful/purified zones, invasion
+            // warning timers, and active invasion target. This is separate
+            // from `worldLevel` so cleared early levels stay replayable.
+            worldRebuild: invasionDirector.getSnapshot(),
             // Full equipped-armor loadout (every slot) + active element.
             // Round-trips both capsule-bought pieces and looted armor
             // so defense / health / stamina bonuses + the elemental
@@ -2032,6 +2087,8 @@ export const Game: React.FC = () => {
               if (snap.legendaryCompanionGranted) {
                 legendaryCompanionGrantedRef.current = true;
               }
+              invasionDirector.applyLoadedState(snap.worldRebuild);
+              invasionDirector.hydrateLegacyProgress(snap.worldLevel, snap.swarmsGeneralDefeated);
               // Restore world-level progression. For L2, applyLoadedState
               // re-emits LEVEL_STARTED, which our listener uses to swap
               // banner/objective, tint the sky, seed the second fortress,
@@ -2537,6 +2594,7 @@ export const Game: React.FC = () => {
           explosions.update(dt);
           sky.update(dt);
           multiplayer.update(dt);
+          invasionDirector.update(dt);
 
           mapThrottleTimer += dt;
           if (mapThrottleTimer >= 0.2) {
@@ -2809,6 +2867,7 @@ export const Game: React.FC = () => {
         if (enemyBaseRef.current) { try { enemyBaseRef.current.dispose(); } catch {} }
         enemyBaseRef.current = null;
         if (levelSystemRef.current) { try { levelSystemRef.current.dispose(); } catch {} levelSystemRef.current = null; }
+        if (invasionDirectorRef.current) { try { invasionDirectorRef.current.dispose(); } catch {} invasionDirectorRef.current = null; }
         if (autosaveTimerRef.current !== null) { window.clearInterval(autosaveTimerRef.current); autosaveTimerRef.current = null; }
         if (respawnTimeoutRef.current !== null) { window.clearTimeout(respawnTimeoutRef.current); respawnTimeoutRef.current = null; }
         // Match handleRestart — these systems also need explicit dispose so
@@ -2924,6 +2983,7 @@ export const Game: React.FC = () => {
     if (miningRef.current) { try { miningRef.current.dispose(); } catch {} miningRef.current = null; }
     if (enemyBaseRef.current) { try { enemyBaseRef.current.dispose(); } catch {} enemyBaseRef.current = null; }
     if (levelSystemRef.current) { try { levelSystemRef.current.dispose(); } catch {} levelSystemRef.current = null; }
+    if (invasionDirectorRef.current) { try { invasionDirectorRef.current.dispose(); } catch {} invasionDirectorRef.current = null; }
     if (enemyHealthBarsRef.current) { try { enemyHealthBarsRef.current.dispose(); } catch {} enemyHealthBarsRef.current = null; }
     if (friendlyNPCsRef.current) { try { friendlyNPCsRef.current.dispose(); } catch {} friendlyNPCsRef.current = null; }
     if (rescueSystemRef.current) { try { rescueSystemRef.current.dispose(); } catch {} rescueSystemRef.current = null; }
@@ -3779,6 +3839,7 @@ export const Game: React.FC = () => {
       if (miningRef.current) miningRef.current.dispose();
       if (enemyBaseRef.current) enemyBaseRef.current.dispose();
       if (levelSystemRef.current) { try { levelSystemRef.current.dispose(); } catch {} levelSystemRef.current = null; }
+      if (invasionDirectorRef.current) { try { invasionDirectorRef.current.dispose(); } catch {} invasionDirectorRef.current = null; }
       if (autosaveTimerRef.current !== null) window.clearInterval(autosaveTimerRef.current);
       if (respawnTimeoutRef.current !== null) window.clearTimeout(respawnTimeoutRef.current);
       if (effectsRef.current) effectsRef.current.dispose();

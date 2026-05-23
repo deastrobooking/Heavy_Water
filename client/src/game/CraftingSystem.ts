@@ -24,7 +24,7 @@ export const CRAFTING_MATERIALS: Record<string, ItemDefinition> = {
 export interface CraftingRecipe {
   id: string;
   name: string;
-  category: "weapon" | "armor" | "base" | "upgrade" | "consumable";
+  category: "weapon" | "armor" | "base" | "upgrade" | "consumable" | "drone" | "robot" | "city" | "ship";
   materials: Array<{ materialId: string; quantity: number }>;
   result: { itemId: string; quantity: number };
   craftTime: number;
@@ -133,6 +133,46 @@ const RECIPES: CraftingRecipe[] = [
     id: "beam_sabre_core", name: "Beam Sabre Core", category: "upgrade",
     materials: [{ materialId: "crystal_shard", quantity: 5 }, { materialId: "dark_matter", quantity: 2 }, { materialId: "energy_core", quantity: 3 }],
     result: { itemId: "beam_sabre_core", quantity: 1 }, craftTime: 30, requiredLevel: 8,
+  },
+  {
+    id: "helper_robot_frame", name: "Helper Robot Frame", category: "robot",
+    materials: [{ materialId: "scrap_metal", quantity: 18 }, { materialId: "circuit_board", quantity: 4 }, { materialId: "energy_core", quantity: 2 }],
+    result: { itemId: "helper_robot_frame", quantity: 1 }, craftTime: 18, requiredLevel: 4,
+  },
+  {
+    id: "support_drone_kit", name: "Support Drone Kit", category: "drone",
+    materials: [{ materialId: "scrap_metal", quantity: 14 }, { materialId: "circuit_board", quantity: 5 }, { materialId: "nano_fiber", quantity: 3 }],
+    result: { itemId: "support_drone_kit", quantity: 1 }, craftTime: 16, requiredLevel: 4,
+  },
+  {
+    id: "repair_drone_kit", name: "Repair Drone Kit", category: "drone",
+    materials: [{ materialId: "scrap_metal", quantity: 16 }, { materialId: "circuit_board", quantity: 6 }, { materialId: "bio_sample", quantity: 3 }, { materialId: "energy_core", quantity: 2 }],
+    result: { itemId: "repair_drone_kit", quantity: 1 }, craftTime: 20, requiredLevel: 5,
+  },
+  {
+    id: "city_hall_beacon", name: "City Hall Beacon", category: "city",
+    materials: [{ materialId: "scrap_metal", quantity: 35 }, { materialId: "circuit_board", quantity: 8 }, { materialId: "energy_core", quantity: 5 }],
+    result: { itemId: "city_hall_beacon", quantity: 1 }, craftTime: 35, requiredLevel: 6,
+  },
+  {
+    id: "spaceport_core", name: "Spaceport Core", category: "city",
+    materials: [{ materialId: "scrap_metal", quantity: 60 }, { materialId: "circuit_board", quantity: 14 }, { materialId: "energy_core", quantity: 10 }, { materialId: "crystal_shard", quantity: 4 }],
+    result: { itemId: "spaceport_core", quantity: 1 }, craftTime: 55, requiredLevel: 8,
+  },
+  {
+    id: "shipyard_scaffold", name: "Shipyard Scaffold", category: "ship",
+    materials: [{ materialId: "scrap_metal", quantity: 85 }, { materialId: "nano_fiber", quantity: 20 }, { materialId: "circuit_board", quantity: 18 }, { materialId: "energy_core", quantity: 12 }],
+    result: { itemId: "shipyard_scaffold", quantity: 1 }, craftTime: 75, requiredLevel: 10,
+  },
+  {
+    id: "comet_fighter_frame", name: "Comet Fighter Frame", category: "ship",
+    materials: [{ materialId: "scrap_metal", quantity: 45 }, { materialId: "nano_fiber", quantity: 12 }, { materialId: "circuit_board", quantity: 10 }, { materialId: "energy_core", quantity: 8 }],
+    result: { itemId: "comet_fighter_frame", quantity: 1 }, craftTime: 45, requiredLevel: 8,
+  },
+  {
+    id: "battleship_spine", name: "Battleship Spine", category: "ship",
+    materials: [{ materialId: "scrap_metal", quantity: 150 }, { materialId: "nano_fiber", quantity: 35 }, { materialId: "circuit_board", quantity: 28 }, { materialId: "energy_core", quantity: 24 }, { materialId: "dark_matter", quantity: 3 }],
+    result: { itemId: "battleship_spine", quantity: 1 }, craftTime: 120, requiredLevel: 12,
   },
 ];
 

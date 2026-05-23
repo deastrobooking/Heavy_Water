@@ -1,4 +1,6 @@
 import type { PlayerStats } from "./PlayerController";
+import type { BaseStructureKind } from "./BaseSystem";
+import type { InvasionDirectorSnapshot } from "./InvasionDirectorSystem";
 
 /**
  * One companion's persisted shape. Enough to fully rebuild it on load
@@ -123,13 +125,14 @@ export interface ProgressSnapshot {
    *  could be charged repeatedly — most painfully for the 5000-credit
    *  Quantum Exo-Suit. Optional for backward compat. */
   appliedCapsuleUpgradeIds?: string[];
-  /** Per-kind base-structure upgrade levels (currently `lab` and
-   *  `garden`). Each is a number in `[1, MAX_BASE_LEVEL]`. The level
-   *  governs companion cap (lab) and garden capture cap + bonus —
-   *  without persisting them, a player who spent gears/scrap/energy
-   *  cores upgrading would silently watch their structures reset to
-   *  level 1 on every reload. Optional for backward compat. */
-  baseStructureLevels?: { lab?: number; garden?: number };
+  /** Per-kind base-structure upgrade levels. The first live kinds were
+   *  `lab` and `garden`; the rebuild/endgame layer also stores city,
+   *  foundry, spaceport, shipyard, and defense-grid tiers here. */
+  baseStructureLevels?: Partial<Record<BaseStructureKind, number>>;
+  /** Long-term post-campaign loop: liberated zones, peace timers, warnings,
+   *  and active invasions. Kept separate from `worldLevel` so replayable
+   *  early levels remain available for parts/XP even after story clears. */
+  worldRebuild?: InvasionDirectorSnapshot;
   /** Full equipped-armor loadout (every slot) + the active elemental
    *  attunement. Captures BOTH capsule-bought pieces (Aero-Flight
    *  Chestplate, Kinetic Boots, Titan Chestplate, Quantum Exo-Suit)
