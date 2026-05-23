@@ -16,6 +16,12 @@ interface RemotePlayer {
   lastUpdate: number;
 }
 
+interface RemotePlayerMetadata {
+  isRemotePlayer: true;
+  playerId: string;
+  username: string;
+}
+
 interface RoomInfo {
   code: string;
   players: number;
@@ -182,6 +188,14 @@ export class MultiplayerSystem {
     mat.emissiveColor = new BABYLON.Color3(0, 0.3, 0.5);
     mat.alpha = 0.9;
     mesh.material = mat;
+    mesh.metadata = {
+      ...(mesh.metadata || {}),
+      remotePlayer: {
+        isRemotePlayer: true,
+        playerId: playerState.id,
+        username: playerState.username || "Player",
+      } satisfies RemotePlayerMetadata,
+    };
 
     const headMesh = BABYLON.MeshBuilder.CreateSphere(
       `remote_head_${playerState.id}`,
@@ -194,6 +208,28 @@ export class MultiplayerSystem {
     headMat.diffuseColor = new BABYLON.Color3(0, 0.8, 1);
     headMat.emissiveColor = new BABYLON.Color3(0, 0.4, 0.6);
     headMesh.material = headMat;
+
+    const limbMat = new BABYLON.StandardMaterial(`remote_limbmat_${playerState.id}`, this.scene);
+    limbMat.diffuseColor = new BABYLON.Color3(0.08, 0.55, 0.8);
+    limbMat.emissiveColor = new BABYLON.Color3(0.02, 0.25, 0.45);
+    limbMat.specularColor = new BABYLON.Color3(0.2, 0.25, 0.35);
+    const limbDefs: Array<[string, number, number, number, number, number, number]> = [
+      ["larm", -0.62, 0.15, 0, 0.22, 1.15, 0.24],
+      ["rarm", 0.62, 0.15, 0, 0.22, 1.15, 0.24],
+      ["lleg", -0.22, -1.1, 0, 0.24, 0.95, 0.28],
+      ["rleg", 0.22, -1.1, 0, 0.24, 0.95, 0.28],
+    ];
+    for (const [name, x, y, z, w, h, d] of limbDefs) {
+      const limb = BABYLON.MeshBuilder.CreateBox(
+        `remote_${name}_${playerState.id}`,
+        { width: w, height: h, depth: d },
+        this.scene,
+      );
+      limb.position.set(x, y, z);
+      limb.parent = mesh;
+      limb.material = limbMat;
+      limb.isPickable = false;
+    }
 
     const visorMesh = BABYLON.MeshBuilder.CreateBox(
       `remote_visor_${playerState.id}`,
@@ -274,13 +310,15 @@ export class MultiplayerSystem {
 
     remote.targetPosition.set(msg.position.x, msg.position.y, msg.position.z);
     remote.targetRotation.set(msg.rotation.x, msg.rotation.y, msg.rotation.z);
-    remote.state = msg.state;
-    remote.health = msg.health;
-    remote.weaponId = msg.weaponId;
-    remote.isFlying = msg.isFlying;
+    remote.state = msg.state || remote.state;
+    remote.health = typeof msg.health === "number" ? msg.health : remote.health;
+    remote.weaponId = typeof msg.weaponId === "number" ? msg.weaponId : remote.weaponId;
+    remote.isFlying = !!msg.isFlying;
     remote.lastUpdate = Date.now();
 
     const mat = remote.mesh.material as BABYLON.StandardMaterial;
+    const alive = remote.health > 0;
+    remote.mesh.setEnabled(alive);
     if (mat) {
       if (remote.isFlying) {
         mat.emissiveColor = new BABYLON.Color3(0.2, 0.5, 1);
@@ -403,6 +441,15 @@ export class MultiplayerSystem {
   getRooms(): RoomInfo[] { return this.rooms; }
   getChatMessages(): { username: string; message: string; time: number }[] { return this.chatMessages; }
   getRemotePlayerCount(): number { return this.remotePlayers.size; }
+  getRemoteHitMeshes(): BABYLON.Mesh[] {
+    const meshes: BABYLON.Mesh[] = [];
+    this.remotePlayers.forEach((remote) => {
+      if (remote.health <= 0) return;
+      if (remote.mesh.isDisposed() || !remote.mesh.isEnabled()) return;
+      meshes.push(remote.mesh);
+    });
+    return meshes;
+  }
 
   disconnect(): void {
     this.cleanup();

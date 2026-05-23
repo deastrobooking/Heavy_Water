@@ -233,6 +233,7 @@ export const Game: React.FC = () => {
   const vehicleRef = useRef<VehicleSystem | null>(null);
   const propSystemRef = useRef<EnvironmentPropSystem | null>(null);
   const atvHitCooldownRef = useRef<Map<number, number>>(new Map());
+  const pvpHitCooldownRef = useRef<Map<string, number>>(new Map());
   const levelSerializerRef = useRef<LevelSerializer | null>(null);
   const loadInputRef = useRef<HTMLInputElement | null>(null);
   const multiplayerRef = useRef<MultiplayerSystem | null>(null);
@@ -885,42 +886,59 @@ export const Game: React.FC = () => {
 
         if (currentUser) {
           multiplayer.connect(currentUser.username, currentUser.id);
-          multiplayer.on("connected", () => setMultiplayerConnected(true));
-          multiplayer.on("disconnected", () => {
-            setMultiplayerConnected(false);
-            setInRoom(false);
-            setRoomCode(null);
-          });
-          multiplayer.on("room_joined", (data: any) => {
-            setInRoom(true);
-            setRoomCode(data.roomCode);
-            setIsHost(data.isHost);
-            setShowLobby(false);
-            showMessage(`Joined room ${data.roomCode}`, 2000);
-          });
-          multiplayer.on("room_left", () => {
-            setInRoom(false);
-            setRoomCode(null);
-            setIsHost(false);
-          });
-          multiplayer.on("room_list", (data: any) => setLobbyRooms(data.rooms));
-          multiplayer.on("player_joined", (data: any) => showMessage(`${data.player.username} joined!`, 2000));
-          multiplayer.on("player_left", (data: any) => showMessage(`${data.username} left`, 1500));
-          multiplayer.on("chat_message", (data: any) => setChatMessages(multiplayer.getChatMessages().slice(-20)));
-          multiplayer.on("error", (data: any) => showMessage(data.message, 2000));
-          multiplayer.on("request_position", () => {
-            const pos = player.getPosition();
-            const rot = player.getRotation();
-            multiplayer.sendPositionUpdate(
-              { x: pos.x, y: pos.y, z: pos.z },
-              { x: rot.x, y: rot.y, z: rot.z },
-              player.getPlayerState(),
-              player.getStats().health,
-              1,
-              player.getIsFlying()
-            );
-          });
         }
+        multiplayer.on("connected", () => setMultiplayerConnected(true));
+        multiplayer.on("disconnected", () => {
+          setMultiplayerConnected(false);
+          setInRoom(false);
+          setRoomCode(null);
+        });
+        multiplayer.on("room_joined", (data: any) => {
+          setInRoom(true);
+          setRoomCode(data.roomCode);
+          setIsHost(data.isHost);
+          setShowLobby(false);
+          showMessage(`Joined room ${data.roomCode}`, 2000);
+        });
+        multiplayer.on("room_left", () => {
+          setInRoom(false);
+          setRoomCode(null);
+          setIsHost(false);
+        });
+        multiplayer.on("room_list", (data: any) => setLobbyRooms(data.rooms));
+        multiplayer.on("player_joined", (data: any) => showMessage(`${data.player.username} joined!`, 2000));
+        multiplayer.on("player_left", (data: any) => showMessage(`${data.username} left`, 1500));
+        multiplayer.on("chat_message", () => setChatMessages(multiplayer.getChatMessages().slice(-20)));
+        multiplayer.on("error", (data: any) => showMessage(data.message, 2000));
+        multiplayer.on("player_action", (data: any) => {
+          if (!versusModeRef.current.active) return;
+          if (data?.action !== "pvp_hit") return;
+          const hit = data.data;
+          if (!hit || hit.targetId !== multiplayer.getPlayerId()) return;
+          const raw = typeof hit.damage === "number" ? hit.damage : 0;
+          if (raw <= 0 || !playerRef.current) return;
+          const reduced = armorSystem.calculateDamageReduction(Math.min(90, raw), DamageType.Kinetic);
+          const result = playerRef.current.takeDamage({
+            amount: reduced,
+            damageType: DamageType.Kinetic,
+          });
+          if (result.damageAmount > 0) {
+            const attacker = typeof hit.attacker === "string" ? hit.attacker : "RIVAL";
+            showMessage(`-${Math.floor(result.damageAmount)} FROM ${attacker.toUpperCase()}`, 700);
+          }
+        });
+        multiplayer.on("request_position", () => {
+          const pos = player.getPosition();
+          const rot = player.getRotation();
+          multiplayer.sendPositionUpdate(
+            { x: pos.x, y: pos.y, z: pos.z },
+            { x: rot.x, y: rot.y, z: rot.z },
+            player.getPlayerState(),
+            player.getStats().health,
+            1,
+            player.getIsFlying()
+          );
+        });
 
         BABYLON.SceneLoader.ImportMeshAsync("", "/models/", "swarm_drone.glb", scene).then((result) => {
           if (result.meshes.length > 0) {
@@ -1009,6 +1027,12 @@ export const Game: React.FC = () => {
               const u = air[i];
               if (!u.isAlive) continue;
               autoAimScratch.push(u.hitbox.position);
+            }
+            if (versusModeRef.current.active && multiplayerRef.current) {
+              const rivals = multiplayerRef.current.getRemoteHitMeshes();
+              for (let i = 0; i < rivals.length; i++) {
+                autoAimScratch.push(rivals[i].position);
+              }
             }
             return autoAimScratch;
           });
@@ -1684,6 +1708,7 @@ export const Game: React.FC = () => {
         const propSystem = new EnvironmentPropSystem(scene);
         propSystemRef.current = propSystem;
         atvHitCooldownRef.current.clear();
+        pvpHitCooldownRef.current.clear();
 
         // Cluster locations: spawn-area, dense rings around each enemy base,
         // roadside caches at true ~150-180m intervals along main approaches,
@@ -2211,6 +2236,7 @@ export const Game: React.FC = () => {
         bus.on(GameEvents.PICKUP_COLLECTED, () => { void doSaveProgress(); });
 
         bus.on(GameEvents.PLAYER_DIED, () => {
+          deathHandledRef.current = true;
           if (vehicleSystem.getActive()) {
             vehicleSystem.exit();
             player.setMounted(null);
@@ -2220,8 +2246,10 @@ export const Game: React.FC = () => {
           // could swallow this call and the player loses everything earned in
           // the last few seconds.
           if (currentUser) void doSaveProgress(true);
-          // Friendly respawn flow — preserve all stats/inventory/weapons
-          showMessage("YOU FELL — RESPAWNING IN 3...", 1100);
+          // Friendly respawn flow — preserve all stats/inventory/weapons.
+          // Versus uses this path too; do not hand control to the legacy
+          // game-over screen or the PvP arena mesh/collider state tears.
+          showMessage(versusModeRef.current.active ? "KNOCKED OUT - RESPAWNING IN 3..." : "YOU FELL - RESPAWNING IN 3...", 1100);
           if (respawnTimeoutRef.current !== null) {
             window.clearTimeout(respawnTimeoutRef.current);
           }
@@ -2236,14 +2264,22 @@ export const Game: React.FC = () => {
             // (labs, lair, Saginaw, Zug, Ann Arbor, space, Michigan Wilds)
             // with the previous level's geometry still mounted elsewhere.
             const worldLevel = levelSystemRef.current?.getCurrentLevel() ?? 1;
-            const sp = LevelSystem.getSpawnPointFor(worldLevel);
-            let spawnY = LevelSystem.isSpacelike(worldLevel) ? 60 : 2;
-            if (LevelSystem.isMichiganTerrain(worldLevel)) {
-              const h = michiganTerrainSystemRef.current?.getHeightAt(sp.x, sp.z);
-              spawnY = (h ?? MichiganTerrainSystem.getDefaultSpawnY()) + 3;
+            let spawn: BABYLON.Vector3;
+            if (versusModeRef.current.active && versusArenaRef.current) {
+              spawn = versusArenaRef.current.getRandomSpawn();
+            } else {
+              const sp = LevelSystem.getSpawnPointFor(worldLevel);
+              let spawnY = LevelSystem.isSpacelike(worldLevel) ? 60 : 2;
+              if (LevelSystem.isMichiganTerrain(worldLevel)) {
+                const h = michiganTerrainSystemRef.current?.getHeightAt(sp.x, sp.z);
+                spawnY = (h ?? MichiganTerrainSystem.getDefaultSpawnY()) + 3;
+              }
+              spawn = new BABYLON.Vector3(sp.x, spawnY, sp.z);
             }
-            const spawn = new BABYLON.Vector3(sp.x, spawnY, sp.z);
             cur.respawn(spawn);
+            deathHandledRef.current = false;
+            setGamePhase("playing");
+            pvpHitCooldownRef.current.clear();
             // Restore the player's permanent helper roster after death. Two
             // helpers should never be lost to a single death:
             //   - Spark Pup: the free starter pet that ships with every run.
@@ -2273,7 +2309,7 @@ export const Game: React.FC = () => {
                 }
               }
             }
-            showMessage("RESPAWNED — YOUR PROGRESS IS SAFE", 2500);
+            showMessage(versusModeRef.current.active ? "BACK IN THE ARENA" : "RESPAWNED - YOUR PROGRESS IS SAFE", 2500);
           }, 3000);
         });
 
@@ -2322,6 +2358,28 @@ export const Game: React.FC = () => {
 
         const routeHit = (mesh: BABYLON.AbstractMesh, dmg: number) => {
           const meta = mesh.metadata;
+          const remoteMeta = (meta as any)?.remotePlayer;
+          if (versusModeRef.current.active && remoteMeta?.isRemotePlayer && multiplayerRef.current) {
+            const targetId = String(remoteMeta.playerId ?? "");
+            if (!targetId) return;
+            const now = performance.now();
+            const last = pvpHitCooldownRef.current.get(targetId) ?? 0;
+            if (now - last < 180) return;
+            pvpHitCooldownRef.current.set(targetId, now);
+            const pvpDamage = Math.max(6, Math.min(90, Math.round(dmg * 0.38)));
+            multiplayerRef.current.sendAction("pvp_hit", {
+              targetId,
+              damage: pvpDamage,
+              attacker: currentUser?.username ?? "Rival",
+              position: {
+                x: mesh.getAbsolutePosition().x,
+                y: mesh.getAbsolutePosition().y,
+                z: mesh.getAbsolutePosition().z,
+              },
+            });
+            showMessage(`HIT ${String(remoteMeta.username ?? "RIVAL").toUpperCase()}`, 450);
+            return;
+          }
           if (isPropMeta(meta)) {
             meta.damageable.takeDamage({
               amount: dmg,
@@ -2394,6 +2452,9 @@ export const Game: React.FC = () => {
             ...baseMeshes,
             ...propMeshes,
           );
+          if (versusModeRef.current.active && multiplayerRef.current) {
+            enemyMeshes.push(...multiplayerRef.current.getRemoteHitMeshes());
+          }
           const hits = weapons.update(enemyMeshes, dt);
 
           for (const hit of hits) {
@@ -2435,13 +2496,15 @@ export const Game: React.FC = () => {
             if (meta?.aerialUnit) aerialEnemySystem.engage();
           }
 
-          const companionResult = companionSystem.update(dt, playerPos, enemyMeshes);
-          if (companionResult.healed > 0) {
-            player.heal(companionResult.healed);
-          }
-          for (const hit of companionResult.attackHits) {
-            const m = hit.mesh as BABYLON.Mesh;
-            routeHit(m, hit.damage);
+          if (!versusModeRef.current.active) {
+            const companionResult = companionSystem.update(dt, playerPos, enemyMeshes);
+            if (companionResult.healed > 0) {
+              player.heal(companionResult.healed);
+            }
+            for (const hit of companionResult.attackHits) {
+              const m = hit.mesh as BABYLON.Mesh;
+              routeHit(m, hit.damage);
+            }
           }
 
           const enemyResult = enemySystem.update(playerPos, deltaTime);
@@ -2700,11 +2763,13 @@ export const Game: React.FC = () => {
             weapons.setPlayerBoosts(player.getPlayerBoosts());
           }
 
-          if (player.getHealth() <= 0 && !deathHandledRef.current) {
+          if (player.getHealth() <= 0 && !deathHandledRef.current && respawnTimeoutRef.current === null) {
             deathHandledRef.current = true;
-            setGamePhase("gameover");
-            // Pause music so the menu/game-over screen isn't drowned in track audio.
-            try { MusicSystem.pause(); } catch {}
+            if (!versusModeRef.current.active) {
+              setGamePhase("gameover");
+              // Pause music so the menu/game-over screen isn't drowned in track audio.
+              try { MusicSystem.pause(); } catch {}
+            }
           }
 
           waveTimer += deltaTime;
@@ -2873,6 +2938,7 @@ export const Game: React.FC = () => {
         if (propSystemRef.current) { try { propSystemRef.current.dispose(); } catch {} }
         propSystemRef.current = null;
         atvHitCooldownRef.current.clear();
+        pvpHitCooldownRef.current.clear();
         if (bioRef.current) { try { bioRef.current.dispose(); } catch {} }
         bioRef.current = null;
         if (mountainRingRef.current) { try { mountainRingRef.current.dispose(); } catch {} }
@@ -3036,6 +3102,7 @@ export const Game: React.FC = () => {
     craftingSystemRef.current = null;
     inventoryRef.current = null;
     atvHitCooldownRef.current.clear();
+    pvpHitCooldownRef.current.clear();
     if (autosaveTimerRef.current !== null) { window.clearInterval(autosaveTimerRef.current); autosaveTimerRef.current = null; }
     if (respawnTimeoutRef.current !== null) { window.clearTimeout(respawnTimeoutRef.current); respawnTimeoutRef.current = null; }
     if (multiplayerRef.current) { try { multiplayerRef.current.dispose(); } catch {} multiplayerRef.current = null; }
@@ -3854,6 +3921,7 @@ export const Game: React.FC = () => {
       if (vehicleRef.current) vehicleRef.current.dispose();
       if (propSystemRef.current) propSystemRef.current.dispose();
       atvHitCooldownRef.current.clear();
+      pvpHitCooldownRef.current.clear();
       if (baseRef.current) baseRef.current.dispose();
       if (miningRef.current) miningRef.current.dispose();
       if (enemyBaseRef.current) enemyBaseRef.current.dispose();

@@ -196,11 +196,10 @@ export function setupMultiplayer(httpServer: Server): void {
               code,
               hostId: playerId,
               players: new Map([[playerId, player]]),
-              // Per-room cap. Position updates broadcast every 50ms scale as
-              // N*(N-1) messages/tick; at 16 that's 4 800 msgs/sec/room which
-              // is comfortable on the naive broadcast (no spatial culling /
-              // delta encoding). Raising further would need those optimisations.
-              maxPlayers: 16,
+              // Per-room cap. Versus gets the larger city arena, so it can
+              // support 24 players before the naive broadcast starts feeling
+              // crowded. Coop stays at 16 to keep campaign rooms lightweight.
+              maxPlayers: mode === "versus" ? 24 : 16,
               wave: 0,
               createdAt: Date.now(),
               mode,

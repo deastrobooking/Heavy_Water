@@ -58,7 +58,7 @@ export const VersusLobby: React.FC<VersusLobbyProps> = ({ onJoined, onClose }) =
         </h2>
         <p className="text-center text-cyan-200/80 text-xs mb-4 tracking-wider"
            style={{ fontFamily: "'Press Start 2P', monospace" }}>
-          UP TO 16 PLAYERS · MELEE FOCUS · NO ENEMIES
+          UP TO 24 PLAYERS · CITY DUELS · NO ENEMIES
         </p>
 
         {error && (

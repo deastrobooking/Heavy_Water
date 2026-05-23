@@ -160,7 +160,7 @@ export class ArmorSystem {
     elementalResist: number;
   } {
     let dmg = 0, fr = 0, spd = 0, crit = 0, hRegen = 0, sRegen = 0, eResist = 0;
-    for (const piece of this.equippedArmor.values()) {
+    for (const piece of Array.from(this.equippedArmor.values())) {
       for (const mod of piece.modules) {
         const val = 0.02 * mod.tier * Math.sqrt(mod.level); // base 2% per tier at L1, up to ~5.7% at L10
         switch (mod.type) {
@@ -259,7 +259,12 @@ export class ArmorSystem {
       for (const p of state.pieces) {
         // Defensive copy + slot-keyed insert — matches `equipArmor`'s
         // contract so getters (getTotalDefense, etc.) work the same.
-        this.equippedArmor.set(p.type, { ...p, element: this.activeElement });
+        this.equippedArmor.set(p.type, {
+          ...p,
+          element: this.activeElement,
+          modules: Array.isArray(p.modules) ? p.modules : [],
+          maxModules: typeof p.maxModules === "number" ? p.maxModules : maxModulesForRarity(p.rarity),
+        });
       }
     }
     this.bus.emit(GameEvents.INVENTORY_CHANGED);
