@@ -158,6 +158,7 @@ export class ArmorSystem {
     healthRegen: number;
     shieldRegen: number;
     elementalResist: number;
+    damageReduction: number;
   } {
     let dmg = 0, fr = 0, spd = 0, crit = 0, hRegen = 0, sRegen = 0, eResist = 0;
     for (const piece of Array.from(this.equippedArmor.values())) {
@@ -182,6 +183,7 @@ export class ArmorSystem {
       healthRegen: Math.min(5.0, hRegen),     // HP / second
       shieldRegen: Math.min(8.0, sRegen),    // shield / second (additive on top of base)
       elementalResist: Math.min(0.30, eResist),
+      damageReduction: 0, // reserved for future module type; currently no modules grant this
     };
   }
 

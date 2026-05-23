@@ -192,6 +192,10 @@ export class PlayerController implements IDamageable {
   private playerUpgradeLevels: Record<string, number> = {};
   private petBondBoosts = { damageMul: 1, fireRateMul: 1, damageReduction: 0 };
 
+  // ---- Modular armor + active pet augment bonuses (pushed from Game.tsx)
+  private moduleBoosts = { damageMul: 1, fireRateMul: 1, speedMul: 1, critChance: 0, healthRegen: 0, shieldRegen: 0, elementalResist: 0, damageReduction: 0 };
+  private petAugmentBoosts = { damageMul: 1, fireRateMul: 1, speedMul: 1, shieldRegen: 0, healthRegen: 0, critChance: 0 };
+
   setCameraMode(mode: "first" | "third"): void {
     this.cameraMode = mode;
     this.applyVisualForCameraMode();
@@ -709,6 +713,7 @@ export class PlayerController implements IDamageable {
     this.updateTimers(deltaTime);
     this.updateStamina(deltaTime);
     this.updateShield(deltaTime);
+    this.updateHealthRegen(deltaTime);
 
     if (this.mountedVehiclePos) {
       this.meshRoot.position.copyFrom(this.mountedVehiclePos);
@@ -817,9 +822,20 @@ export class PlayerController implements IDamageable {
       return;
     }
     if (this.stats.shield < this.stats.maxShield) {
+      const bonusShieldRegen = this.moduleBoosts.shieldRegen + this.petAugmentBoosts.shieldRegen;
       this.stats.shield = Math.min(
         this.stats.maxShield,
-        this.stats.shield + this.stats.shieldRegenRate * dt,
+        this.stats.shield + (this.stats.shieldRegenRate + bonusShieldRegen) * dt,
+      );
+    }
+  }
+
+  private updateHealthRegen(dt: number): void {
+    const bonusHealthRegen = this.moduleBoosts.healthRegen + this.petAugmentBoosts.healthRegen;
+    if (bonusHealthRegen > 0 && this.stats.health < this.stats.maxHealth) {
+      this.stats.health = Math.min(
+        this.stats.maxHealth,
+        this.stats.health + bonusHealthRegen * dt,
       );
     }
   }
@@ -1098,9 +1114,10 @@ export class PlayerController implements IDamageable {
 
     let moveDirection = BABYLON.Vector3.Zero();
     // Rocket skates > sprint > walk. Speed applies to every WASD axis below.
-    const speed = this.isRocketSkating
+    const speedMul = this.moduleBoosts.speedMul * this.petAugmentBoosts.speedMul;
+    const speed = (this.isRocketSkating
       ? this.rocketSkateSpeed
-      : (this.isSprinting ? this.sprintSpeed : this.walkSpeed);
+      : (this.isSprinting ? this.sprintSpeed : this.walkSpeed)) * speedMul;
 
     if (this.keys["KeyW"]) moveDirection.addInPlace(forward.scale(speed));
     if (this.keys["KeyS"]) moveDirection.addInPlace(forward.scale(-speed));
@@ -1532,8 +1549,20 @@ export class PlayerController implements IDamageable {
     // the existing 70%-armor-absorb pipeline. Capped at 30% inside
     // getPlayerBoosts() to keep the player from going invincible.
     const drLvl = this.playerUpgradeLevels["damageReduction"] ?? 0;
-    const totalReduction = Math.min(0.45, Math.min(0.30, 0.03 * drLvl) + this.petBondBoosts.damageReduction);
+    const totalReduction = Math.min(
+      0.60,
+      Math.min(0.30, 0.03 * drLvl)
+        + this.petBondBoosts.damageReduction
+        + this.moduleBoosts.damageReduction,
+    );
     if (totalReduction > 0) amount *= (1 - totalReduction);
+
+    // Module elemental resistance — applies against non-kinetic/non-melee damage.
+    if (this.moduleBoosts.elementalResist > 0 && info.damageType) {
+      if (info.damageType !== DamageType.Kinetic && info.damageType !== DamageType.Melee) {
+        amount *= (1 - this.moduleBoosts.elementalResist);
+      }
+    }
 
     this.shieldRegenCooldown = this.stats.shieldRegenDelay;
 
@@ -1752,9 +1781,14 @@ export class PlayerController implements IDamageable {
     const frLvl = this.playerUpgradeLevels["fireRateBoost"] ?? 0;
     const drLvl = this.playerUpgradeLevels["damageReduction"] ?? 0;
     return {
-      damageMul: (1 + 0.05 * dmgLvl) * this.petBondBoosts.damageMul,
-      fireRateMul: (1 + 0.04 * frLvl) * this.petBondBoosts.fireRateMul,
-      damageReduction: Math.min(0.45, Math.min(0.30, 0.03 * drLvl) + this.petBondBoosts.damageReduction),
+      damageMul: (1 + 0.05 * dmgLvl) * this.petBondBoosts.damageMul * this.moduleBoosts.damageMul * this.petAugmentBoosts.damageMul,
+      fireRateMul: (1 + 0.04 * frLvl) * this.petBondBoosts.fireRateMul * this.moduleBoosts.fireRateMul * this.petAugmentBoosts.fireRateMul,
+      damageReduction: Math.min(
+        0.60,
+        Math.min(0.30, 0.03 * drLvl)
+          + this.petBondBoosts.damageReduction
+          + this.moduleBoosts.damageReduction,
+      ),
     };
   }
 
@@ -1762,6 +1796,34 @@ export class PlayerController implements IDamageable {
     this.petBondBoosts.damageMul = Math.max(1, boosts.damageMul || 1);
     this.petBondBoosts.fireRateMul = Math.max(1, boosts.fireRateMul || 1);
     this.petBondBoosts.damageReduction = Math.max(0, Math.min(0.15, boosts.damageReduction || 0));
+  }
+
+  /** Push modular armor socket bonuses from ArmorSystem.getModuleBonuses(). */
+  setModuleBoosts(boosts: {
+    damageMul: number; fireRateMul: number; speedMul: number; critChance: number;
+    healthRegen: number; shieldRegen: number; elementalResist: number; damageReduction: number;
+  }): void {
+    this.moduleBoosts.damageMul = Math.max(1, boosts.damageMul || 1);
+    this.moduleBoosts.fireRateMul = Math.max(1, boosts.fireRateMul || 1);
+    this.moduleBoosts.speedMul = Math.max(1, boosts.speedMul || 1);
+    this.moduleBoosts.critChance = Math.max(0, boosts.critChance || 0);
+    this.moduleBoosts.healthRegen = Math.max(0, boosts.healthRegen || 0);
+    this.moduleBoosts.shieldRegen = Math.max(0, boosts.shieldRegen || 0);
+    this.moduleBoosts.elementalResist = Math.max(0, Math.min(0.30, boosts.elementalResist || 0));
+    this.moduleBoosts.damageReduction = Math.max(0, Math.min(0.30, boosts.damageReduction || 0));
+  }
+
+  /** Push active pet augment bonuses from ActivePetSystem.getAugmentBonuses(). */
+  setPetAugmentBoosts(boosts: {
+    damageMul: number; fireRateMul: number; speedMul: number;
+    shieldRegen: number; healthRegen: number; critChance: number;
+  }): void {
+    this.petAugmentBoosts.damageMul = Math.max(1, boosts.damageMul || 1);
+    this.petAugmentBoosts.fireRateMul = Math.max(1, boosts.fireRateMul || 1);
+    this.petAugmentBoosts.speedMul = Math.max(1, boosts.speedMul || 1);
+    this.petAugmentBoosts.shieldRegen = Math.max(0, boosts.shieldRegen || 0);
+    this.petAugmentBoosts.healthRegen = Math.max(0, boosts.healthRegen || 0);
+    this.petAugmentBoosts.critChance = Math.max(0, boosts.critChance || 0);
   }
 
   private recomputeUpgradeStats(): void {

@@ -695,6 +695,8 @@ export const Game: React.FC = () => {
 
         const armorSystem = new ArmorSystem();
         armorSystemRef.current = armorSystem;
+        // Push initial modular armor bonuses into the player stat pipeline.
+        player.setModuleBoosts(armorSystem.getModuleBonuses());
 
         const craftingSystem = new CraftingSystem(inventory);
         craftingSystemRef.current = craftingSystem;
@@ -813,6 +815,8 @@ export const Game: React.FC = () => {
         // player and provide active combat augments based on species type.
         const activePetSystem = new ActivePetSystem(scene);
         activePetSystemRef.current = activePetSystem;
+        // Wire pet augment bonuses into the player stat pipeline.
+        player.setPetAugmentBoosts(activePetSystem.getAugmentBonuses());
 
         // Nature ring: 28 mountains around the world rim plus 4 hidden
         // temples that grant a one-time bundle of rare items + a guaranteed
@@ -2169,6 +2173,9 @@ export const Game: React.FC = () => {
                   snap.activePets,
                   bioRef.current?.getCaptured() ?? [],
                 );
+                // Re-push pet augment bonuses after loading saved pets.
+                player.setPetAugmentBoosts(activePetSystemRef.current.getAugmentBonuses());
+                weapons.setPlayerBoosts(player.getPlayerBoosts());
               }
               // Hidden-temple looted state — keep raided temples dimmed
               // across reloads and (per-level) across deaths.
@@ -2242,6 +2249,13 @@ export const Game: React.FC = () => {
         bus.on(GameEvents.PLAYER_UPGRADED, () => {
           weapons.setPlayerBoosts(player.getPlayerBoosts());
           void doSaveProgress();
+        });
+        // Any time armor is equipped, unequipped, or modules change,
+        // recompute module bonuses and push them into the player + weapons.
+        bus.on(GameEvents.INVENTORY_CHANGED, () => {
+          const modBoosts = armorSystem.getModuleBonuses();
+          player.setModuleBoosts(modBoosts);
+          weapons.setPlayerBoosts(player.getPlayerBoosts());
         });
         bus.on(GameEvents.CREATURE_CAPTURED, () => { void doSaveProgress(); });
         // Helper-bot roster + helper-bot upgrades must persist or paid-for
