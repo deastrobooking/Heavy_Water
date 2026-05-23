@@ -7,7 +7,9 @@ import type { BioCreatureSystem } from "./BioCreatureSystem";
 import { BIO_SPECIES } from "./BioSpecies";
 import type { EnemySystem, EnemyType, EnemyUnit } from "./EnemySystem";
 import type { AerialEnemySystem, AerialUnit } from "./AerialEnemySystem";
+import type { EnemyBaseSystem } from "./EnemyBaseSystem";
 import { createRetroTexture, TERRAIN_TEXTURES } from "./TerrainTextureMaterials";
+import type { BossVariantId } from "./BossVariants";
 
 export interface MichiganTerrainHandles {
   city?: CityGenerator | null;
@@ -18,6 +20,7 @@ export interface MichiganTerrainHandles {
   playerPos?: (() => BABYLON.Vector3) | null;
   enemy?: EnemySystem | null;
   aerial?: AerialEnemySystem | null;
+  enemyBase?: EnemyBaseSystem | null;
 }
 
 interface HeightData {
@@ -69,6 +72,10 @@ export class MichiganTerrainSystem {
   private powerBlooms: Array<{ mesh: BABYLON.Mesh; itemId: keyof typeof ITEM_DEFINITIONS; quantity: number; collected: boolean; baseY: number }> = [];
   private spawnedEnemyUnits: EnemyUnit[] = [];
   private spawnedAerialUnits: AerialUnit[] = [];
+  private spawnedInteractiveBaseCenters: BABYLON.Vector3[] = [];
+  private sectorCullNodes: Array<{ node: BABYLON.TransformNode; radius: number; enabled: boolean }> = [];
+  private sectorCullAccum = 0;
+  private patrolMotherships: Array<{ root: BABYLON.TransformNode; baseY: number; spin: number; phase: number }> = [];
   private observer: BABYLON.Observer<BABYLON.Scene> | null = null;
   private previousEnemyMax: number | null = null;
   private terrainContentSeeded = false;
@@ -253,6 +260,12 @@ export class MichiganTerrainSystem {
     try { this.handles.aerial?.disengageAndClear(); } catch {}
     this.spawnedEnemyUnits = [];
     this.spawnedAerialUnits = [];
+    if (this.spawnedInteractiveBaseCenters.length) {
+      try { this.handles.enemyBase?.removeBasesNear(this.spawnedInteractiveBaseCenters, 12); } catch {}
+    }
+    this.spawnedInteractiveBaseCenters = [];
+    this.sectorCullNodes = [];
+    this.patrolMotherships = [];
     this.powerBlooms = [];
     if (restoreOuterWorld) {
       try { this.restoreOuterWorld(); } catch {}
@@ -707,8 +720,41 @@ export class MichiganTerrainSystem {
       }
     }
 
+    this.seedInteractiveWildsBases();
     this.buildMothershipWreck(this.sampleTerrainFraction(-0.12, -0.50, 3.0), 0, -0.38);
     this.buildMothershipWreck(this.sampleTerrainFraction(0.46, 0.07, 4.0), 1, 0.55);
+    this.buildMothershipWreck(this.sampleTerrainFraction(-0.43, 0.41, 5.0), 2, -0.92);
+    this.buildPatrolMothership(this.sampleTerrainFraction(-0.39, -0.08, 92), 0, -0.28, 1.0);
+    this.buildPatrolMothership(this.sampleTerrainFraction(0.02, 0.39, 104), 1, 0.44, 1.08);
+    this.buildPatrolMothership(this.sampleTerrainFraction(0.39, 0.29, 86), 2, 0.86, 0.9);
+    this.buildPatrolMothership(this.sampleTerrainFraction(-0.08, -0.45, 78), 3, -0.66, 0.82);
+  }
+
+  private seedInteractiveWildsBases(): void {
+    const enemyBase = this.handles.enemyBase;
+    if (!enemyBase) return;
+
+    const bossDefs = MichiganTerrainSystem.WARP_POINT_DEFS.filter((def) => def.kind === "base");
+    for (const def of bossDefs) {
+      const pos = this.sampleWarpPoint(def, 0.02);
+      try {
+        enemyBase.spawnBossFortress(pos.clone());
+        this.spawnedInteractiveBaseCenters.push(pos.clone());
+      } catch (err) {
+        console.warn("[MichiganTerrainSystem] failed to seed MI boss fortress", def.id, err);
+      }
+    }
+
+    const regularDefs = MichiganTerrainSystem.WARP_POINT_DEFS.filter((def) => def.kind === "lab").slice(0, 2);
+    for (const def of regularDefs) {
+      const pos = this.sampleWarpPoint(def, 0.02);
+      try {
+        enemyBase.spawnBase(pos.clone());
+        this.spawnedInteractiveBaseCenters.push(pos.clone());
+      } catch (err) {
+        console.warn("[MichiganTerrainSystem] failed to seed MI field base", def.id, err);
+      }
+    }
   }
 
   private buildGiantBase(pos: BABYLON.Vector3, idx: number): void {
@@ -721,6 +767,7 @@ export class MichiganTerrainSystem {
     root.parent = this.root;
     root.position.copyFrom(pos);
     root.rotation.y = (idx * 0.7) % Math.PI;
+    this.registerSectorNode(root, 720);
 
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2;
@@ -777,6 +824,7 @@ export class MichiganTerrainSystem {
     root.parent = this.root;
     root.position.copyFrom(pos);
     root.rotation.y = idx * 0.9 - 0.4;
+    this.registerSectorNode(root, 520);
 
     const body = BABYLON.MeshBuilder.CreateBox(`miLabBody_${idx}`, { width: 24, height: 6, depth: 14 }, scene);
     body.position.set(0, 3, 0);
@@ -836,6 +884,7 @@ export class MichiganTerrainSystem {
     root.parent = this.root;
     root.position.copyFrom(pos);
     root.rotation.y = idx * 0.65;
+    this.registerSectorNode(root, 680);
 
     for (let i = 0; i < 4; i++) {
       const sx = i < 2 ? -1 : 1;
@@ -887,6 +936,7 @@ export class MichiganTerrainSystem {
     root.parent = this.root;
     root.position.copyFrom(pos);
     root.rotation.set(0.12, yaw, -0.18);
+    this.registerSectorNode(root, 960);
 
     const hull = BABYLON.MeshBuilder.CreateCylinder(`miMothershipHull_${idx}`, {
       diameter: 48,
@@ -915,31 +965,151 @@ export class MichiganTerrainSystem {
     }
   }
 
+  private buildPatrolMothership(pos: BABYLON.Vector3, idx: number, yaw: number, scale: number): void {
+    const scene = this.scene;
+    const hullMat = this.makeMaterial(
+      `miPatrolMothershipHullMat_${idx}`,
+      new BABYLON.Color3(0.16, 0.17, 0.22),
+      new BABYLON.Color3(0.035, 0.045, 0.075),
+    );
+    const trimMat = this.makeMaterial(
+      `miPatrolMothershipTrimMat_${idx}`,
+      new BABYLON.Color3(0.85, 0.16, 0.64),
+      new BABYLON.Color3(0.85, 0.08, 0.52),
+    );
+    const domeMat = this.makeMaterial(
+      `miPatrolMothershipDomeMat_${idx}`,
+      new BABYLON.Color3(0.35, 0.56, 0.84),
+      new BABYLON.Color3(0.18, 0.38, 0.92),
+    );
+    domeMat.alpha = 0.88;
+
+    const root = new BABYLON.TransformNode(`miPatrolMothership_${idx}`, scene);
+    root.parent = this.root;
+    root.position.copyFrom(pos);
+    root.rotation.y = yaw;
+    root.scaling.setAll(scale);
+    this.registerSectorNode(root, 1400);
+    this.patrolMotherships.push({
+      root,
+      baseY: pos.y,
+      spin: (idx % 2 === 0 ? 1 : -1) * (Math.PI * 2 / (150 + idx * 35)),
+      phase: idx * 1.7,
+    });
+
+    const lower = BABYLON.MeshBuilder.CreateSphere(`miPatrolSaucerLower_${idx}`, { diameter: 116, segments: 26 }, scene);
+    lower.scaling.set(1, 0.14, 1);
+    lower.position.y = -2;
+    lower.parent = root;
+    lower.material = hullMat;
+    lower.isPickable = false;
+
+    const upper = BABYLON.MeshBuilder.CreateSphere(`miPatrolSaucerUpper_${idx}`, { diameter: 92, segments: 24 }, scene);
+    upper.scaling.set(1, 0.24, 1);
+    upper.position.y = 9;
+    upper.parent = root;
+    upper.material = hullMat;
+    upper.isPickable = false;
+
+    const deck = BABYLON.MeshBuilder.CreateCylinder(`miPatrolSaucerDeck_${idx}`, {
+      height: 0.7,
+      diameter: 62,
+      tessellation: 28,
+    }, scene);
+    deck.position.y = 17;
+    deck.parent = root;
+    deck.material = hullMat;
+    deck.isPickable = false;
+
+    const dome = BABYLON.MeshBuilder.CreateSphere(`miPatrolSaucerDome_${idx}`, { diameter: 28, segments: 18 }, scene);
+    dome.scaling.y = 0.58;
+    dome.position.y = 25;
+    dome.parent = root;
+    dome.material = domeMat;
+    dome.isPickable = false;
+
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      const orb = BABYLON.MeshBuilder.CreateSphere(`miPatrolSaucerOrb_${idx}_${i}`, { diameter: 3.8, segments: 8 }, scene);
+      orb.position.set(Math.cos(a) * 52, -8, Math.sin(a) * 52);
+      orb.parent = root;
+      orb.material = trimMat;
+      orb.isPickable = false;
+    }
+
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      const spire = BABYLON.MeshBuilder.CreateCylinder(`miPatrolSaucerSpire_${idx}_${i}`, {
+        height: 15,
+        diameterBottom: 1.2,
+        diameterTop: 0.25,
+        tessellation: 7,
+      }, scene);
+      spire.position.set(Math.cos(a) * 18, 34, Math.sin(a) * 18);
+      spire.parent = root;
+      spire.material = hullMat;
+      spire.isPickable = false;
+    }
+  }
+
   private spawnWildsDangerLayer(): void {
     const enemy = this.handles.enemy;
     if (enemy) {
-      const encounters: Array<[EnemyType, number, number]> = [
-        ["wilds_titan", -0.40, -0.07],
-        ["wilds_transformer", -0.32, 0.24],
-        ["titan", -0.23, -0.26],
-        ["captain", -0.12, 0.35],
-        ["tank", 0.10, -0.38],
-        ["wilds_transformer", 0.25, 0.26],
-        ["heavy", 0.31, -0.12],
-        ["hybrid", 0.39, 0.28],
-        ["wilds_titan", 0.39, -0.31],
-        ["commander", 0.47, 0.08],
+      const encounters: Array<{ type: EnemyType; fx: number; fz: number; lift?: number }> = [
+        { type: "wilds_titan", fx: -0.40, fz: -0.07, lift: 3.4 },
+        { type: "spider_tank", fx: -0.37, fz: -0.12, lift: 3.8 },
+        { type: "commander", fx: -0.43, fz: -0.02, lift: 1.8 },
+        { type: "wilds_transformer", fx: -0.32, fz: 0.24, lift: 3.5 },
+        { type: "titan", fx: -0.23, fz: -0.26, lift: 1.8 },
+        { type: "spider_tank", fx: -0.18, fz: 0.12, lift: 3.6 },
+        { type: "tank", fx: 0.10, fz: -0.38, lift: 1.8 },
+        { type: "wilds_transformer", fx: 0.25, fz: 0.26, lift: 3.5 },
+        { type: "heavy", fx: 0.31, fz: -0.12, lift: 1.8 },
+        { type: "hybrid", fx: 0.39, fz: 0.28, lift: 1.8 },
+        { type: "wilds_titan", fx: 0.39, fz: -0.31, lift: 3.4 },
+        { type: "spider_tank", fx: 0.34, fz: -0.35, lift: 3.8 },
+        { type: "commander", fx: 0.47, fz: 0.08, lift: 1.8 },
+        { type: "titan", fx: -0.44, fz: 0.42, lift: 1.9 },
+        { type: "wilds_transformer", fx: 0.03, fz: 0.38, lift: 3.5 },
+        { type: "tank", fx: -0.08, fz: -0.46, lift: 1.8 },
+        { type: "wilds_titan", fx: 0.16, fz: 0.43, lift: 3.4 },
+        { type: "spider_tank", fx: 0.42, fz: 0.07, lift: 3.8 },
       ];
-      for (const [type, fx, fz] of encounters) {
-        const pos = this.sampleTerrainFraction(fx, fz, type.startsWith("wilds_") ? 3.2 : 1.6);
+      for (const encounter of encounters) {
+        const pos = this.sampleTerrainFraction(encounter.fx, encounter.fz, encounter.lift ?? 1.6);
         try {
-          const unit = enemy.spawnEnemyAt(type, pos);
+          const unit = enemy.spawnEnemyAt(encounter.type, pos);
           if (unit) {
             unit.keepAirborneY = pos.y;
             this.spawnedEnemyUnits.push(unit);
           }
         } catch (err) {
-          console.warn("[MichiganTerrainSystem] failed to spawn MI enemy", type, err);
+          console.warn("[MichiganTerrainSystem] failed to spawn MI enemy", encounter.type, err);
+        }
+      }
+
+      const captainClasses: Array<{
+        preset: string;
+        variantId: BossVariantId;
+        fx: number;
+        fz: number;
+      }> = [
+        { preset: "HumanoidCaptainWarrior", variantId: "frost", fx: -0.12, fz: 0.35 },
+        { preset: "HumanoidCaptainBerserker", variantId: "inferno", fx: 0.17, fz: 0.43 },
+        { preset: "HumanoidCaptainChampion", variantId: "storm", fx: -0.46, fz: 0.18 },
+      ];
+      for (const captain of captainClasses) {
+        const pos = this.sampleTerrainFraction(captain.fx, captain.fz, 1.8);
+        try {
+          const unit = enemy.spawnCaptain(pos, {
+            healthMultiplier: 1.2,
+            humanoidPreset: captain.preset,
+            variantId: captain.variantId,
+          });
+          unit.keepAirborneY = pos.y;
+          this.spawnedEnemyUnits.push(unit);
+        } catch (err) {
+          console.warn("[MichiganTerrainSystem] failed to spawn MI captain class", captain.preset, err);
         }
       }
     }
@@ -947,26 +1117,36 @@ export class MichiganTerrainSystem {
     const aerial = this.handles.aerial;
     if (aerial) {
       const anchors = [
+        this.sampleTerrainFraction(-0.39, -0.08, 0),
         this.sampleTerrainFraction(-0.16, -0.48, 0),
+        this.sampleTerrainFraction(0.02, 0.39, 0),
         this.sampleTerrainFraction(0.43, 0.06, 0),
         this.sampleTerrainFraction(0.16, 0.36, 0),
       ];
-      for (const anchor of anchors) {
+      for (let i = 0; i < anchors.length; i++) {
+        const anchor = anchors[i];
         try {
           const fort = aerial.spawnFortress(anchor);
           if (fort) {
-            fort.patrolCenter = new BABYLON.Vector3(anchor.x, 76, anchor.z);
+            fort.patrolCenter = new BABYLON.Vector3(anchor.x, 82 + (i % 2) * 10, anchor.z);
             this.spawnedAerialUnits.push(fort);
           }
           const ship = aerial.spawnBattleship(anchor);
           if (ship) {
-            ship.patrolCenter = new BABYLON.Vector3(anchor.x, 58, anchor.z);
+            ship.patrolCenter = new BABYLON.Vector3(anchor.x, 62 + (i % 3) * 7, anchor.z);
             this.spawnedAerialUnits.push(ship);
           }
           const fighter = aerial.spawnFighter(anchor);
           if (fighter) {
             fighter.patrolCenter = new BABYLON.Vector3(anchor.x, 34, anchor.z);
             this.spawnedAerialUnits.push(fighter);
+          }
+          if (i % 2 === 0) {
+            const escort = aerial.spawnFighter(anchor);
+            if (escort) {
+              escort.patrolCenter = new BABYLON.Vector3(anchor.x, 38, anchor.z);
+              this.spawnedAerialUnits.push(escort);
+            }
           }
         } catch (err) {
           console.warn("[MichiganTerrainSystem] failed to seed MI aerial patrol", err);
@@ -986,6 +1166,9 @@ export class MichiganTerrainSystem {
     const player = this.handles.playerPos?.();
     const inventory = this.handles.inventory;
 
+    this.updateSectorCulling(dt, player);
+    this.updatePatrolMotherships(dt);
+
     for (const bloom of this.powerBlooms) {
       if (bloom.collected || !bloom.mesh.isEnabled()) continue;
       bloom.mesh.rotation.y += dt * 1.8;
@@ -1003,6 +1186,44 @@ export class MichiganTerrainSystem {
       bloom.collected = true;
       bloom.mesh.setEnabled(false);
       this.bus.emit(GameEvents.UI_MESSAGE, `MI WILDS POWER BLOOM: ${collected} ${def.name.toUpperCase()}`);
+    }
+  }
+
+  private registerSectorNode(node: BABYLON.TransformNode, radius: number): void {
+    this.sectorCullNodes.push({ node, radius, enabled: true });
+  }
+
+  private updateSectorCulling(dt: number, player: BABYLON.Vector3 | null | undefined): void {
+    if (!player || this.sectorCullNodes.length === 0) return;
+    this.sectorCullAccum += dt;
+    if (this.sectorCullAccum < 0.22) return;
+    this.sectorCullAccum = 0;
+
+    for (let i = this.sectorCullNodes.length - 1; i >= 0; i--) {
+      const entry = this.sectorCullNodes[i];
+      if (entry.node.isDisposed()) {
+        this.sectorCullNodes.splice(i, 1);
+        continue;
+      }
+      const pos = entry.node.getAbsolutePosition();
+      const dx = pos.x - player.x;
+      const dy = pos.y - player.y;
+      const dz = pos.z - player.z;
+      const radius = entry.enabled ? entry.radius + 140 : entry.radius;
+      const want = dx * dx + dy * dy + dz * dz <= radius * radius;
+      if (want === entry.enabled) continue;
+      entry.node.setEnabled(want);
+      entry.enabled = want;
+    }
+  }
+
+  private updatePatrolMotherships(dt: number): void {
+    if (this.patrolMotherships.length === 0) return;
+    const now = performance.now() * 0.001;
+    for (const ship of this.patrolMotherships) {
+      if (ship.root.isDisposed() || !ship.root.isEnabled()) continue;
+      ship.root.rotation.y += dt * ship.spin;
+      ship.root.position.y = ship.baseY + Math.sin(now * 0.55 + ship.phase) * 3.8;
     }
   }
 

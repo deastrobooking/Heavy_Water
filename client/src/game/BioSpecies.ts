@@ -15,7 +15,8 @@ export type Archetype =
   | "serpent" | "owl" | "bird" | "dragon"
   | "fish" | "crab" | "turtle"
   | "bear" | "monkey" | "golem"
-  | "flutter" | "slime";
+  | "flutter" | "slime"
+  | "bot" | "drone" | "roller";
 
 export type ElementalType =
   | "normal" | "flame" | "water" | "grass" | "electric"
@@ -260,6 +261,16 @@ export const BIO_SPECIES: BioCreatureSpecies[] = [
   spec("chipsalamander", "Chipsalamander",  "salamander","normal","common",    0.50, "Heat-sink lizard"),
   spec("dustcat",        "Dustcat",         "cat",     "normal",   "common",   0.50, "Vent-clearing scout"),
   spec("loaderape",      "Loaderape",       "monkey",  "normal",   "uncommon", 0.65, "Lift-frame hauler"),
+
+  // ---- Cute utility robots for gardens, farms, and future villages ----
+  spec("beepbot",        "Beepbot",         "bot",     "normal",   "common",   0.46, "Tiny helper chassis"),
+  spec("hugbot",         "Hugbot",          "bot",     "normal",   "uncommon", 0.52, "Comfort-care robot"),
+  spec("sproutbot",      "Sproutbot",       "bot",     "grass",    "common",   0.48, "Seedling field helper"),
+  spec("seedroller",     "Seedroller",      "roller",  "grass",    "common",   0.50, "Soil-tilling roller"),
+  spec("sunnyroller",    "Sunnyroller",     "roller",  "electric", "common",   0.50, "Solar charge rover"),
+  spec("orbdrone",       "Orbdrone",        "drone",   "electric", "uncommon", 0.48, "Floating scout helper"),
+  spec("medidrone",      "Medidrone",       "drone",   "water",    "uncommon", 0.50, "Clinic mist drone"),
+  spec("pearlbot",       "Pearlbot",        "bot",     "crystal",  "rare",     0.52, "Polished sanctuary aide"),
 ];
 
 // ---------------------------------------------------------------- helpers

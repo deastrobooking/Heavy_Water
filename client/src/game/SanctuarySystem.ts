@@ -140,11 +140,11 @@ export class SanctuarySystem {
     this.buildPerimeter();
     this.buildVillage();
     this.buildPetClinic();
-    // Wilder additions — mountains ring the valley, an alien cave sits on
-    // its eastern edge as an adventure pocket, and dense L-system foliage
-    // + wandering bio-critters bring the place to life. Order matters
-    // only for visual layering; none of these are colliders.
-    this.buildMountainRing();
+    // Wilder additions — the sanctuary now borrows a peaceful slice of
+    // the Michigan heightmap language instead of sitting in a strange
+    // cone-mountain arena. Gentle wetlands, ridges, L-system foliage,
+    // and wandering bio-critters make it feel like a protected preserve.
+    this.buildMichiganMeadowBackcountry();
     this.buildCave();
     this.scatterAlienFoliage();
     this.buildWildlife();
@@ -309,15 +309,16 @@ export class SanctuarySystem {
     this.hiddenVisibles = [];
   }
 
-  /** Build a real rolling terrain patch centred on the sanctuary so the
-   *  player walks on a shaped valley instead of a flat hidden-city stand-in.
-   *  The inner village/farm circle is flattened for readable props while
-   *  the outer terrain rolls upward into foothills before the mountain ring. */
+  /** Build a peaceful mini-Michigan terrain patch centred on the sanctuary.
+   *  The old sanctuary used a generic ring-valley silhouette; this version
+   *  reads as a protected slice of the MI Wildlands: soft grass lowlands,
+   *  shallow wetland pockets, broad foothills, and a large flattened
+   *  village/farm/pet-care preserve in the middle. */
   private buildGrassPlains(): void {
     const c = SanctuarySystem.CENTER;
     const ground = BABYLON.MeshBuilder.CreateGround(
       "sanctuaryTerrain",
-      { width: 1500, height: 1500, subdivisions: 96, updatable: true },
+      { width: 2300, height: 2300, subdivisions: 144, updatable: true },
       this.scene,
     );
     ground.position.set(c.x, -0.08, c.z);
@@ -332,15 +333,21 @@ export class SanctuarySystem {
         const x = positions[i];
         const z = positions[i + 2];
         const dist = Math.sqrt(x * x + z * z);
-        const villageFlatten = BABYLON.Scalar.Clamp((dist - 30) / 95, 0, 1);
+        const villageFlatten = BABYLON.Scalar.Clamp((dist - 95) / 150, 0, 1);
         const ripple =
-          Math.sin(x * 0.020) * 0.85 +
-          Math.cos(z * 0.016) * 0.65 +
-          Math.sin((x + z) * 0.011) * 0.50 +
-          (SanctuarySystem.noise2(Math.floor(x / 18), Math.floor(z / 18), 91) - 0.5) * 0.55;
-        const foothill = SanctuarySystem.smoothstep(230, 690, dist) * 10.5;
-        const dip = (1 - SanctuarySystem.smoothstep(0, 150, dist)) * -0.18;
-        positions[i + 1] = ripple * villageFlatten + foothill + dip;
+          Math.sin(x * 0.010) * 1.10 +
+          Math.cos(z * 0.012) * 0.95 +
+          Math.sin((x - z) * 0.006) * 0.85 +
+          (SanctuarySystem.noise2(Math.floor(x / 42), Math.floor(z / 42), 91) - 0.5) * 0.90;
+        const upperRidge =
+          SanctuarySystem.gaussian(x + 420, z - 360, 360) * 8.0 +
+          SanctuarySystem.gaussian(x - 520, z + 260, 420) * 6.5;
+        const wetland =
+          SanctuarySystem.gaussian(x - 260, z - 120, 170) * -2.4 +
+          SanctuarySystem.gaussian(x + 310, z + 210, 220) * -2.0;
+        const farFoothills = SanctuarySystem.smoothstep(430, 1080, dist) * 11.5;
+        const villagePad = (1 - SanctuarySystem.smoothstep(0, 145, dist)) * -0.08;
+        positions[i + 1] = (ripple + upperRidge + wetland + farFoothills) * villageFlatten + villagePad;
       }
       const normals: number[] = [];
       BABYLON.VertexData.ComputeNormals(positions, indices, normals);
@@ -358,6 +365,31 @@ export class SanctuarySystem {
       0.10,
     );
     ground.material = mat;
+
+    const waterMat = new BABYLON.StandardMaterial("sanctuaryWetlandMat", this.scene);
+    waterMat.diffuseColor = new BABYLON.Color3(0.06, 0.30, 0.38);
+    waterMat.emissiveColor = new BABYLON.Color3(0.02, 0.10, 0.14);
+    waterMat.specularColor = new BABYLON.Color3(0.25, 0.42, 0.46);
+    waterMat.alpha = 0.38;
+    waterMat.backFaceCulling = false;
+    const ponds: Array<{ x: number; z: number; sx: number; sz: number; rot: number }> = [
+      { x: c.x + 260, z: c.z + 210, sx: 1.55, sz: 0.82, rot: -0.28 },
+      { x: c.x - 280, z: c.z - 120, sx: 1.20, sz: 0.72, rot: 0.44 },
+    ];
+    ponds.forEach((p, i) => {
+      const pond = BABYLON.MeshBuilder.CreateDisc(
+        `sanctuaryWetlandPond_${i}`,
+        { radius: 34 + i * 8, tessellation: 42 },
+        this.scene,
+      );
+      pond.position.set(p.x, 0.035, p.z);
+      pond.rotation.x = Math.PI / 2;
+      pond.rotation.z = p.rot;
+      pond.scaling.set(p.sx, p.sz, 1);
+      pond.parent = this.root;
+      pond.material = waterMat;
+      pond.isPickable = false;
+    });
   }
 
   // -------------------------------------------------------------- visuals
@@ -409,7 +441,7 @@ export class SanctuarySystem {
    *  collider — building/exploration both pass through it. */
   private buildPerimeter(): void {
     const c = SanctuarySystem.CENTER;
-    const r = 32;
+    const r = 76;
     const segs = 64;
     const points: BABYLON.Vector3[] = [];
     for (let i = 0; i <= segs; i++) {
@@ -787,10 +819,10 @@ export class SanctuarySystem {
     });
 
     // ---- wooden fence ringing the farm patch (south of sign) ----
-    // Farm sits at startX=c.x-8, z=c.z+12, 4 wide × 2 deep with spacing 4.
-    // Fence box: x in [c.x-11, c.x+9], z in [c.z+9, c.z+21].
+    // Farm sits at startX=c.x-8, z=c.z+12, 4 wide x 3 deep with spacing 4.
+    // Fence box: x in [c.x-11, c.x+9], z in [c.z+9, c.z+25].
     const fenceX0 = c.x - 11, fenceX1 = c.x + 9;
-    const fenceZ0 = c.z + 9,  fenceZ1 = c.z + 21;
+    const fenceZ0 = c.z + 9,  fenceZ1 = c.z + 25;
     const buildFenceRail = (x0: number, z0: number, x1: number, z1: number, idx: number) => {
       const dx = x1 - x0, dz = z1 - z0;
       const len = Math.sqrt(dx * dx + dz * dz);
@@ -1014,40 +1046,50 @@ export class SanctuarySystem {
     this.gardenPlinthPos = pos.clone();
   }
 
-  // ----------------------------------------------------- mountains / cave
+  // ----------------------------------------------------- meadow / cave
 
-  /** Ring the sanctuary valley with a circle of stylized mountain peaks so
-   *  the world reads as a hidden basin instead of an open prairie. Twelve
-   *  cones at radius 95 m — well beyond the 32 m perimeter ring — keep the
-   *  gameplay area unobstructed while giving the horizon real depth. The
-   *  cones use a simple 4-side tessellation so each peak reads angular and
-   *  faceted (anime-cell-shaded silhouette). All meshes parent to root. */
-  private buildMountainRing(): void {
+  /** Dress the expanded terrain like a peaceful MI preserve rather than
+   *  the previous cone-mountain arena. Low rock shelves, meadow stones,
+   *  marsh reeds, and scattered saplings frame the pet/farming space while
+   *  keeping the buildable center visually open. */
+  private buildMichiganMeadowBackcountry(): void {
     const c = SanctuarySystem.CENTER;
     const scene = this.scene;
 
     const rockMat = createRetroGroundMaterial(
       scene,
-      "sanctuaryMountainMat",
+      "sanctuaryMeadowRockMat",
       TERRAIN_TEXTURES.rockGrass,
-      5,
-      new BABYLON.Color3(0.32, 0.30, 0.40),
+      7,
+      new BABYLON.Color3(0.34, 0.38, 0.32),
       0.12,
     );
 
-    const snowMat = createRetroGroundMaterial(
+    const stoneMat = createRetroGroundMaterial(
       scene,
-      "sanctuarySnowMat",
-      TERRAIN_TEXTURES.rockSnow,
-      5,
-      new BABYLON.Color3(0.92, 0.95, 1.00),
-      0.18,
+      "sanctuaryMeadowStoneMat",
+      TERRAIN_TEXTURES.stone,
+      6,
+      new BABYLON.Color3(0.56, 0.57, 0.52),
+      0.06,
     );
 
-    const RING_R = 95;
-    const PEAKS = 12;
+    const reedMat = new BABYLON.StandardMaterial("sanctuaryReedMat", scene);
+    reedMat.diffuseColor = new BABYLON.Color3(0.42, 0.58, 0.22);
+    reedMat.emissiveColor = new BABYLON.Color3(0.04, 0.08, 0.02);
+    reedMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const saplingMat = new BABYLON.StandardMaterial("sanctuarySaplingMat", scene);
+    saplingMat.diffuseColor = new BABYLON.Color3(0.18, 0.58, 0.25);
+    saplingMat.emissiveColor = new BABYLON.Color3(0.03, 0.10, 0.04);
+    saplingMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
+    const trunkMat = new BABYLON.StandardMaterial("sanctuarySaplingTrunkMat", scene);
+    trunkMat.diffuseColor = new BABYLON.Color3(0.30, 0.20, 0.12);
+    trunkMat.specularColor = new BABYLON.Color3(0, 0, 0);
+
     // Mulberry32 — local deterministic so the layout is stable across mounts.
-    let s = 0x5A1C2A;
+    let s = 0x4D1A11;
     const rand = () => {
       s = (s + 0x6D2B79F5) >>> 0;
       let t = s;
@@ -1056,41 +1098,74 @@ export class SanctuarySystem {
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
 
-    for (let i = 0; i < PEAKS; i++) {
-      const a = (i / PEAKS) * Math.PI * 2 + (rand() - 0.5) * 0.18;
-      const r = RING_R + (rand() - 0.5) * 18;
+    for (let i = 0; i < 26; i++) {
+      const a = rand() * Math.PI * 2;
+      const r = 115 + rand() * 430;
       const x = c.x + Math.cos(a) * r;
       const z = c.z + Math.sin(a) * r;
-      const height = 28 + rand() * 22;            // 28..50 m
-      const baseDiam = 22 + rand() * 14;          // 22..36 m
-
-      const peak = BABYLON.MeshBuilder.CreateCylinder(
-        `sanctuaryPeak_${i}`,
-        { diameterTop: 0.4, diameterBottom: baseDiam, height, tessellation: 5 },
+      const rock = BABYLON.MeshBuilder.CreateCylinder(
+        `sanctuaryMeadowBoulder_${i}`,
+        {
+          diameterTop: 1.2 + rand() * 2.2,
+          diameterBottom: 4.0 + rand() * 5.5,
+          height: 1.2 + rand() * 2.6,
+          tessellation: 7,
+        },
         scene,
       );
-      // Height/2 so the cone rests flush on the grass plane (y=0.02).
-      peak.position.set(x, height / 2, z);
-      peak.rotation.y = rand() * Math.PI * 2;
-      peak.material = rockMat;
-      peak.parent = this.root;
-      peak.isPickable = false;
-      peak.freezeWorldMatrix();
+      rock.position.set(x, rock.getBoundingInfo().boundingBox.extendSize.y, z);
+      rock.rotation.y = rand() * Math.PI * 2;
+      rock.scaling.x = 0.7 + rand() * 1.1;
+      rock.scaling.z = 0.7 + rand() * 1.0;
+      rock.material = i % 3 === 0 ? stoneMat : rockMat;
+      rock.parent = this.root;
+      rock.isPickable = false;
+      rock.freezeWorldMatrix();
+    }
 
-      // A snow cap on the upper third — visually anchors the peak as a
-      // mountain rather than a generic spike.
-      const capH = height * 0.32;
-      const cap = BABYLON.MeshBuilder.CreateCylinder(
-        `sanctuaryCap_${i}`,
-        { diameterTop: 0.4, diameterBottom: baseDiam * 0.45, height: capH, tessellation: 5 },
+    for (let i = 0; i < 58; i++) {
+      const nearEastPond = i < 30;
+      const px = c.x + (nearEastPond ? 260 : -280) + (rand() - 0.5) * 94;
+      const pz = c.z + (nearEastPond ? 210 : -120) + (rand() - 0.5) * 62;
+      const reed = BABYLON.MeshBuilder.CreateCylinder(
+        `sanctuaryWetlandReed_${i}`,
+        { diameterTop: 0.04, diameterBottom: 0.10, height: 0.9 + rand() * 1.2, tessellation: 5 },
         scene,
       );
-      cap.position.set(x, height - capH / 2 + 0.05, z);
-      cap.rotation.y = peak.rotation.y;
-      cap.material = snowMat;
-      cap.parent = this.root;
-      cap.isPickable = false;
-      cap.freezeWorldMatrix();
+      reed.position.set(px, reed.getBoundingInfo().boundingBox.extendSize.y, pz);
+      reed.rotation.x = (rand() - 0.5) * 0.20;
+      reed.rotation.z = (rand() - 0.5) * 0.20;
+      reed.material = reedMat;
+      reed.parent = this.root;
+      reed.isPickable = false;
+      reed.freezeWorldMatrix();
+    }
+
+    for (let i = 0; i < 24; i++) {
+      const a = rand() * Math.PI * 2;
+      const r = 140 + rand() * 360;
+      const x = c.x + Math.cos(a) * r;
+      const z = c.z + Math.sin(a) * r;
+      const trunk = BABYLON.MeshBuilder.CreateCylinder(
+        `sanctuaryMeadowSaplingTrunk_${i}`,
+        { diameter: 0.28 + rand() * 0.16, height: 1.5 + rand() * 0.7, tessellation: 7 },
+        scene,
+      );
+      trunk.position.set(x, 0.8, z);
+      trunk.material = trunkMat;
+      trunk.parent = this.root;
+      trunk.isPickable = false;
+
+      const crown = BABYLON.MeshBuilder.CreateSphere(
+        `sanctuaryMeadowSaplingCrown_${i}`,
+        { diameter: 1.7 + rand() * 1.2, segments: 9 },
+        scene,
+      );
+      crown.scaling.y = 0.85;
+      crown.position.set(x, 2.0 + rand() * 0.6, z);
+      crown.material = saplingMat;
+      crown.parent = this.root;
+      crown.isPickable = false;
     }
   }
 
@@ -1258,23 +1333,36 @@ export class SanctuarySystem {
    *  attemptCaptureNearest finds nothing in range because the cosmetic
    *  herd from buildWildlife isn't registered with the bio system.
    *
-   *  Positions live within the sanctuary perimeter (r≈26m), spaced
+   *  Positions live across the enlarged sanctuary preserve, spaced
    *  enough that no two creatures stack on the same plot. Ids are tracked
    *  so dispose can despawn the uncaptured remainder cleanly. */
   private spawnHuntableBioCreatures(): void {
     const bio = this.handles.bio;
     if (!bio) return;
     const c = SanctuarySystem.CENTER;
-    // Eight spawn points laid out around the village footprint, avoiding
-    // the centre (NPC + plinth) and the cave mouth (east edge).
-    const offsets: Array<[number, number]> = [
-      [-18,  -4], [-14,  14], [ -4,  20], [ 12,  18],
-      [ 18,   2], [ 14, -16], [  2, -20], [-12, -18],
+    // Curated peaceful population: familiar animal silhouettes plus the
+    // new cute utility robots, because the sanctuary should feel like a
+    // future farm/village roster rather than a random combat biome roll.
+    const entries: Array<[string, number, number]> = [
+      ["sproutbot", -46,  24],
+      ["seedroller", -32,  46],
+      ["beepbot", -14,  58],
+      ["hugbot",  22,  50],
+      ["medidrone", 52,  26],
+      ["orbdrone", 70,  -8],
+      ["sunnyroller", 42, -42],
+      ["tinypup",  6, -58],
+      ["crystalbeetle", -30, -48],
+      ["sparkpup", -58, -18],
+      ["mossfox", 118, 70],
+      ["leafbeetle", -124, 82],
+      ["splashfrog", 156, 182],
+      ["pearlbot", -168, -96],
     ];
-    for (const [dx, dz] of offsets) {
+    for (const [speciesId, dx, dz] of entries) {
       const pos = new BABYLON.Vector3(c.x + dx, 1, c.z + dz);
       try {
-        const id = bio.spawnRandomAt(pos);
+        const id = bio.spawnSpeciesAt(speciesId, pos) ?? bio.spawnRandomAt(pos);
         if (id) this.spawnedBioIds.push(id);
       } catch (err) {
         console.warn("[SanctuarySystem] failed to spawn sanctuary creature", err);
@@ -1462,6 +1550,10 @@ export class SanctuarySystem {
     const t = BABYLON.Scalar.Clamp((x - edge0) / (edge1 - edge0), 0, 1);
     return t * t * (3 - 2 * t);
   }
+
+  private static gaussian(x: number, z: number, radius: number): number {
+    return Math.exp(-(x * x + z * z) / Math.max(1, radius * radius));
+  }
 }
 
 // ============================================================================
@@ -1496,8 +1588,9 @@ class FarmingSystem {
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
   private prompt: HTMLDivElement;
 
-  /** Time per growth tier — total seed→harvest = 60s, tuned for fun. */
-  private static readonly STAGE_MS = 30_000;
+  /** Time per growth tier — total seed-to-harvest is 44s, quick enough
+   *  that Sanctuary farming feels like an active mini-game loop. */
+  private static readonly STAGE_MS = 22_000;
   /** How close the player must be to interact (m). */
   private static readonly INTERACT_RANGE = 4.0;
 
@@ -1568,14 +1661,14 @@ class FarmingSystem {
     try { this.prompt.remove(); } catch {}
   }
 
-  /** Eight plots in two rows of four, fenced to the south of the sign. */
+  /** Twelve plots in three rows of four, fenced to the south of the sign. */
   private spawnPlots(): void {
     const c = SanctuarySystem["CENTER"] as BABYLON.Vector3;
     const startX = c.x - 7.5;
     const startZ = c.z + 12;
     const spacing = 4;
     const cols = 4;
-    const rows = 2;
+    const rows = 3;
 
     let idx = 0;
     for (let r = 0; r < rows; r++) {
@@ -1710,11 +1803,17 @@ class FarmingSystem {
       this.inventory.addItem(ITEM_DEFINITIONS.bio_crop, 2);
       const feedBonus = Math.random() < 0.45;
       if (feedBonus) this.inventory.addItem(ITEM_DEFINITIONS.animaton_feed, 1);
+      const seedReturn = Math.random() < 0.35;
+      if (seedReturn) this.inventory.addItem(ITEM_DEFINITIONS.bio_seed, 1);
       this.setStage(plot, 0);
+      const extras = [
+        feedBonus ? "1 Animaton Feed" : "",
+        seedReturn ? "1 Bio Seed" : "",
+      ].filter(Boolean).join(" + ");
       this.bus.emit(
         GameEvents.UI_MESSAGE,
-        feedBonus
-          ? "Harvested 2x Bio Crop + 1 Animaton Feed."
+        extras
+          ? `Harvested 2x Bio Crop + ${extras}.`
           : "Harvested 2x Bio Crop.",
       );
       return;

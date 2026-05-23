@@ -960,7 +960,10 @@ export const Game: React.FC = () => {
         const enemyBaseSystem = new EnemyBaseSystem(scene);
         enemyBaseRef.current = enemyBaseSystem;
         // Hook the registrar BEFORE seeding so initial bases get culled too.
-        enemyBaseSystem.setCullRegistrar((node, r) => lodCull.register(node, r));
+        enemyBaseSystem.setCullRegistrar(
+          (node, r) => lodCull.register(node, r),
+          (node) => lodCull.unregister(node),
+        );
         enemyBaseSystem.seedWorld([
           new BABYLON.Vector3(250, 0, 250),
           new BABYLON.Vector3(-250, 0, 250),
@@ -1407,6 +1410,7 @@ export const Game: React.FC = () => {
                 playerPos: () => player.getPosition(),
                 enemy: enemySystem,
                 aerial: aerialEnemySystem,
+                enemyBase: enemyBaseSystem,
               },
             );
           } else if (!isMichiganTerrain && michiganTerrainSystemRef.current) {
@@ -3435,6 +3439,14 @@ export const Game: React.FC = () => {
       hoverserpent: "JetWarden",
       neonowl: "InsectoidStalker",
       voltfrog: "SparkPup",
+      beepbot: "HoverOrb",
+      hugbot: "SparkPup",
+      sproutbot: "SparkPup",
+      seedroller: "SparkPup",
+      sunnyroller: "SparkPup",
+      orbdrone: "HoverOrb",
+      medidrone: "HoverOrb",
+      pearlbot: "HoverOrb",
     };
     const preset = presetMap[captured.speciesId] || "ScoutCompanion";
     const ok = companionRef.current.addCompanion(preset, playerRef.current.getPosition(), { allowDuplicate: true });

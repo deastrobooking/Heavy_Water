@@ -332,7 +332,7 @@ const RosterView: React.FC<{
   onHover: (id: string) => void;
 }> = ({ captured, onDeploy, onCare, selectedId, setRowRef, onHover }) => {
   if (captured.length === 0) {
-    return <div className="text-center text-zinc-500 py-8 text-sm">Garden roster empty. Find wild bio-creatures and capture them.</div>;
+    return <div className="text-center text-zinc-500 py-8 text-sm">Garden roster empty. Find wild bio-creatures, helper bots, and sanctuary pets.</div>;
   }
   return (
     <>

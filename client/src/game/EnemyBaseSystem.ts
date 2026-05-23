@@ -88,8 +88,13 @@ export class EnemyBaseSystem {
    *  Hitbox meshes are intentionally NOT registered — they're invisible,
    *  free to render, and used by weapons aim resolution. */
   private cullRegistrar: ((node: BABYLON.TransformNode, radius: number) => void) | null = null;
-  setCullRegistrar(fn: (node: BABYLON.TransformNode, radius: number) => void): void {
+  private cullUnregister: ((node: BABYLON.TransformNode) => void) | null = null;
+  setCullRegistrar(
+    fn: (node: BABYLON.TransformNode, radius: number) => void,
+    unregister?: (node: BABYLON.TransformNode) => void,
+  ): void {
     this.cullRegistrar = fn;
+    this.cullUnregister = unregister ?? null;
   }
 
   static readonly TURRET_RANGE = 60;
@@ -289,7 +294,7 @@ export class EnemyBaseSystem {
       if (base.isBoss && !base.bossTurretsClearedFired) {
         base.bossTurretsClearedFired = true;
         const spawnPos = base.position.clone();
-        spawnPos.y = 1.5;
+        spawnPos.y = base.position.y + 1.5;
         // Drop the captain in front of the spire so the player can engage him.
         spawnPos.z += 8;
         this.bus.emit(GameEvents.BOSS_FORTRESS_TURRETS_CLEARED, {
@@ -466,6 +471,23 @@ export class EnemyBaseSystem {
    *  and HUD overlays (mini-map icons, etc.) can dim or drop the marker. */
   getBasePositions(): ReadonlyArray<{ position: BABYLON.Vector3; alive: boolean }> {
     return this.bases.map(b => ({ position: b.position, alive: b.vault.alive }));
+  }
+
+  /** Remove temporary/side-zone bases without tearing down the shared city
+   *  EnemyBaseSystem. Used by Michigan Wilds, which borrows the old fortress
+   *  gameplay but must clean it up when the player warps away. */
+  removeBasesNear(centers: ReadonlyArray<BABYLON.Vector3>, radius: number = 8): number {
+    const radiusSq = radius * radius;
+    let removed = 0;
+    for (let i = this.bases.length - 1; i >= 0; i--) {
+      const base = this.bases[i];
+      const shouldRemove = centers.some((center) => base.position.subtract(center).lengthSquared() <= radiusSq);
+      if (!shouldRemove) continue;
+      this.disposeBase(base);
+      this.bases.splice(i, 1);
+      removed += 1;
+    }
+    return removed;
   }
 
   /** EnemyLike list for health-bar provider */
@@ -1001,6 +1023,35 @@ export class EnemyBaseSystem {
     return all.length === 0 ? null : all[all.length - 1];
   }
 
+  private unregisterCullNode(node: BABYLON.TransformNode | null | undefined): void {
+    if (!node || !this.cullUnregister) return;
+    try { this.cullUnregister(node); } catch {}
+  }
+
+  private disposeChildren(node: BABYLON.TransformNode): void {
+    const children = node.getChildMeshes(false);
+    for (const c of children) c.dispose();
+  }
+
+  private disposeBase(base: EnemyBase): void {
+    this.unregisterCullNode(base.centerPillar);
+    this.unregisterCullNode(base.vault.visual);
+    for (const t of base.turrets) {
+      this.unregisterCullNode(t.visual);
+      this.disposeChildren(t.visual);
+      t.hitbox.dispose();
+      t.visual.dispose();
+      for (const m of t.ownedMaterials) try { m.dispose(); } catch {}
+    }
+    this.disposeChildren(base.vault.visual);
+    base.vault.hitbox.dispose();
+    base.vault.visual.dispose();
+    for (const m of base.vault.ownedMaterials) try { m.dispose(); } catch {}
+    this.disposeChildren(base.centerPillar);
+    base.centerPillar.dispose();
+    for (const m of base.ownedMaterials) try { m.dispose(); } catch {}
+  }
+
   dispose(): void {
     if (this.observer) {
       this.scene.onBeforeRenderObservable.remove(this.observer);
@@ -1016,24 +1067,8 @@ export class EnemyBaseSystem {
       if (mat) try { mat.dispose(); } catch {}
     }
     this.tracers = [];
-    const disposeChildren = (node: BABYLON.TransformNode) => {
-      const children = node.getChildMeshes(false);
-      for (const c of children) c.dispose();
-    };
     for (const base of this.bases) {
-      for (const t of base.turrets) {
-        disposeChildren(t.visual);
-        t.hitbox.dispose();
-        t.visual.dispose();
-        for (const m of t.ownedMaterials) try { m.dispose(); } catch {}
-      }
-      disposeChildren(base.vault.visual);
-      base.vault.hitbox.dispose();
-      base.vault.visual.dispose();
-      for (const m of base.vault.ownedMaterials) try { m.dispose(); } catch {}
-      disposeChildren(base.centerPillar);
-      base.centerPillar.dispose();
-      for (const m of base.ownedMaterials) try { m.dispose(); } catch {}
+      this.disposeBase(base);
     }
     this.bases = [];
   }

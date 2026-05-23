@@ -1371,6 +1371,9 @@ export class EnemySystem {
         "HumanoidCaptainBeta",
         "HumanoidCaptainGamma",
         "HumanoidCaptainOmega",
+        "HumanoidCaptainWarrior",
+        "HumanoidCaptainBerserker",
+        "HumanoidCaptainChampion",
       ];
       // Player-side override from the CharacterEditor "Boss Style" tab.
       // Only applies to captains (commanders keep their canonical preset)
@@ -1444,7 +1447,7 @@ export class EnemySystem {
     const presetMap: Record<EnemyType, string[]> = {
       drone: ["JetWarden"],
       soldier: ["ScoutPrime"],
-      heavy: ["TankTitan", "OptimusForge"],
+      heavy: ["TankTitan", "OptimusForge", "TitanWarrior", "TitanBerserker"],
       insectoid: ["InsectoidStalker"],
       hybrid: ["HybridOmega", "HybridApex"],
       commander: ["CommanderOmega"],
@@ -1458,9 +1461,9 @@ export class EnemySystem {
       tank: ["TankTitan"],
       // Titan reuses the TankTitan robot preset but is upscaled + tougher
       // when the EnemyUnit constructor runs (config + per-spawn scale).
-      titan: ["TankTitan"],
-      wilds_titan: ["TankTitan", "BruteForge", "MegaUnitX"],
-      wilds_transformer: ["OptimusForge", "GuardianUnit", "ScoutPrime", "ScoutCompanion", "SparkPup", "NeonCat"],
+      titan: ["TankTitan", "TitanWarrior", "TitanBerserker", "TitanChampion"],
+      wilds_titan: ["TitanWarrior", "TitanBerserker", "TitanChampion", "TankTitan"],
+      wilds_transformer: ["OptimusForge", "TitanChampion", "GuardianUnit", "ScoutPrime", "ScoutCompanion", "SparkPup", "NeonCat"],
       // Spider tank is parametric; this entry is just a fallback so the
       // exhaustive Record type compiles. createEnemyMesh short-circuits
       // to createSpiderTankMesh above before it ever reads this entry.
@@ -1468,12 +1471,13 @@ export class EnemySystem {
     };
 
     const variants = presetMap[type] || ["ScoutPrime"];
-    // Heavy/titan preset override from the Boss-Style tab. Only "heavy"
-    // type is overridable — drone/soldier/insectoid/hybrid presets are
+    // Heavy/titan preset override from the Boss-Style tab. Only heavy
+    // ground elite types are overridable — drone/soldier/insectoid/hybrid presets are
     // fixed by gameplay role and would mis-read the silhouette if swapped.
     const heavyOverrides = getEnemyStyleOverrides();
+    const isTitanStyleType = type === "heavy" || type === "titan" || type === "wilds_titan";
     const overridePresetName =
-      type === "heavy" && heavyOverrides.titanPreset && heavyOverrides.titanPreset !== "random"
+      isTitanStyleType && heavyOverrides.titanPreset && heavyOverrides.titanPreset !== "random"
         ? heavyOverrides.titanPreset
         : null;
     const presetName = overridePresetName ?? variants[Math.floor(Math.random() * variants.length)];

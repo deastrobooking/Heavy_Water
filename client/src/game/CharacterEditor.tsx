@@ -27,10 +27,17 @@ export interface EnemyStyleOverrides {
    *  original Alpha/Beta/Gamma/Omega randomization. The variant tint
    *  (inferno / plague / frost / storm / void) is still chosen by the
    *  level system — this only changes the underlying body silhouette. */
-  captainPreset?: "random" | "HumanoidCaptainAlpha" | "HumanoidCaptainBeta" | "HumanoidCaptainGamma" | "HumanoidCaptainOmega";
+  captainPreset?: "random"
+    | "HumanoidCaptainAlpha"
+    | "HumanoidCaptainBeta"
+    | "HumanoidCaptainGamma"
+    | "HumanoidCaptainOmega"
+    | "HumanoidCaptainWarrior"
+    | "HumanoidCaptainBerserker"
+    | "HumanoidCaptainChampion";
   /** Robot preset id used for heavy/titan ground spawns. "random" keeps
    *  the original TankTitan/OptimusForge coin-flip. */
-  titanPreset?: "random" | "TankTitan" | "OptimusForge";
+  titanPreset?: "random" | "TankTitan" | "OptimusForge" | "TitanWarrior" | "TitanBerserker" | "TitanChampion";
   /** Force a single boss-variant tint on every captain regardless of
    *  level. "byLevel" keeps the LevelSystem's per-level assignment. */
   captainVariant?: "byLevel" | BossVariantId;
@@ -454,6 +461,9 @@ export const CharacterEditor: React.FC<CharacterEditorProps> = ({ onClose }) => 
                       <option value="HumanoidCaptainBeta">Captain Beta — Athletic</option>
                       <option value="HumanoidCaptainGamma">Captain Gamma — Lean Stalker</option>
                       <option value="HumanoidCaptainOmega">Captain Omega — Towering</option>
+                      <option value="HumanoidCaptainWarrior">Captain Warrior - Armored Officer</option>
+                      <option value="HumanoidCaptainBerserker">Captain Berserker - Heavy Charger</option>
+                      <option value="HumanoidCaptainChampion">Captain Champion - Wildlands Elite</option>
                     </select>
                   </div>
 
@@ -481,6 +491,9 @@ export const CharacterEditor: React.FC<CharacterEditorProps> = ({ onClose }) => 
                       <option value="random">Random (default)</option>
                       <option value="TankTitan">Tank Titan — Stocky</option>
                       <option value="OptimusForge">Optimus Forge — Tall</option>
+                      <option value="TitanWarrior">Titan Warrior - Shield Line</option>
+                      <option value="TitanBerserker">Titan Berserker - Assault Frame</option>
+                      <option value="TitanChampion">Titan Champion - Command Frame</option>
                     </select>
                   </div>
 

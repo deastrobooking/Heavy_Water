@@ -265,7 +265,14 @@ export class HumanoidCharacter {
   private buildArmor(scene: BABYLON.Scene): void {
     const armorType = this.definition.armorType || "light";
     const matArmor = this.materials.get("secondary")!;
+    const matPrimary = this.materials.get("primary")!;
+    const matGlow = this.materials.get("hair")!;
 
+    const torsoHeight = this.definition.height * 0.28;
+    const pelvisY = this.definition.height * 0.48;
+    const chestY = pelvisY + torsoHeight * 0.55;
+    const neckY = pelvisY + torsoHeight;
+    const torsoRadius = this.definition.chestWidth * 0.22;
     const totalLegLen = this.definition.height * 0.45;
     const thighLen = totalLegLen * 0.5;
     const shinLen = totalLegLen * 0.5;
@@ -312,6 +319,115 @@ export class HumanoidCharacter {
     const rightBoot = leftBoot.clone("rightBoot")!;
     rightBoot.position = new BABYLON.Vector3(0, -(thighLen + shinLen) - 0.04, 0.08);
     rightBoot.parent = this.rightLegPivot;
+
+    if (armorType === "captain") {
+      const chestPlate = BABYLON.MeshBuilder.CreateBox("captainChestPlate", {
+        width: this.definition.shoulderWidth * 0.58,
+        height: torsoHeight * 0.78,
+        depth: 0.42,
+      }, scene);
+      chestPlate.position.set(0, chestY + torsoHeight * 0.05, torsoRadius + 0.05);
+      chestPlate.material = matArmor;
+      chestPlate.parent = this.visualRoot;
+
+      const sternum = BABYLON.MeshBuilder.CreateBox("captainSternumGuard", {
+        width: this.definition.shoulderWidth * 0.16,
+        height: torsoHeight * 0.92,
+        depth: 0.12,
+      }, scene);
+      sternum.position.set(0, chestY, torsoRadius + 0.30);
+      sternum.material = matPrimary;
+      sternum.parent = this.visualRoot;
+
+      const core = BABYLON.MeshBuilder.CreateCylinder("captainCore", {
+        height: 0.08,
+        diameter: this.definition.shoulderWidth * 0.16,
+        tessellation: 14,
+      }, scene);
+      core.rotation.x = Math.PI / 2;
+      core.position.set(0, chestY + torsoHeight * 0.12, torsoRadius + 0.39);
+      core.material = matGlow;
+      core.parent = this.visualRoot;
+
+      const visor = BABYLON.MeshBuilder.CreateBox("captainFaceVisor", {
+        width: this.definition.headScale * 0.72,
+        height: this.definition.headScale * 0.14,
+        depth: 0.06,
+      }, scene);
+      visor.position.set(0, this.definition.headScale * 0.02, this.definition.headScale * 0.46);
+      visor.material = matGlow;
+      visor.parent = this.headMesh;
+
+      const crest = BABYLON.MeshBuilder.CreateBox("captainHeadCrest", {
+        width: this.definition.headScale * 0.24,
+        height: this.definition.headScale * 0.52,
+        depth: this.definition.headScale * 0.12,
+      }, scene);
+      crest.position.set(0, this.definition.headScale * 0.48, -this.definition.headScale * 0.08);
+      crest.rotation.x = -0.18;
+      crest.material = matArmor;
+      crest.parent = this.headMesh;
+
+      for (const side of [-1, 1]) {
+        const shoulder = BABYLON.MeshBuilder.CreateBox(
+          side < 0 ? "captainLeftShoulderSlab" : "captainRightShoulderSlab",
+          { width: 0.78, height: 0.28, depth: 0.55 },
+          scene,
+        );
+        shoulder.position.set(side * 0.10, 0.08, 0);
+        shoulder.rotation.z = side * 0.16;
+        shoulder.material = matArmor;
+        shoulder.parent = side < 0 ? this.leftArmPivot : this.rightArmPivot;
+
+        const forearm = BABYLON.MeshBuilder.CreateBox(
+          side < 0 ? "captainLeftForearmGuard" : "captainRightForearmGuard",
+          { width: 0.34, height: 0.42, depth: 0.44 },
+          scene,
+        );
+        forearm.position.set(0, -this.definition.armLength * 0.66, 0.07);
+        forearm.material = matPrimary;
+        forearm.parent = side < 0 ? this.leftArmPivot : this.rightArmPivot;
+
+        const knee = BABYLON.MeshBuilder.CreateBox(
+          side < 0 ? "captainLeftKneeGuard" : "captainRightKneeGuard",
+          { width: 0.34, height: 0.22, depth: 0.36 },
+          scene,
+        );
+        knee.position.set(0, -thighLen, 0.13);
+        knee.material = matPrimary;
+        knee.parent = side < 0 ? this.leftLegPivot : this.rightLegPivot;
+      }
+
+      for (const side of [-1, 1]) {
+        const backFin = BABYLON.MeshBuilder.CreateBox(`captainBackFin_${side}`, {
+          width: 0.20,
+          height: torsoHeight * 0.72,
+          depth: 0.16,
+        }, scene);
+        backFin.position.set(side * this.definition.shoulderWidth * 0.18, chestY, -torsoRadius - 0.18);
+        backFin.rotation.z = side * 0.22;
+        backFin.material = matArmor;
+        backFin.parent = this.visualRoot;
+      }
+
+      const belt = BABYLON.MeshBuilder.CreateBox("captainWarBelt", {
+        width: this.definition.shoulderWidth * 0.46,
+        height: 0.18,
+        depth: 0.42,
+      }, scene);
+      belt.position.set(0, pelvisY - torsoRadius * 0.38, torsoRadius * 0.42);
+      belt.material = matGlow;
+      belt.parent = this.visualRoot;
+
+      const collar = BABYLON.MeshBuilder.CreateBox("captainCollarGuard", {
+        width: this.definition.shoulderWidth * 0.42,
+        height: 0.20,
+        depth: 0.36,
+      }, scene);
+      collar.position.set(0, neckY - 0.10, torsoRadius * 0.25);
+      collar.material = matArmor;
+      collar.parent = this.visualRoot;
+    }
   }
 
   public getRoot(): BABYLON.TransformNode {

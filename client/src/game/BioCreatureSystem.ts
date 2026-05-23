@@ -493,6 +493,15 @@ export class BioCreatureSystem {
     return this.spawnCreature(pickWeightedSpecies(), position);
   }
 
+  /** Spawn a specific species by id. Sanctuary uses this for curated
+   *  peaceful animals / cute helper robots instead of rolling the full
+   *  combat-world dex. */
+  spawnSpeciesAt(speciesId: string, position: BABYLON.Vector3): string | null {
+    const species = getSpeciesById(speciesId);
+    if (!species) return null;
+    return this.spawnCreature(species, position);
+  }
+
   /** Forcibly remove a live (uncaptured) creature from the world by id —
    *  used by SanctuarySystem on warp-out so sanctuary-spawned creatures
    *  don't linger in the world after the player leaves Level 4. Captured
@@ -687,6 +696,40 @@ function applyArchetype(a: Archetype, s: RobotStyle): void {
       s.legLength = 0.15; s.legThickness = 0.18;
       s.visorStyle = "round";
       break;
+    case "bot":
+      s.scale *= 0.95;
+      s.headSize = 0.66; s.headShape = "box";
+      s.torsoWidth = 0.72; s.torsoHeight = 0.55; s.torsoDepth = 0.68;
+      s.armLength = 0.32; s.armThickness = 0.12; s.armStyle = "box";
+      s.legLength = 0.26; s.legThickness = 0.18; s.legStyle = "box";
+      s.hasAntennae = true; s.antennaLength = 0.28;
+      s.hasBackpack = true; s.backpackSize = 0.36;
+      s.hasVisor = true; s.visorStyle = "round";
+      s.extraPlating = Math.max(s.extraPlating, 1);
+      s.bootStyle = "rounded"; s.gauntletStyle = "rounded";
+      break;
+    case "drone":
+      s.scale *= 0.86;
+      s.headSize = 0.62; s.headShape = "sphere";
+      s.torsoWidth = 0.58; s.torsoHeight = 0.42; s.torsoDepth = 0.58;
+      s.armLength = 0.18; s.armThickness = 0.08;
+      s.legLength = 0.16; s.legThickness = 0.10; s.legStyle = "hoverpads";
+      s.hasWings = true; s.wingSpan = 1.0; s.wingAngle = 0.78;
+      s.hasAntennae = true; s.antennaLength = 0.36;
+      s.hasBackpackEngine = true; s.engineVentCount = 2;
+      s.hasVisor = true; s.visorStyle = "full";
+      break;
+    case "roller":
+      s.scale *= 0.9;
+      s.headSize = 0.56; s.headShape = "sphere";
+      s.torsoWidth = 0.88; s.torsoHeight = 0.44; s.torsoDepth = 0.98;
+      s.armLength = 0.24; s.armThickness = 0.10; s.armStyle = "tapered";
+      s.legLength = 0.18; s.legThickness = 0.16;
+      s.hasWheels = true; s.wheelStyle = "feet"; s.bootStyle = "wheeled";
+      s.hasBackpack = true; s.backpackSize = 0.42;
+      s.hasVisor = true; s.visorStyle = "round";
+      s.extraPlating = Math.max(s.extraPlating, 1);
+      break;
   }
 }
 
@@ -811,5 +854,5 @@ function applyRarityFlair(s: RobotStyle, rarity: import("./BioSpecies").Rarity):
 }
 
 function isFlyer(a: Archetype): boolean {
-  return a === "owl" || a === "bird" || a === "serpent" || a === "dragon" || a === "flutter" || a === "fish";
+  return a === "owl" || a === "bird" || a === "serpent" || a === "dragon" || a === "flutter" || a === "fish" || a === "drone";
 }
