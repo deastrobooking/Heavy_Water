@@ -1,4 +1,8 @@
 import * as BABYLON from "@babylonjs/core";
+import {
+  createRetroGroundMaterial,
+  TERRAIN_TEXTURES,
+} from "./TerrainTextureMaterials";
 
 interface BuildingConfig {
   minHeight: number;
@@ -815,10 +819,14 @@ export class CityGenerator {
       this.scene
     );
     
-    const groundMat = new BABYLON.StandardMaterial("groundMat", this.scene);
-    groundMat.diffuseColor = new BABYLON.Color3(0.1, 0.1, 0.12);
-    groundMat.specularColor = new BABYLON.Color3(0.2, 0.2, 0.3);
-    groundMat.emissiveColor = new BABYLON.Color3(0.02, 0.02, 0.05);
+    const groundMat = createRetroGroundMaterial(
+      this.scene,
+      "groundMat",
+      TERRAIN_TEXTURES.asphalt,
+      96,
+      new BABYLON.Color3(0.1, 0.1, 0.12),
+      0.12,
+    );
     ground.material = groundMat;
     ground.receiveShadows = true;
     this.groundMaterial = groundMat;

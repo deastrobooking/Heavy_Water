@@ -7,6 +7,7 @@ import type { BioCreatureSystem } from "./BioCreatureSystem";
 import { BIO_SPECIES } from "./BioSpecies";
 import type { EnemySystem, EnemyType, EnemyUnit } from "./EnemySystem";
 import type { AerialEnemySystem, AerialUnit } from "./AerialEnemySystem";
+import { createRetroTexture, TERRAIN_TEXTURES } from "./TerrainTextureMaterials";
 
 export interface MichiganTerrainHandles {
   city?: CityGenerator | null;
@@ -76,7 +77,6 @@ export class MichiganTerrainSystem {
     "/textures/miheightmap.png",
     "/textures/MIHEIGHTMAP.PNG",
   ];
-  private static readonly GRASS_TEXTURE_URL = "/textures/grass.png";
   private static readonly CENTER = new BABYLON.Vector3(3000, 0, 1500);
   private static readonly HEIGHTMAP_PIXEL_WIDTH = 1448;
   private static readonly HEIGHTMAP_PIXEL_HEIGHT = 1086;
@@ -355,34 +355,32 @@ export class MichiganTerrainSystem {
   private createTerrainMaterial(): TerrainMaterial {
     const material = new TerrainMaterial("miTerrainMat", this.scene);
     const tileScale = MichiganTerrainSystem.TERRAIN_WIDTH / 1800;
-    material.specularColor = new BABYLON.Color3(0.04, 0.045, 0.05);
+    material.specularColor = new BABYLON.Color3(0, 0, 0);
     material.mixTexture = this.createFallbackMixTexture();
-    material.diffuseTexture1 = this.createNoiseTexture(
-      "miWaterbedTex",
-      new BABYLON.Color3(0.05, 0.12, 0.16),
-      new BABYLON.Color3(0.16, 0.22, 0.18),
-      72 * tileScale,
-      17,
+    material.diffuseTexture1 = this.createTerrainTexture(
+      "miStoneTerrainTex",
+      TERRAIN_TEXTURES.stone,
+      74 * tileScale,
     );
-
-    const grass = new BABYLON.Texture(MichiganTerrainSystem.GRASS_TEXTURE_URL, this.scene);
-    grass.uScale = 95 * tileScale;
-    grass.vScale = 95 * tileScale;
-    grass.wrapU = BABYLON.Texture.WRAP_ADDRESSMODE;
-    grass.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
-    this.ownedTextures.push(grass);
-    material.diffuseTexture2 = grass;
-
-    material.diffuseTexture3 = this.createNoiseTexture(
-      "miRockTex",
-      new BABYLON.Color3(0.24, 0.25, 0.27),
-      new BABYLON.Color3(0.56, 0.55, 0.50),
-      84 * tileScale,
-      41,
+    material.diffuseTexture2 = this.createTerrainTexture(
+      "miRockGrassTerrainTex",
+      TERRAIN_TEXTURES.rockGrass,
+      88 * tileScale,
+    );
+    material.diffuseTexture3 = this.createTerrainTexture(
+      "miRockTerrainTex",
+      TERRAIN_TEXTURES.rock,
+      82 * tileScale,
     );
 
     this.ownedMaterials.push(material);
     return material;
+  }
+
+  private createTerrainTexture(name: string, url: string, tiling: number): BABYLON.Texture {
+    const texture = createRetroTexture(this.scene, url, tiling, name);
+    this.ownedTextures.push(texture);
+    return texture;
   }
 
   private buildWaterPlane(): void {

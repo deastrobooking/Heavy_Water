@@ -241,6 +241,20 @@ export class BabylonEngine {
   private setupPostProcessing(): void {
     const highQuality = this.highQualityGraphics;
 
+    // Keep the baseline renderer color-preserving. Some browser/GPU
+    // combinations have reported sessions that looked effectively
+    // monochrome after the optional post stack initialized, so explicitly
+    // clear every color-grading/vignette/tone-mapping lever we do not own.
+    const imageProcessing = this.scene.imageProcessingConfiguration as any;
+    if (imageProcessing) {
+      imageProcessing.colorCurvesEnabled = false;
+      imageProcessing.colorGradingEnabled = false;
+      imageProcessing.vignetteEnabled = false;
+      imageProcessing.toneMappingEnabled = false;
+      imageProcessing.contrast = 1;
+      imageProcessing.exposure = 1;
+    }
+
     const defaultPipeline = new BABYLON.DefaultRenderingPipeline(
       "default",
       true,
@@ -369,6 +383,10 @@ export class BabylonEngine {
       } catch (e) {
         console.warn("Could not get normal texture from geometry buffer");
       }
+    }
+    if (!normalTexture) {
+      console.warn("Cell-shading outline disabled: normal buffer unavailable");
+      return;
     }
 
     this.outlinePostProcess = new BABYLON.PostProcess(

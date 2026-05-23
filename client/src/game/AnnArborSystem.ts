@@ -3,6 +3,10 @@ import { EventBus, GameEvents } from "./EventBus";
 import type { CityGenerator } from "./CityGenerator";
 import type { EnemySystem, EnemyType, EnemyUnit } from "./EnemySystem";
 import type { BossVariantId } from "./BossVariants";
+import {
+  createRetroGroundMaterial,
+  TERRAIN_TEXTURES,
+} from "./TerrainTextureMaterials";
 
 export interface AnnArborHandles {
   city?: CityGenerator | null;
@@ -190,10 +194,14 @@ export class AnnArborSystem {
     ground.parent = this.root;
     ground.isPickable = false;
 
-    const groundMat = new BABYLON.StandardMaterial("annArborGroundMat", this.scene);
-    groundMat.diffuseColor = new BABYLON.Color3(0.12, 0.12, 0.14);
-    groundMat.specularColor = new BABYLON.Color3(0, 0, 0);
-    groundMat.emissiveColor = new BABYLON.Color3(0.04, 0.04, 0.06);
+    const groundMat = createRetroGroundMaterial(
+      this.scene,
+      "annArborGroundMat",
+      TERRAIN_TEXTURES.brick,
+      54,
+      new BABYLON.Color3(0.12, 0.12, 0.14),
+      0.18,
+    );
     ground.material = groundMat;
 
     // Cracked-asphalt accent disc under the UFO landing zone — dark

@@ -7,6 +7,10 @@ import type { CityGenerator } from "./CityGenerator";
 import type { AlienFoliageSystem } from "./AlienFoliageSystem";
 import type { BioCreatureSystem } from "./BioCreatureSystem";
 import type { WeaponsSystem, WeaponType } from "./WeaponsSystem";
+import {
+  createRetroGroundMaterial,
+  TERRAIN_TEXTURES,
+} from "./TerrainTextureMaterials";
 
 /** Optional handles SanctuarySystem hides on mount + restores on dispose so
  *  Level 4 reads as a *truly distinct* world (rolling green plains village)
@@ -345,12 +349,14 @@ export class SanctuarySystem {
       ground.refreshBoundingInfo();
     }
 
-    const mat = new BABYLON.StandardMaterial("sanctuaryGrassMat", this.scene);
-    // Warm-meadow green: lifted from a reference frontier-village palette
-    // so it reads "cozy farm" rather than "alien biome".
-    mat.diffuseColor = new BABYLON.Color3(0.34, 0.58, 0.28);
-    mat.emissiveColor = new BABYLON.Color3(0.05, 0.10, 0.04);
-    mat.specularColor = new BABYLON.Color3(0, 0, 0);
+    const mat = createRetroGroundMaterial(
+      this.scene,
+      "sanctuaryGrassMat",
+      TERRAIN_TEXTURES.grass,
+      58,
+      new BABYLON.Color3(0.34, 0.58, 0.28),
+      0.10,
+    );
     ground.material = mat;
   }
 
@@ -528,9 +534,14 @@ export class SanctuarySystem {
     trimMat.emissiveColor = new BABYLON.Color3(0.08, 0.06, 0.03);
     trimMat.specularColor = new BABYLON.Color3(0, 0, 0);
 
-    const stoneMat = new BABYLON.StandardMaterial("villageStoneMat", scene);
-    stoneMat.diffuseColor = new BABYLON.Color3(0.62, 0.60, 0.55);
-    stoneMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+    const stoneMat = createRetroGroundMaterial(
+      scene,
+      "villageStoneMat",
+      TERRAIN_TEXTURES.stone,
+      8,
+      new BABYLON.Color3(0.62, 0.60, 0.55),
+      0.04,
+    );
 
     const leafMat = new BABYLON.StandardMaterial("villageLeafMat", scene);
     leafMat.diffuseColor = new BABYLON.Color3(0.18, 0.55, 0.25);
@@ -963,9 +974,14 @@ export class SanctuarySystem {
     plinth.position.set(px, 0.6, pz);
     plinth.parent = this.root;
     plinth.isPickable = false;
-    const stoneMat = new BABYLON.StandardMaterial("sanctuaryPlinthMat", this.scene);
-    stoneMat.diffuseColor = new BABYLON.Color3(0.55, 0.55, 0.6);
-    stoneMat.specularColor = new BABYLON.Color3(0.18, 0.18, 0.22);
+    const stoneMat = createRetroGroundMaterial(
+      this.scene,
+      "sanctuaryPlinthMat",
+      TERRAIN_TEXTURES.stone,
+      6,
+      new BABYLON.Color3(0.55, 0.55, 0.6),
+      0.05,
+    );
     plinth.material = stoneMat;
 
     const orb = BABYLON.MeshBuilder.CreateSphere(
@@ -1010,15 +1026,23 @@ export class SanctuarySystem {
     const c = SanctuarySystem.CENTER;
     const scene = this.scene;
 
-    const rockMat = new BABYLON.StandardMaterial("sanctuaryMountainMat", scene);
-    rockMat.diffuseColor = new BABYLON.Color3(0.32, 0.30, 0.40);
-    rockMat.emissiveColor = new BABYLON.Color3(0.06, 0.05, 0.10);
-    rockMat.specularColor = new BABYLON.Color3(0, 0, 0);
+    const rockMat = createRetroGroundMaterial(
+      scene,
+      "sanctuaryMountainMat",
+      TERRAIN_TEXTURES.rockGrass,
+      5,
+      new BABYLON.Color3(0.32, 0.30, 0.40),
+      0.12,
+    );
 
-    const snowMat = new BABYLON.StandardMaterial("sanctuarySnowMat", scene);
-    snowMat.diffuseColor = new BABYLON.Color3(0.92, 0.95, 1.00);
-    snowMat.emissiveColor = new BABYLON.Color3(0.20, 0.22, 0.28);
-    snowMat.specularColor = new BABYLON.Color3(0, 0, 0);
+    const snowMat = createRetroGroundMaterial(
+      scene,
+      "sanctuarySnowMat",
+      TERRAIN_TEXTURES.rockSnow,
+      5,
+      new BABYLON.Color3(0.92, 0.95, 1.00),
+      0.18,
+    );
 
     const RING_R = 95;
     const PEAKS = 12;
@@ -1084,10 +1108,14 @@ export class SanctuarySystem {
     const cx = c.x + 60;
     const cz = c.z + 4;
 
-    const rockMat = new BABYLON.StandardMaterial("sanctuaryCaveRockMat", scene);
-    rockMat.diffuseColor = new BABYLON.Color3(0.22, 0.20, 0.26);
-    rockMat.emissiveColor = new BABYLON.Color3(0.04, 0.03, 0.06);
-    rockMat.specularColor = new BABYLON.Color3(0, 0, 0);
+    const rockMat = createRetroGroundMaterial(
+      scene,
+      "sanctuaryCaveRockMat",
+      TERRAIN_TEXTURES.rock,
+      4,
+      new BABYLON.Color3(0.22, 0.20, 0.26),
+      0.10,
+    );
 
     const crystalMat = new BABYLON.StandardMaterial("sanctuaryCrystalMat", scene);
     crystalMat.diffuseColor = new BABYLON.Color3(0.20, 0.85, 1.00);

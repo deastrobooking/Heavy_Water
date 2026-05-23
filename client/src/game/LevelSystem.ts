@@ -397,11 +397,14 @@ export class LevelSystem {
 
   /** Internal: switch to the given level + emit `LEVEL_STARTED`. */
   private advanceTo(level: WorldLevel): void {
+    const previousLevel = this.currentLevel;
     this.currentLevel = level;
     this.transitioning = false;
     const def = LEVEL_DEFS[level];
     this.bus.emit(GameEvents.LEVEL_STARTED, {
       level,
+      previousLevel,
+      levelChanged: previousLevel !== level,
       banner: def.banner,
       objective: def.objective,
       difficultyMultiplier: def.difficultyMultiplier,

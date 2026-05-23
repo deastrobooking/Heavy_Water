@@ -4,6 +4,10 @@ import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
 import { BioCreatureSystem } from "./BioCreatureSystem";
 import { BIO_SPECIES, getSpeciesById, BioCreatureSpecies } from "./BioSpecies";
 import type { WorldLevel } from "./LevelSystem";
+import {
+  createRetroGroundMaterial,
+  TERRAIN_TEXTURES,
+} from "./TerrainTextureMaterials";
 
 /**
  * Hidden temple loot bundle granted on first interaction. Mix is chosen so
@@ -130,10 +134,14 @@ export class MountainRingSystem {
     this.mountainRoot = new BABYLON.TransformNode("mountainRingRoot", scene);
     this.templeRoot = new BABYLON.TransformNode("templeRoot", scene);
 
-    this.mountainMat = new BABYLON.StandardMaterial("mountainMat", scene);
-    this.mountainMat.diffuseColor = new BABYLON.Color3(0.42, 0.4, 0.45);
-    this.mountainMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
-    this.mountainMat.emissiveColor = new BABYLON.Color3(0.04, 0.04, 0.05);
+    this.mountainMat = createRetroGroundMaterial(
+      scene,
+      "mountainMat",
+      TERRAIN_TEXTURES.rock,
+      7,
+      new BABYLON.Color3(0.42, 0.4, 0.45),
+      0.10,
+    );
 
     this.buildMountainRing();
     this.buildTemplesForLevel(1);
@@ -214,6 +222,14 @@ export class MountainRingSystem {
   private buildMountainRing(): void {
     const r = MountainRingSystem.RING_RADIUS;
     let peakIndex = 0;
+    const snowCapMat = createRetroGroundMaterial(
+      this.scene,
+      "mountainCapMat",
+      TERRAIN_TEXTURES.rockSnow,
+      4,
+      new BABYLON.Color3(0.92, 0.95, 1.0),
+      0.22,
+    );
 
     // Mulberry32-flavoured deterministic number stream — same seed each
     // boot so the ring layout is stable across reloads. Wrapped in a
@@ -371,11 +387,7 @@ export class MountainRingSystem {
             { diameterTop: 0, diameterBottom: 14, height: 10, tessellation: 7 },
             this.scene,
           );
-          const capMat = new BABYLON.StandardMaterial(`mountain_cap_mat_${peakIndex}`, this.scene);
-          capMat.diffuseColor = new BABYLON.Color3(0.92, 0.95, 1.0);
-          capMat.emissiveColor = new BABYLON.Color3(0.3, 0.34, 0.4);
-          capMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-          cap.material = capMat;
+          cap.material = snowCapMat;
           cap.position = new BABYLON.Vector3(px, baseH + 5, pz);
           cap.parent = this.mountainRoot;
           cap.checkCollisions = false;
@@ -448,10 +460,14 @@ export class MountainRingSystem {
     root.parent = this.templeRoot;
     root.position = def.position.clone();
 
-    const stoneMat = new BABYLON.StandardMaterial(`templeStone_${def.id}`, this.scene);
-    stoneMat.diffuseColor = new BABYLON.Color3(0.55, 0.5, 0.42);
-    stoneMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
-    stoneMat.emissiveColor = new BABYLON.Color3(0.05, 0.04, 0.03);
+    const stoneMat = createRetroGroundMaterial(
+      this.scene,
+      `templeStone_${def.id}`,
+      TERRAIN_TEXTURES.stone,
+      5,
+      new BABYLON.Color3(0.55, 0.5, 0.42),
+      0.08,
+    );
 
     // Three-tier stepped pyramid. Heights/widths chosen so the tower is
     // visible from a long distance but doesn't overshadow the mountains
@@ -724,4 +740,3 @@ export class MountainRingSystem {
     this.templeRoot.dispose(false, true);
   }
 }
-

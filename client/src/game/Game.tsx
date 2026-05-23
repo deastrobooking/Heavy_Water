@@ -1043,6 +1043,72 @@ export const Game: React.FC = () => {
           if (payload?.banner) setLevelBanner(payload.banner);
           if (payload?.objective) setLevelObjective(payload.objective);
           if (typeof payload?.level === "number") setCurrentWorldLevel(payload.level as WorldLevel);
+          const nextWorldLevel: WorldLevel | null =
+            typeof payload?.level === "number" ? payload.level as WorldLevel : null;
+          const levelChanged = payload?.levelChanged !== false;
+          // Compute the target zone once, then tear down any inactive
+          // side-zone before mounting the new one. The old interleaved
+          // mount/dispose order let a later-disposed zone restore the
+          // shared Detroit world after the new zone had already hidden it.
+          const isPeaceful = !!payload?.peaceful
+            || (nextWorldLevel !== null && LevelSystem.isPeaceful(nextWorldLevel));
+          const isSanctuary = nextWorldLevel === 4;
+          const isLab = nextWorldLevel !== null && LevelSystem.isLab(nextWorldLevel);
+          const isLair = nextWorldLevel !== null && LevelSystem.isLair(nextWorldLevel);
+          const isSaginawLab = nextWorldLevel !== null && LevelSystem.isSaginawLab(nextWorldLevel);
+          const isZugIsland = nextWorldLevel !== null && LevelSystem.isZugIsland(nextWorldLevel);
+          const isAnnArbor = nextWorldLevel !== null && LevelSystem.isAnnArbor(nextWorldLevel);
+          const isSpacelike = nextWorldLevel !== null && LevelSystem.isSpacelike(nextWorldLevel);
+          const isMichiganTerrain = nextWorldLevel !== null && LevelSystem.isMichiganTerrain(nextWorldLevel);
+          const usesCustomGroundDirector =
+            isPeaceful || isSpacelike || isLair || isSaginawLab ||
+            isZugIsland || isAnnArbor || isMichiganTerrain;
+
+          if (nextWorldLevel !== null) {
+            if (!isSanctuary && sanctuarySystemRef.current) {
+              try { sanctuarySystemRef.current.dispose(); } catch {}
+              sanctuarySystemRef.current = null;
+            }
+            if (!isLab && pontiacLabSystemRef.current) {
+              try { pontiacLabSystemRef.current.dispose(); } catch {}
+              pontiacLabSystemRef.current = null;
+            }
+            if (!isLair && swarmsLairSystemRef.current) {
+              try { swarmsLairSystemRef.current.dispose(); } catch {}
+              swarmsLairSystemRef.current = null;
+            }
+            if (!isSaginawLab && saginawLabSystemRef.current) {
+              try { saginawLabSystemRef.current.dispose(); } catch {}
+              saginawLabSystemRef.current = null;
+            }
+            if (!isZugIsland && zugIslandSystemRef.current) {
+              try { zugIslandSystemRef.current.dispose(); } catch {}
+              zugIslandSystemRef.current = null;
+            }
+            if (!isAnnArbor && annArborSystemRef.current) {
+              try { annArborSystemRef.current.dispose(); } catch {}
+              annArborSystemRef.current = null;
+            }
+            if (!isSpacelike && spaceLevelSystemRef.current) {
+              try { spaceLevelSystemRef.current.dispose(); } catch {}
+              spaceLevelSystemRef.current = null;
+            }
+            if (!isMichiganTerrain && michiganTerrainSystemRef.current) {
+              try { michiganTerrainSystemRef.current.dispose(); } catch {}
+              michiganTerrainSystemRef.current = null;
+              player.setBuildingColliders(cityGenerator.getWallColliders());
+              player.setFloorPlatforms(cityGenerator.getFloorPlatforms());
+            }
+          }
+
+          if (levelChanged) {
+            // A level swap is a hard boundary. Dedicated side-zones spawn
+            // their own rosters after this point, and campaign levels get
+            // fresh wave spawns, so carrying enemies across levels only
+            // leaves old combat behind in the wrong world.
+            enemySystem.clearAllEnemies();
+            aerialEnemySystem.disengageAndClear();
+          }
           // Sky tint per level (red shift on L2, cold violet shift on L3,
           // warm dawn for the sanctuary).
           if (payload?.skyTint && skyRef.current) {
@@ -1082,25 +1148,10 @@ export const Game: React.FC = () => {
             }
           }
 
-          // Mount/dispose the sanctuary side-zone based on the peaceful flag.
-          // Idempotent on re-entry: while peaceful=true, leaving the dispose
-          // alone re-uses the live system; we only build/tear down on edge.
-          // Fall back to the static `LevelSystem.isPeaceful` lookup if a
-          // legacy payload (e.g. from an older event source) omits the flag.
-          const isPeaceful = !!payload?.peaceful
-            || (typeof payload?.level === "number"
-                && LevelSystem.isPeaceful(payload.level as WorldLevel));
-          // Silence the wave spawner + clear lingering enemies when
-          // entering a peaceful zone, and re-arm it when leaving. Without
-          // this gate the timer-based drip-spawn keeps fanning out drones
-          // around the player even inside the sanctuary.
-          if (isPeaceful) {
-            enemySystem.setSpawningEnabled(false);
-            enemySystem.clearAllEnemies();
-            aerialEnemySystem.disengageAndClear();
-          } else {
-            enemySystem.setSpawningEnabled(true);
-          }
+          // Silence the stock wave spawner in every side-zone with its own
+          // director (or no combat at all). Otherwise random Detroit drip
+          // spawns bleed into labs, caves, orbital space, and heightmap zones.
+          enemySystem.setSpawningEnabled(!usesCustomGroundDirector);
 
           // Refresh the rescue roster for the new level. RescueSystem skips
           // levels with no roster (peaceful zones), and prunes any rescuees
@@ -1117,8 +1168,6 @@ export const Game: React.FC = () => {
            // so we MUST NOT also mount the sanctuary on top of them — that
            // would double-hide the city and stack two distinct world-swap
            // restorations on dispose.
-          const isSanctuary = typeof payload?.level === "number"
-            && (payload.level as WorldLevel) === 4;
           if (isSanctuary && !sanctuarySystemRef.current) {
             sanctuarySystemRef.current = new SanctuarySystem(
               scene,
@@ -1165,8 +1214,6 @@ export const Game: React.FC = () => {
           // wholesale (city, mountains, foliage, props all hidden), but
           // it's a separate system because the lab interior + dressing
           // is completely different from the sanctuary's village.
-          const isLab = typeof payload?.level === "number"
-            && LevelSystem.isLab(payload.level as WorldLevel);
           if (isLab && !pontiacLabSystemRef.current) {
             pontiacLabSystemRef.current = new PontiacLabSystem(
               scene,
@@ -1200,8 +1247,6 @@ export const Game: React.FC = () => {
           // contained underground combat arena reachable from the Pontiac
           // Lab's cave hatch (or directly from TRAVEL once the player has
           // it on their map). Same handles bag as the lab + sanctuary.
-          const isLair = typeof payload?.level === "number"
-            && LevelSystem.isLair(payload.level as WorldLevel);
           if (isLair && !swarmsLairSystemRef.current) {
             swarmsLairSystemRef.current = new SwarmsLairSystem(
               scene,
@@ -1232,8 +1277,6 @@ export const Game: React.FC = () => {
           // hardest combat zone in the game. Captains-only spawns + 2
           // spider-tank mid-bosses. Mirrors the SwarmsLair mount block
           // exactly (same handles bag, same dispose pattern).
-          const isSaginawLab = typeof payload?.level === "number"
-            && LevelSystem.isSaginawLab(payload.level as WorldLevel);
           if (isSaginawLab && !saginawLabSystemRef.current) {
             saginawLabSystemRef.current = new SaginawLabSystem(
               scene,
@@ -1259,8 +1302,6 @@ export const Game: React.FC = () => {
           // open industrial arena with sustained waves of titans,
           // captains, and spider tanks. Same handles bag + dispose
           // pattern as the SaginawLab block above.
-          const isZugIsland = typeof payload?.level === "number"
-            && LevelSystem.isZugIsland(payload.level as WorldLevel);
           if (isZugIsland && !zugIslandSystemRef.current) {
             zugIslandSystemRef.current = new ZugIslandSystem(
               scene,
@@ -1287,8 +1328,6 @@ export const Game: React.FC = () => {
           // its downtown towers. 10 maxed captains atop the saucer + a
           // continuous ground swarm of every robot type. Same handles bag
           // + dispose pattern as the ZugIsland block above.
-          const isAnnArbor = typeof payload?.level === "number"
-            && LevelSystem.isAnnArbor(payload.level as WorldLevel);
           if (isAnnArbor && !annArborSystemRef.current) {
             annArborSystemRef.current = new AnnArborSystem(
               scene,
@@ -1314,8 +1353,6 @@ export const Game: React.FC = () => {
           // as the sanctuary. SpaceLevelSystem owns the skybox swap, the
           // Earth backdrop, the asteroid field, and pre-engages
           // AerialEnemySystem so the player drops into a live dogfight.
-          const isSpacelike = typeof payload?.level === "number"
-            && LevelSystem.isSpacelike(payload.level as WorldLevel);
           if (isSpacelike && !spaceLevelSystemRef.current && skyRef.current) {
             // Defensive guard: only mount once both the sky and the aerial
             // systems are live. In practice both are constructed in
@@ -1351,8 +1388,6 @@ export const Game: React.FC = () => {
           // Mount/dispose the Michigan Wilds heightmap side-zone (Level 11).
           // It owns the MIHEIGHTMAP terrain + TerrainMaterial tiering and
           // hides the city so existing city-level materials stay untouched.
-          const isMichiganTerrain = typeof payload?.level === "number"
-            && LevelSystem.isMichiganTerrain(payload.level as WorldLevel);
           if (isMichiganTerrain && !michiganTerrainSystemRef.current) {
             player.setBuildingColliders([]);
             player.setFloorPlatforms([]);
@@ -1375,10 +1410,7 @@ export const Game: React.FC = () => {
               },
             );
           } else if (!isMichiganTerrain && michiganTerrainSystemRef.current) {
-            const targetKeepsWorldHidden =
-              isSanctuary || isLab || isLair || isSaginawLab ||
-              isZugIsland || isAnnArbor || isSpacelike;
-            try { michiganTerrainSystemRef.current.dispose(!targetKeepsWorldHidden); } catch {}
+            try { michiganTerrainSystemRef.current.dispose(); } catch {}
             michiganTerrainSystemRef.current = null;
             player.setBuildingColliders(cityGenerator.getWallColliders());
             player.setFloorPlatforms(cityGenerator.getFloorPlatforms());
@@ -2121,9 +2153,18 @@ export const Game: React.FC = () => {
             respawnTimeoutRef.current = null;
             const cur = playerRef.current;
             if (!cur) return;
-            // Respawn at the safe initial spawn area (cleared of buildings),
-            // not (0,0,0) which can be inside a downtown building.
-            const spawn = new BABYLON.Vector3(0, 2, -15);
+            // Respawn inside the level the player died in. The old fixed
+            // Detroit-origin spawn stranded players in hidden-world zones
+            // (labs, lair, Saginaw, Zug, Ann Arbor, space, Michigan Wilds)
+            // with the previous level's geometry still mounted elsewhere.
+            const worldLevel = levelSystemRef.current?.getCurrentLevel() ?? 1;
+            const sp = LevelSystem.getSpawnPointFor(worldLevel);
+            let spawnY = LevelSystem.isSpacelike(worldLevel) ? 60 : 2;
+            if (LevelSystem.isMichiganTerrain(worldLevel)) {
+              const h = michiganTerrainSystemRef.current?.getHeightAt(sp.x, sp.z);
+              spawnY = (h ?? MichiganTerrainSystem.getDefaultSpawnY()) + 3;
+            }
+            const spawn = new BABYLON.Vector3(sp.x, spawnY, sp.z);
             cur.respawn(spawn);
             // Restore the player's permanent helper roster after death. Two
             // helpers should never be lost to a single death:
