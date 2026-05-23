@@ -151,9 +151,17 @@ export interface ProgressSnapshot {
       staminaBonus: number;
       level: number;
       rarity: number;
+      modules: Array<{ id: string; name: string; type: string; tier: number; level: number }>;
+      maxModules: number;
     }>;
     element: string | null;
   };
+  /** Loose armor modules in the player's inventory (not yet socketed). */
+  armorModuleInventory?: Array<{ id: string; name: string; type: string; tier: number; level: number }>;
+  /** Active bio-creature pets that follow the player and augment abilities.
+   *  Up to 3; separate from companions/ allies. Each entry is a captured
+   *  creature id + its active-pet level (1-50). */
+  activePets?: Array<{ creatureId: string; level: number }>;
 }
 
 export async function loadProgress(): Promise<ProgressSnapshot | null> {

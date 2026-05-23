@@ -1,6 +1,10 @@
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { db } from "./db";
-import { users, playerProgress, gameSessions, type User, type InsertUser, type PlayerProgress, type GameSession } from "@shared/schema";
+import {
+  users, playerProgress, gameSessions, playerPets, playerArmorModules,
+  type User, type InsertUser, type PlayerProgress, type GameSession,
+  type PlayerPet, type PlayerArmorModule,
+} from "@shared/schema";
 
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
@@ -10,6 +14,15 @@ export interface IStorage {
   getPlayerProgress(userId: number): Promise<PlayerProgress | undefined>;
   savePlayerProgress(userId: number, saveData: any): Promise<PlayerProgress>;
   getLeaderboard(limit?: number): Promise<User[]>;
+  // ---- player pets
+  getPlayerPets(userId: number): Promise<PlayerPet[]>;
+  addPlayerPet(userId: number, pet: Omit<PlayerPet, "id" | "userId" | "createdAt">): Promise<PlayerPet>;
+  removePlayerPet(userId: number, creatureId: string): Promise<void>;
+  updatePlayerPetLevel(userId: number, creatureId: string, level: number): Promise<void>;
+  // ---- armor modules
+  getArmorModules(userId: number): Promise<PlayerArmorModule[]>;
+  addArmorModule(userId: number, mod: Omit<PlayerArmorModule, "id" | "userId" | "createdAt">): Promise<PlayerArmorModule>;
+  removeArmorModule(userId: number, moduleId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -54,6 +67,38 @@ export class DatabaseStorage implements IStorage {
 
   async getLeaderboard(limit = 10): Promise<User[]> {
     return db.select().from(users).orderBy(desc(users.highestWave), desc(users.totalKills)).limit(limit);
+  }
+
+  // ---- Player Pets ----
+  async getPlayerPets(userId: number): Promise<PlayerPet[]> {
+    return db.select().from(playerPets).where(eq(playerPets.userId, userId));
+  }
+
+  async addPlayerPet(userId: number, pet: Omit<PlayerPet, "id" | "userId" | "createdAt">): Promise<PlayerPet> {
+    const [created] = await db.insert(playerPets).values({ ...pet, userId }).returning();
+    return created;
+  }
+
+  async removePlayerPet(userId: number, creatureId: string): Promise<void> {
+    await db.delete(playerPets).where(and(eq(playerPets.userId, userId), eq(playerPets.creatureId, creatureId)));
+  }
+
+  async updatePlayerPetLevel(userId: number, creatureId: string, level: number): Promise<void> {
+    await db.update(playerPets).set({ level }).where(and(eq(playerPets.userId, userId), eq(playerPets.creatureId, creatureId)));
+  }
+
+  // ---- Armor Modules ----
+  async getArmorModules(userId: number): Promise<PlayerArmorModule[]> {
+    return db.select().from(playerArmorModules).where(eq(playerArmorModules.userId, userId));
+  }
+
+  async addArmorModule(userId: number, mod: Omit<PlayerArmorModule, "id" | "userId" | "createdAt">): Promise<PlayerArmorModule> {
+    const [created] = await db.insert(playerArmorModules).values({ ...mod, userId }).returning();
+    return created;
+  }
+
+  async removeArmorModule(userId: number, moduleId: string): Promise<void> {
+    await db.delete(playerArmorModules).where(and(eq(playerArmorModules.userId, userId), eq(playerArmorModules.moduleId, moduleId)));
   }
 }
 

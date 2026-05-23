@@ -1839,46 +1839,60 @@ export class PlayerController implements IDamageable {
     return true;
   }
 
-  /** Hard cap on the player's level. +10 maxHP / +5 stamina per level
-   *  with attack-damage scaling via getLevelDamageMul means level 100
-   *  gives +990 maxHP, +495 stamina, and +99% projectile damage on top
-   *  of every other multiplier — comfortably "endgame" without breaking
-   *  the elite/captain HP curve. */
-  static readonly MAX_LEVEL = 100;
+  /** Hard cap on the player's level. 1000 gives the endgame a long
+   *  tail while keeping each level meaningful. Early levels (1-100)
+   *  keep the original pacing; post-100 the curve smooths out so
+   *  every level still grants +5 maxHP / +2 stamina / +0.1% damage. */
+  static readonly MAX_LEVEL = 1000;
+
+  /** XP required to reach the next level from `level`.
+   *  1-100: old linear curve (level * 100) so legacy saves feel identical.
+   *  101-1000: gentler linear ramp (5000 + level * 30) so dedicated
+   *  endgame farming yields steady progression without absurd grinds. */
+  static expForNextLevel(level: number): number {
+    if (level <= 100) return level * 100;
+    return 5000 + level * 30;
+  }
 
   addExperience(amount: number): void {
     if (this.stats.level >= PlayerController.MAX_LEVEL) return;
     this.stats.experience += amount;
-    // Loop so a single huge XP grant (e.g. boss-clear bonus) can level
-    // up multiple times — but stop at MAX_LEVEL so the cap is hard.
+    // Multi-level loop: one big boss-clear bonus can bump the player
+    // several levels in a single call.
     while (
       this.stats.level < PlayerController.MAX_LEVEL &&
-      this.stats.experience >= this.stats.level * 100
+      this.stats.experience >= PlayerController.expForNextLevel(this.stats.level)
     ) {
-      const expNeeded = this.stats.level * 100;
+      const expNeeded = PlayerController.expForNextLevel(this.stats.level);
       this.stats.experience -= expNeeded;
       this.stats.level++;
-      this.stats.maxHealth += 10;
+      // Early levels (1-100): +10 HP / +5 stamina / +1% damage
+      // Post-100: +5 HP / +2 stamina / +0.1% damage — half the rate so
+      // level 1000 is roughly 5x the power of level 100, not 50x.
+      const isEarly = this.stats.level <= 100;
+      this.stats.maxHealth += isEarly ? 10 : 5;
       this.stats.health = this.stats.maxHealth;
       this.health = this.stats.health;
       this.maxHealth = this.stats.maxHealth;
-      this.stats.maxStamina += 5;
+      this.stats.maxStamina += isEarly ? 5 : 2;
       this.stats.stamina = this.stats.maxStamina;
       this.bus.emit(GameEvents.PLAYER_LEVEL_UP, { level: this.stats.level });
     }
-    // At cap, drain residual XP so the bar reads "MAX" and a future
-    // overflow can't roll the integer.
+    // At cap, drain residual XP so the bar reads "MAX".
     if (this.stats.level >= PlayerController.MAX_LEVEL) {
       this.stats.experience = 0;
     }
   }
 
-  /** Per-level attack-damage multiplier exposed for WeaponsSystem.
-   *  Linear +1% per level over level 1 → +99% at level 100. Combat
-   *  systems (WeaponsSystem.createProjectile, melee paths) read this
-   *  on every hit so it stacks with armor damage mods + jewels. */
+  /** Per-level attack-damage multiplier.
+   *  1-100: +1% per level (same as before, → +99%).
+   *  101-1000: +0.1% per level (→ +90% extra), so total at 1000 = +189%.
+   *  Combat systems read this every hit so it stacks with armor mods,
+   *  jewel mounts, pet augments, and module bonuses. */
   getLevelDamageMul(): number {
-    return 1 + (Math.max(1, this.stats.level) - 1) * 0.01;
+    const lvl = Math.max(1, this.stats.level);
+    if (lvl <= 100) return 1 + (lvl - 1) * 0.01;
+    return 1.99 + (lvl - 100) * 0.001;
   }
 
   grantFlightArmor(): void {

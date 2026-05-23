@@ -40,6 +40,34 @@ export const userSessions = pgTable("user_sessions", {
   expire: timestamp("expire").notNull(),
 });
 
+/** Active bio-creature pets that follow the player and augment abilities.
+ *  Up to 3 active pets per player; each pet is a captured creature with
+ *  an independent active-pet level (1-50) separate from the garden roster. */
+export const playerPets = pgTable("player_pets", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  creatureId: text("creature_id").notNull(),
+  speciesId: text("species_id").notNull(),
+  name: text("name").default("Unknown Pet").notNull(),
+  level: integer("level").default(1).notNull(),
+  elementalType: text("elemental_type"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/** Loose armor modules in the player's inventory (not yet socketed into armor).
+ *  These are distinct from modules already installed in equipped armor pieces,
+ *  which are stored inside the `equippedArmor` JSONB in player_progress. */
+export const playerArmorModules = pgTable("player_armor_modules", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  moduleId: text("module_id").notNull(),
+  name: text("name").notNull(),
+  type: text("type").notNull(),
+  tier: integer("tier").default(1).notNull(),
+  level: integer("level").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -49,3 +77,5 @@ export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type PlayerProgress = typeof playerProgress.$inferSelect;
 export type GameSession = typeof gameSessions.$inferSelect;
+export type PlayerPet = typeof playerPets.$inferSelect;
+export type PlayerArmorModule = typeof playerArmorModules.$inferSelect;

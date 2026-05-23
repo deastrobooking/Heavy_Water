@@ -35,6 +35,7 @@ import { PrefabSystem, PrefabSummary } from "./PrefabSystem";
 import { PickupSystem } from "./PickupSystem";
 import { BaseSystem, BaseStructure } from "./BaseSystem";
 import { BioCreatureSystem, CapturedCreature } from "./BioCreatureSystem";
+import { ActivePetSystem } from "./ActivePetSystem";
 import { MountainRingSystem } from "./MountainRingSystem";
 import { AlienFoliageSystem } from "./AlienFoliageSystem";
 import { EarthFoliageSystem } from "./EarthFoliageSystem";
@@ -225,6 +226,7 @@ export const Game: React.FC = () => {
   const pickupRef = useRef<PickupSystem | null>(null);
   const baseRef = useRef<BaseSystem | null>(null);
   const bioRef = useRef<BioCreatureSystem | null>(null);
+  const activePetSystemRef = useRef<ActivePetSystem | null>(null);
   const mountainRingRef = useRef<MountainRingSystem | null>(null);
   const alienFoliageRef = useRef<AlienFoliageSystem | null>(null);
   const earthFoliageRef = useRef<EarthFoliageSystem | null>(null);
@@ -794,6 +796,11 @@ export const Game: React.FC = () => {
         weapons.setSpecialFireHandler("capture_net", () => {
           bioRef.current?.attemptCaptureNearest();
         });
+
+        // Active pet system: up to 3 captured bio-creatures follow the
+        // player and provide active combat augments based on species type.
+        const activePetSystem = new ActivePetSystem(scene);
+        activePetSystemRef.current = activePetSystem;
 
         // Nature ring: 28 mountains around the world rim plus 4 hidden
         // temples that grant a one-time bundle of rare items + a guaranteed
@@ -1880,6 +1887,9 @@ export const Game: React.FC = () => {
             // so defense / health / stamina bonuses + the elemental
             // aura survive a reload.
             equippedArmor: armorSystem.serialize() as unknown as ProgressSnapshot["equippedArmor"],
+            // Active bio-creature pet assignments (which creatures follow
+            // the player and their active-pet levels).
+            activePets: activePetSystem.serialize(),
           };
         };
 
@@ -2108,6 +2118,13 @@ export const Game: React.FC = () => {
                 setPetBondSummary(petBondBoosts.summary);
                 player.setPetBondBoosts(petBondBoosts);
                 weapons.setPlayerBoosts(player.getPlayerBoosts());
+              }
+              // Restore active pet assignments from save.
+              if (activePetSystemRef.current && snap.activePets && snap.activePets.length > 0) {
+                activePetSystemRef.current.assignPets(
+                  snap.activePets,
+                  bioRef.current?.getCaptured() ?? [],
+                );
               }
               // Hidden-temple looted state — keep raided temples dimmed
               // across reloads and (per-level) across deaths.
@@ -2354,6 +2371,8 @@ export const Game: React.FC = () => {
           // spin and per-frame land-check see the up-to-date isGrounded
           // state.
           smashAttackRef.current?.update(dt);
+          // Active pets follow the player every frame.
+          activePetSystemRef.current?.update(dt, player.getPosition());
           // Amplify weapons while mounted in a vehicle (1.5x size/damage/explosion).
           const mounted = player.isMounted();
           weapons.setVehicleMode(mounted);

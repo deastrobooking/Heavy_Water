@@ -10,6 +10,23 @@ export enum ElementType {
   Insectoid = "Insectoid",
 }
 
+export type ArmorModuleType =
+  | "damage_boost"
+  | "fire_rate"
+  | "speed_boost"
+  | "crit_chance"
+  | "health_regen"
+  | "shield_regen"
+  | "elemental_resist";
+
+export interface ArmorModule {
+  id: string;
+  name: string;
+  type: ArmorModuleType;
+  tier: number; // 1-5
+  level: number; // 1-10
+}
+
 export interface ArmorPiece {
   id: string;
   name: string;
@@ -20,6 +37,8 @@ export interface ArmorPiece {
   staminaBonus: number;
   level: number;
   rarity: ItemRarity;
+  modules: ArmorModule[];
+  maxModules: number;
 }
 
 export interface ElementalEffect {
@@ -128,6 +147,44 @@ export class ArmorSystem {
     return total;
   }
 
+  /** Total module bonuses across all equipped armor pieces.
+   *  Scales with module level & tier: value = base * tier * sqrt(level).
+   *  Sums across every module in every slot, then clamps to sane caps. */
+  getModuleBonuses(): {
+    damageMul: number;
+    fireRateMul: number;
+    speedMul: number;
+    critChance: number;
+    healthRegen: number;
+    shieldRegen: number;
+    elementalResist: number;
+  } {
+    let dmg = 0, fr = 0, spd = 0, crit = 0, hRegen = 0, sRegen = 0, eResist = 0;
+    for (const piece of this.equippedArmor.values()) {
+      for (const mod of piece.modules) {
+        const val = 0.02 * mod.tier * Math.sqrt(mod.level); // base 2% per tier at L1, up to ~5.7% at L10
+        switch (mod.type) {
+          case "damage_boost": dmg += val; break;
+          case "fire_rate": fr += val; break;
+          case "speed_boost": spd += val; break;
+          case "crit_chance": crit += val; break;
+          case "health_regen": hRegen += val; break;
+          case "shield_regen": sRegen += val; break;
+          case "elemental_resist": eResist += val; break;
+        }
+      }
+    }
+    return {
+      damageMul: 1 + Math.min(0.50, dmg),
+      fireRateMul: 1 + Math.min(0.40, fr),
+      speedMul: 1 + Math.min(0.30, spd),
+      critChance: Math.min(0.25, crit),
+      healthRegen: Math.min(5.0, hRegen),     // HP / second
+      shieldRegen: Math.min(8.0, sRegen),    // shield / second (additive on top of base)
+      elementalResist: Math.min(0.30, eResist),
+    };
+  }
+
   setElement(element: ElementType | null): void {
     this.activeElement = element;
     Array.from(this.equippedArmor.values()).forEach(piece => {
@@ -209,28 +266,39 @@ export class ArmorSystem {
   }
 }
 
+function maxModulesForRarity(r: ItemRarity): number {
+  switch (r) {
+    case ItemRarity.Common: return 1;
+    case ItemRarity.Uncommon: return 1;
+    case ItemRarity.Rare: return 2;
+    case ItemRarity.Epic: return 2;
+    case ItemRarity.Legendary: return 3;
+    default: return 1;
+  }
+}
+
 export const ARMOR_DEFINITIONS: Record<string, ArmorPiece> = {
-  iron_helmet: { id: "iron_helmet", name: "Iron Helmet", type: "helmet", element: null, defense: 5, healthBonus: 10, staminaBonus: 0, level: 1, rarity: ItemRarity.Common },
-  steel_helmet: { id: "steel_helmet", name: "Steel Helmet", type: "helmet", element: null, defense: 10, healthBonus: 20, staminaBonus: 5, level: 2, rarity: ItemRarity.Uncommon },
-  titanium_helmet: { id: "titanium_helmet", name: "Titanium Helmet", type: "helmet", element: null, defense: 18, healthBonus: 35, staminaBonus: 10, level: 3, rarity: ItemRarity.Rare },
-  plasma_helmet: { id: "plasma_helmet", name: "Plasma Helmet", type: "helmet", element: null, defense: 28, healthBonus: 50, staminaBonus: 15, level: 4, rarity: ItemRarity.Epic },
-  quantum_helmet: { id: "quantum_helmet", name: "Quantum Helmet", type: "helmet", element: null, defense: 40, healthBonus: 75, staminaBonus: 25, level: 5, rarity: ItemRarity.Legendary },
+  iron_helmet: { id: "iron_helmet", name: "Iron Helmet", type: "helmet", element: null, defense: 5, healthBonus: 10, staminaBonus: 0, level: 1, rarity: ItemRarity.Common, modules: [], maxModules: maxModulesForRarity(ItemRarity.Common) },
+  steel_helmet: { id: "steel_helmet", name: "Steel Helmet", type: "helmet", element: null, defense: 10, healthBonus: 20, staminaBonus: 5, level: 2, rarity: ItemRarity.Uncommon, modules: [], maxModules: maxModulesForRarity(ItemRarity.Uncommon) },
+  titanium_helmet: { id: "titanium_helmet", name: "Titanium Helmet", type: "helmet", element: null, defense: 18, healthBonus: 35, staminaBonus: 10, level: 3, rarity: ItemRarity.Rare, modules: [], maxModules: maxModulesForRarity(ItemRarity.Rare) },
+  plasma_helmet: { id: "plasma_helmet", name: "Plasma Helmet", type: "helmet", element: null, defense: 28, healthBonus: 50, staminaBonus: 15, level: 4, rarity: ItemRarity.Epic, modules: [], maxModules: maxModulesForRarity(ItemRarity.Epic) },
+  quantum_helmet: { id: "quantum_helmet", name: "Quantum Helmet", type: "helmet", element: null, defense: 40, healthBonus: 75, staminaBonus: 25, level: 5, rarity: ItemRarity.Legendary, modules: [], maxModules: maxModulesForRarity(ItemRarity.Legendary) },
 
-  iron_chestplate: { id: "iron_chestplate", name: "Iron Chestplate", type: "chest", element: null, defense: 8, healthBonus: 15, staminaBonus: 0, level: 1, rarity: ItemRarity.Common },
-  steel_chestplate: { id: "steel_chestplate", name: "Steel Chestplate", type: "chest", element: null, defense: 16, healthBonus: 30, staminaBonus: 5, level: 2, rarity: ItemRarity.Uncommon },
-  titanium_chestplate: { id: "titanium_chestplate", name: "Titanium Chestplate", type: "chest", element: null, defense: 28, healthBonus: 50, staminaBonus: 10, level: 3, rarity: ItemRarity.Rare },
-  plasma_chestplate: { id: "plasma_chestplate", name: "Plasma Chestplate", type: "chest", element: null, defense: 42, healthBonus: 75, staminaBonus: 20, level: 4, rarity: ItemRarity.Epic },
-  quantum_chestplate: { id: "quantum_chestplate", name: "Quantum Chestplate", type: "chest", element: null, defense: 60, healthBonus: 100, staminaBonus: 30, level: 5, rarity: ItemRarity.Legendary },
+  iron_chestplate: { id: "iron_chestplate", name: "Iron Chestplate", type: "chest", element: null, defense: 8, healthBonus: 15, staminaBonus: 0, level: 1, rarity: ItemRarity.Common, modules: [], maxModules: maxModulesForRarity(ItemRarity.Common) },
+  steel_chestplate: { id: "steel_chestplate", name: "Steel Chestplate", type: "chest", element: null, defense: 16, healthBonus: 30, staminaBonus: 5, level: 2, rarity: ItemRarity.Uncommon, modules: [], maxModules: maxModulesForRarity(ItemRarity.Uncommon) },
+  titanium_chestplate: { id: "titanium_chestplate", name: "Titanium Chestplate", type: "chest", element: null, defense: 28, healthBonus: 50, staminaBonus: 10, level: 3, rarity: ItemRarity.Rare, modules: [], maxModules: maxModulesForRarity(ItemRarity.Rare) },
+  plasma_chestplate: { id: "plasma_chestplate", name: "Plasma Chestplate", type: "chest", element: null, defense: 42, healthBonus: 75, staminaBonus: 20, level: 4, rarity: ItemRarity.Epic, modules: [], maxModules: maxModulesForRarity(ItemRarity.Epic) },
+  quantum_chestplate: { id: "quantum_chestplate", name: "Quantum Chestplate", type: "chest", element: null, defense: 60, healthBonus: 100, staminaBonus: 30, level: 5, rarity: ItemRarity.Legendary, modules: [], maxModules: maxModulesForRarity(ItemRarity.Legendary) },
 
-  iron_leggings: { id: "iron_leggings", name: "Iron Leggings", type: "legs", element: null, defense: 6, healthBonus: 10, staminaBonus: 5, level: 1, rarity: ItemRarity.Common },
-  steel_leggings: { id: "steel_leggings", name: "Steel Leggings", type: "legs", element: null, defense: 12, healthBonus: 20, staminaBonus: 10, level: 2, rarity: ItemRarity.Uncommon },
-  titanium_leggings: { id: "titanium_leggings", name: "Titanium Leggings", type: "legs", element: null, defense: 22, healthBonus: 40, staminaBonus: 15, level: 3, rarity: ItemRarity.Rare },
-  plasma_leggings: { id: "plasma_leggings", name: "Plasma Leggings", type: "legs", element: null, defense: 34, healthBonus: 60, staminaBonus: 25, level: 4, rarity: ItemRarity.Epic },
-  quantum_leggings: { id: "quantum_leggings", name: "Quantum Leggings", type: "legs", element: null, defense: 50, healthBonus: 85, staminaBonus: 35, level: 5, rarity: ItemRarity.Legendary },
+  iron_leggings: { id: "iron_leggings", name: "Iron Leggings", type: "legs", element: null, defense: 6, healthBonus: 10, staminaBonus: 5, level: 1, rarity: ItemRarity.Common, modules: [], maxModules: maxModulesForRarity(ItemRarity.Common) },
+  steel_leggings: { id: "steel_leggings", name: "Steel Leggings", type: "legs", element: null, defense: 12, healthBonus: 20, staminaBonus: 10, level: 2, rarity: ItemRarity.Uncommon, modules: [], maxModules: maxModulesForRarity(ItemRarity.Uncommon) },
+  titanium_leggings: { id: "titanium_leggings", name: "Titanium Leggings", type: "legs", element: null, defense: 22, healthBonus: 40, staminaBonus: 15, level: 3, rarity: ItemRarity.Rare, modules: [], maxModules: maxModulesForRarity(ItemRarity.Rare) },
+  plasma_leggings: { id: "plasma_leggings", name: "Plasma Leggings", type: "legs", element: null, defense: 34, healthBonus: 60, staminaBonus: 25, level: 4, rarity: ItemRarity.Epic, modules: [], maxModules: maxModulesForRarity(ItemRarity.Epic) },
+  quantum_leggings: { id: "quantum_leggings", name: "Quantum Leggings", type: "legs", element: null, defense: 50, healthBonus: 85, staminaBonus: 35, level: 5, rarity: ItemRarity.Legendary, modules: [], maxModules: maxModulesForRarity(ItemRarity.Legendary) },
 
-  iron_boots: { id: "iron_boots", name: "Iron Boots", type: "boots", element: null, defense: 4, healthBonus: 5, staminaBonus: 5, level: 1, rarity: ItemRarity.Common },
-  steel_boots: { id: "steel_boots", name: "Steel Boots", type: "boots", element: null, defense: 8, healthBonus: 15, staminaBonus: 10, level: 2, rarity: ItemRarity.Uncommon },
-  titanium_boots: { id: "titanium_boots", name: "Titanium Boots", type: "boots", element: null, defense: 15, healthBonus: 25, staminaBonus: 20, level: 3, rarity: ItemRarity.Rare },
-  plasma_boots: { id: "plasma_boots", name: "Plasma Boots", type: "boots", element: null, defense: 24, healthBonus: 40, staminaBonus: 30, level: 4, rarity: ItemRarity.Epic },
-  quantum_boots: { id: "quantum_boots", name: "Quantum Boots", type: "boots", element: null, defense: 35, healthBonus: 60, staminaBonus: 40, level: 5, rarity: ItemRarity.Legendary },
+  iron_boots: { id: "iron_boots", name: "Iron Boots", type: "boots", element: null, defense: 4, healthBonus: 5, staminaBonus: 5, level: 1, rarity: ItemRarity.Common, modules: [], maxModules: maxModulesForRarity(ItemRarity.Common) },
+  steel_boots: { id: "steel_boots", name: "Steel Boots", type: "boots", element: null, defense: 8, healthBonus: 15, staminaBonus: 10, level: 2, rarity: ItemRarity.Uncommon, modules: [], maxModules: maxModulesForRarity(ItemRarity.Uncommon) },
+  titanium_boots: { id: "titanium_boots", name: "Titanium Boots", type: "boots", element: null, defense: 15, healthBonus: 25, staminaBonus: 20, level: 3, rarity: ItemRarity.Rare, modules: [], maxModules: maxModulesForRarity(ItemRarity.Rare) },
+  plasma_boots: { id: "plasma_boots", name: "Plasma Boots", type: "boots", element: null, defense: 24, healthBonus: 40, staminaBonus: 30, level: 4, rarity: ItemRarity.Epic, modules: [], maxModules: maxModulesForRarity(ItemRarity.Epic) },
+  quantum_boots: { id: "quantum_boots", name: "Quantum Boots", type: "boots", element: null, defense: 35, healthBonus: 60, staminaBonus: 40, level: 5, rarity: ItemRarity.Legendary, modules: [], maxModules: maxModulesForRarity(ItemRarity.Legendary) },
 };
