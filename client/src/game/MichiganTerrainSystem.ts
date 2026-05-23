@@ -292,6 +292,14 @@ export class MichiganTerrainSystem {
     console.log("[MichiganTerrainSystem] Michigan Wilds disposed");
   }
 
+  /** Re-apply the side-zone visibility contract without rebuilding the
+   *  terrain. Respawns can re-fire level state after stale side-zone cleanup;
+   *  this keeps Detroit/world dressing hidden while MI Wilds remains active. */
+  reassertWorldState(): void {
+    this.hideOuterWorld();
+    try { this.handles.lodCull?.setSuppressed(true); } catch {}
+  }
+
   getDriveableHeight(x: number, z: number): number | null {
     return this.getHeightAt(x, z);
   }
@@ -1339,7 +1347,7 @@ export class MichiganTerrainSystem {
       if (!w) continue;
       try {
         w.setVisible(false);
-        this.hiddenVisibles.push(w);
+        if (!this.hiddenVisibles.includes(w)) this.hiddenVisibles.push(w);
       } catch {}
     }
   }

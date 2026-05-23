@@ -168,9 +168,17 @@ export class AnnArborSystem {
       if (!w) continue;
       try {
         w.setVisible(false);
-        this.hiddenVisibles.push(w);
+        if (!this.hiddenVisibles.includes(w)) this.hiddenVisibles.push(w);
       } catch {}
     }
+  }
+
+  /** Re-apply the side-zone visibility contract without remounting content.
+   *  Same-level respawns can happen after another stale zone restored the
+   *  shared Detroit world; this makes Ann Arbor authoritative again. */
+  reassertWorldState(): void {
+    this.hideOuterWorld();
+    try { this.handles.lodCull?.setSuppressed(true); } catch {}
   }
 
   private restoreOuterWorld(): void {

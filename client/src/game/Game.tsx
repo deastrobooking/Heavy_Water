@@ -1444,6 +1444,9 @@ export const Game: React.FC = () => {
             try { annArborSystemRef.current.dispose(); } catch {}
             annArborSystemRef.current = null;
           }
+          if (isAnnArbor && annArborSystemRef.current) {
+            annArborSystemRef.current.reassertWorldState();
+          }
 
           // Mount/dispose the orbital side-zone (Level 5) on the same edge
           // as the sanctuary. SpaceLevelSystem owns the skybox swap, the
@@ -1511,6 +1514,11 @@ export const Game: React.FC = () => {
             michiganTerrainSystemRef.current = null;
             player.setBuildingColliders(cityGenerator.getWallColliders());
             player.setFloorPlatforms(cityGenerator.getFloorPlatforms());
+          }
+          if (isMichiganTerrain && michiganTerrainSystemRef.current) {
+            player.setBuildingColliders([]);
+            player.setFloorPlatforms([]);
+            michiganTerrainSystemRef.current.reassertWorldState();
           }
 
           // Combat-only progression: bump waves + seed the next fortress.
@@ -2279,6 +2287,23 @@ export const Game: React.FC = () => {
             if (versusModeRef.current.active && versusArenaRef.current) {
               spawn = versusArenaRef.current.getRandomSpawn();
             } else {
+              if (LevelSystem.isAnnArbor(worldLevel) || LevelSystem.isMichiganTerrain(worldLevel)) {
+                // Respawn is a same-level transition, so the normal
+                // LEVEL_STARTED "levelChanged" path may not run. Re-fire the
+                // current level to clean stale side-zone refs, then reassert
+                // the active zone's hide/collider contract before placing
+                // the player. This prevents Detroit/world meshes from being
+                // restored underneath Ann Arbor or MI Wilds after death.
+                try { levelSystemRef.current?.forceStart(worldLevel); } catch {}
+                if (LevelSystem.isAnnArbor(worldLevel)) {
+                  try { annArborSystemRef.current?.reassertWorldState(); } catch {}
+                }
+                if (LevelSystem.isMichiganTerrain(worldLevel)) {
+                  player.setBuildingColliders([]);
+                  player.setFloorPlatforms([]);
+                  try { michiganTerrainSystemRef.current?.reassertWorldState(); } catch {}
+                }
+              }
               const sp = LevelSystem.getSpawnPointFor(worldLevel);
               let spawnY = LevelSystem.isSpacelike(worldLevel) ? 60 : 2;
               if (LevelSystem.isMichiganTerrain(worldLevel)) {
