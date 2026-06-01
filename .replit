@@ -38,3 +38,6 @@ waitForPort = 5000
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 120000
+
+[agent]
+integrations = ["github:1.0.0"]
