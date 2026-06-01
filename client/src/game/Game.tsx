@@ -2301,23 +2301,6 @@ export const Game: React.FC = () => {
             if (versusModeRef.current.active && versusArenaRef.current) {
               spawn = versusArenaRef.current.getRandomSpawn();
             } else {
-              if (LevelSystem.isAnnArbor(worldLevel) || LevelSystem.isMichiganTerrain(worldLevel)) {
-                // Respawn is a same-level transition, so the normal
-                // LEVEL_STARTED "levelChanged" path may not run. Re-fire the
-                // current level to clean stale side-zone refs, then reassert
-                // the active zone's hide/collider contract before placing
-                // the player. This prevents Detroit/world meshes from being
-                // restored underneath Ann Arbor or MI Wilds after death.
-                try { levelSystemRef.current?.forceStart(worldLevel); } catch {}
-                if (LevelSystem.isAnnArbor(worldLevel)) {
-                  try { annArborSystemRef.current?.reassertWorldState(); } catch {}
-                }
-                if (LevelSystem.isMichiganTerrain(worldLevel)) {
-                  player.setBuildingColliders([]);
-                  player.setFloorPlatforms([]);
-                  try { michiganTerrainSystemRef.current?.reassertWorldState(); } catch {}
-                }
-              }
               const sp = LevelSystem.getSpawnPointFor(worldLevel);
               let spawnY = LevelSystem.isSpacelike(worldLevel) ? 60 : 2;
               if (LevelSystem.isMichiganTerrain(worldLevel)) {
@@ -2327,6 +2310,34 @@ export const Game: React.FC = () => {
               spawn = new BABYLON.Vector3(sp.x, spawnY, sp.z);
             }
             cur.respawn(spawn);
+            // --- Limbo-world fix -------------------------------------------
+            // Dying inside a hidden-world side-zone (levels 4-11: Ashur,
+            // space, Pontiac/Saginaw labs, Swarms lair, Zug, Ann Arbor, MI
+            // Wilds) is a SAME-level event, so the normal LEVEL_STARTED
+            // "levelChanged" path that hides Detroit and mounts the zone never
+            // fires. Without re-asserting, the player wakes up in "limbo" —
+            // side-zone meshes gone and the default Detroit world restored
+            // underneath them — and had to fast-travel out and back to fix it.
+            // Re-firing the current level runs the FULL mount/reassert
+            // contract for every side-zone. forceStart is idempotent: each
+            // side-zone system only mounts if absent, otherwise it just
+            // re-hides Detroit, so this never resets captured/cleared progress.
+            // Player is positioned first (matches the fast-travel teleport->
+            // forceStart order SpaceLevelSystem relies on for spawning).
+            if (!versusModeRef.current.active && worldLevel >= 4) {
+              try { levelSystemRef.current?.forceStart(worldLevel); } catch {}
+              if (LevelSystem.isMichiganTerrain(worldLevel)) {
+                player.setBuildingColliders([]);
+                player.setFloorPlatforms([]);
+                try { michiganTerrainSystemRef.current?.reassertWorldState(); } catch {}
+                // Re-snap onto the heightmap once the terrain has re-mounted.
+                const snapTo = spawn.clone();
+                requestAnimationFrame(() => {
+                  const h2 = michiganTerrainSystemRef.current?.getHeightAt(snapTo.x, snapTo.z);
+                  if (h2 != null) cur.teleportTo(new BABYLON.Vector3(snapTo.x, h2 + 3, snapTo.z));
+                });
+              }
+            }
             deathHandledRef.current = false;
             setGamePhase("playing");
             pvpHitCooldownRef.current.clear();

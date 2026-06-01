@@ -1,0 +1,1 @@
+- [Respawn side-zone limbo](respawn-side-zone-limbo.md) — same-level deaths in side-zones (L4–11) must re-fire LevelSystem.forceStart to re-hide Detroit; forceStart is idempotent and won't reset captain/cleared progress.

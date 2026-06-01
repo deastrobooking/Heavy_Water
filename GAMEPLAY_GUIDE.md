@@ -15,11 +15,19 @@ in-game from the **GUIDE** button on the main menu.
 | Sprint | `SHIFT` |
 | Jump / Triple-Jump | `SPACE` |
 | Boost Dash (mid-air) | `SHIFT + SPACE` |
+| Land / cancel flight | `X` |
+| **Escape flight/hover** | tap `SPACE` (jump) 3× quickly |
 | Look | Mouse |
 
 **Triple-jump → Rocket Skates flight.** Press `SPACE` three times in the air to
 enter DBZ-style flight. While flying, `WASD` steers, `SPACE` climbs, `CTRL`
 dives.
+
+**Bail out of flight.** Press `X` to land instantly, or simply **mash the jump
+button** — three quick `SPACE` taps (or three taps of the gamepad `A` button)
+while flying or hovering disengage flight and drop you back toward the ground.
+Holding `SPACE` still climbs as normal; only rapid discrete taps trigger the
+escape, so you won't fall out of the sky by accident.
 
 ---
 

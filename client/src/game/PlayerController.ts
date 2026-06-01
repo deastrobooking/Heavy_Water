@@ -235,6 +235,10 @@ export class PlayerController implements IDamageable {
   private tripleJumpLaunchForce: number = 1.2;
 
   private isFlying: boolean = false;
+  // Rapid-tap-jump-to-escape-flight: count discrete Space taps inside a
+  // short window so the player can bail out of flight/hover by mashing jump.
+  private flightExitTaps: number = 0;
+  private flightExitLastTap: number = 0;
   private flightSpeed: number = 0.5;
   private flightSprintSpeed: number = 0.85;
   private flightAscendSpeed: number = 0.35;
@@ -453,6 +457,23 @@ export class PlayerController implements IDamageable {
           return;
         }
         if (this.isFlying || this.isSupermanFlight) {
+          // Escape flight/hover by rapidly tapping jump. Ignore the OS
+          // key-auto-repeat (a HELD Space is ascend/boost, not a tap) so
+          // only genuine discrete presses count. Three taps inside the
+          // window disengage flight and let gravity bring the player down.
+          if (!e.repeat) {
+            const now = performance.now();
+            if (now - this.flightExitLastTap > 700) this.flightExitTaps = 0;
+            this.flightExitTaps++;
+            this.flightExitLastTap = now;
+            if (this.flightExitTaps >= 3) {
+              this.flightExitTaps = 0;
+              if (this.isSupermanFlight) this.exitSupermanMode();
+              if (this.isFlying) this.exitFlightMode();
+              this.velocity.y = Math.min(this.velocity.y, 0);
+              this.bus.emit(GameEvents.UI_MESSAGE, { text: "FLIGHT DISENGAGED", duration: 1.2 });
+            }
+          }
           return;
         }
         this.handleJump();
@@ -594,6 +615,7 @@ export class PlayerController implements IDamageable {
   private enterFlightMode(): void {
     if (this.isFlying) return;
     this.isFlying = true;
+    this.flightExitTaps = 0;
     this.velocity.y = 0;
     this.stateMachine.changeState("flying");
     this.bus.emit(GameEvents.PLAYER_FLIGHT_ENTER);
@@ -603,6 +625,7 @@ export class PlayerController implements IDamageable {
   private exitFlightMode(): void {
     if (!this.isFlying) return;
     this.isFlying = false;
+    this.flightExitTaps = 0;
     this.stateMachine.changeState("idle");
     this.bus.emit(GameEvents.PLAYER_FLIGHT_EXIT);
     console.log("[PlayerController] Exited flight mode");
@@ -1630,6 +1653,8 @@ export class PlayerController implements IDamageable {
     this.armorEnergy = this.maxArmorEnergy;
     this.jetpackFuel = this.maxJetpackFuel;
     this.isFlying = false;
+    this.isSupermanFlight = false;
+    this.flightExitTaps = 0;
     this.isJetpacking = false;
     this.isDodging = false;
     this.isBoostDashing = false;
@@ -1983,6 +2008,7 @@ export class PlayerController implements IDamageable {
   private enterSupermanMode(): void {
     if (this.isSupermanFlight || this.isGrounded || this.mountedVehicleRoot) return;
     this.isSupermanFlight = true;
+    this.flightExitTaps = 0;
     // Cancel competing aerial states so updateSuperman owns velocity.
     this.isJetpacking = false;
     this.isDodging = false;
@@ -1996,6 +2022,7 @@ export class PlayerController implements IDamageable {
   private exitSupermanMode(): void {
     if (!this.isSupermanFlight) return;
     this.isSupermanFlight = false;
+    this.flightExitTaps = 0;
     this.supermanBoostMul = 1;
     // Restore upright posture so the next ground frame doesn't render
     // the player still pitched forward.
