@@ -2956,8 +2956,20 @@ export const Game: React.FC = () => {
         }
 
         initializingRef.current = false;
+        // Init succeeded — clear the one-shot WebGL reload guard so a future
+        // genuine context exhaustion can auto-recover again.
+        try { sessionStorage.removeItem("heavywater:webgl-reload-once"); } catch {}
       } catch (error) {
-        console.error("Failed to initialize game:", error);
+        // Log richly: a thrown Error serializes to `{}` in the captured
+        // console (message/stack are non-enumerable), which hid the real
+        // cause. Surface name/message/stack explicitly.
+        const err = error as { name?: string; message?: string; stack?: string };
+        console.error(
+          "Failed to initialize game:",
+          err?.name ?? typeof error,
+          err?.message ?? String(error),
+          err?.stack ?? "(no stack)",
+        );
         if (engineRef.current) {
           try { engineRef.current.dispose(); } catch {}
           engineRef.current = null;
@@ -3052,8 +3064,44 @@ export const Game: React.FC = () => {
         tryGrantLegendaryCompanionRef.current = null;
         EventBus.getInstance().clear();
         initializingRef.current = false;
+        // --- WebGL context-exhaustion auto-recovery --------------------------
+        // The most common cause of a hard init failure is WebGL context
+        // exhaustion: the browser caps live contexts (~16) and once they're
+        // gone, Babylon reports "WebGL not supported". A workflow/server
+        // restart does NOT release them — only a full page reload does. So if
+        // a fresh probe canvas also can't get a WebGL2 context, we're
+        // exhausted: reload the page ONCE (guarded via sessionStorage so a
+        // genuine deterministic crash can never loop) to hand the user a clean
+        // slate instead of a dead-end error screen.
+        let webglDead = false;
+        try {
+          const probe = document.createElement("canvas");
+          const gl = probe.getContext("webgl2") || probe.getContext("webgl");
+          webglDead = !gl;
+          // Release the probe's own context immediately so repeated non-WebGL
+          // init failures don't themselves accumulate transient contexts.
+          try { (gl as WebGLRenderingContext | null)?.getExtension("WEBGL_lose_context")?.loseContext(); } catch {}
+        } catch { webglDead = true; }
+
+        const RELOAD_GUARD = "heavywater:webgl-reload-once";
+        let alreadyReloaded = false;
+        try { alreadyReloaded = sessionStorage.getItem(RELOAD_GUARD) === "1"; } catch {}
+        if (webglDead && !alreadyReloaded) {
+          try { sessionStorage.setItem(RELOAD_GUARD, "1"); } catch {}
+          setMessage("GPU CONTEXT LOST — RELOADING…");
+          setTimeout(() => { try { window.location.reload(); } catch {} }, 600);
+          return;
+        }
+        // Reaching init successfully clears the guard so a future real
+        // exhaustion can recover again.
+        if (!webglDead) { try { sessionStorage.removeItem(RELOAD_GUARD); } catch {} }
+
         const errorMsg = error instanceof Error ? error.message : String(error);
-        setMessage(`CRITICAL ERROR: ${errorMsg}`);
+        setMessage(
+          webglDead
+            ? "GRAPHICS UNAVAILABLE — please reload the page (your browser ran out of GPU contexts)."
+            : `CRITICAL ERROR: ${errorMsg}`,
+        );
         setGamePhase("menu");
       }
     }, 150);

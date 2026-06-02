@@ -1,3 +1,4 @@
-- [Respawn side-zone limbo](respawn-side-zone-limbo.md) — same-level deaths in side-zones (L4–11) must re-fire LevelSystem.forceStart to re-hide Detroit; forceStart is idempotent and won't reset captain/cleared progress.
-- [Side-zone neon bloom](sidezone-glow-bloom.md) — L9/L10/L11 each own a GlowLayer restricted (addIncludedOnlyMesh) to decor; dispose explicitly; coexists with sabreGlow (first effectLayer, sabre-only).
-- [Pet & robot upgrade caps](pet-robot-upgrade-caps.md) — raising any pet/robot cap needs both the live guard AND the load-time clamp moved together; UI is data-driven; bond reduction is re-clamped in PlayerController.
+- [Respawn side-zone limbo](respawn-side-zone-limbo.md) — same-level deaths in side-zones (L4–11) must re-fire LevelSystem.forceStart; it's idempotent and won't reset progress.
+- [WebGL context exhaustion](webgl-context-exhaustion.md) — "WebGL not supported" = leaked/exhausted contexts, not a dead GPU; dispose engines on failure + auto-reload once.
+- [Side-zone neon bloom](sidezone-glow-bloom.md) — L9/L10/L11 each own a GlowLayer restricted to decor; dispose explicitly; coexists with sabre-only sabreGlow.
+- [Pet & robot upgrade caps](pet-robot-upgrade-caps.md) — raising any pet/robot cap needs the live guard AND the load-time clamp moved together; UI is data-driven.

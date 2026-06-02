@@ -104,7 +104,21 @@ export class BabylonEngine {
       console.log("[BabylonEngine] WebGL2 backend active");
     }
 
-    return new BabylonEngine(canvas, engine, isWebGPU);
+    // The raw BABYLON engine above has ALREADY acquired a GPU/WebGL context.
+    // The wrapper constructor then builds the scene/camera/lighting/post FX —
+    // any of which can throw. If we let that throw propagate without disposing
+    // the raw engine, the WebGL context is LEAKED (the caller never receives a
+    // wrapper instance, so it can't dispose it either). Browsers cap live
+    // WebGL contexts (~16); a few leaked failed-inits later, context creation
+    // starts failing outright and Babylon reports "WebGL not supported".
+    // Disposing the raw engine here releases the context on every failure so a
+    // retry always starts from a clean slate.
+    try {
+      return new BabylonEngine(canvas, engine, isWebGPU);
+    } catch (e) {
+      try { engine.dispose(); } catch {}
+      throw e;
+    }
   }
 
   /**
