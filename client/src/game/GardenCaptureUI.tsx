@@ -19,6 +19,7 @@ interface GardenCaptureUIProps {
   dexCaughtIds: string[];
   bioEssenceCount: number;
   petBondSummary?: string;
+  petAugmentSummary?: string;
   upgradeCost: { gears: number; nano: number; cores: number } | null;
   canUpgradeGarden: boolean;
   onDeploy: (id: string) => void;
@@ -44,7 +45,7 @@ const RARITY_COLOR: Record<Rarity, string> = {
 
 export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
   open, level, maxLevel, captureBonus, capacityMax, captured, dexCaughtIds, bioEssenceCount,
-  petBondSummary, upgradeCost, canUpgradeGarden, onDeploy, onCare, onUpgradeGarden, onClose,
+  petBondSummary, petAugmentSummary, upgradeCost, canUpgradeGarden, onDeploy, onCare, onUpgradeGarden, onClose,
 }) => {
   const [tab, setTab] = useState<Tab>("roster");
   // Per-roster-row cursor for keyboard + gamepad. Only the ROSTER tab
@@ -229,6 +230,9 @@ export const GardenCaptureUI: React.FC<GardenCaptureUIProps> = ({
             </div>
             {petBondSummary && (
               <div className="text-cyan-300 text-[11px] mt-1">{petBondSummary}</div>
+            )}
+            {petAugmentSummary && (
+              <div className="text-fuchsia-300 text-[11px] mt-0.5">{petAugmentSummary}</div>
             )}
           </div>
           <div className="text-xs font-mono text-lime-300">

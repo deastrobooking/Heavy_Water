@@ -230,6 +230,7 @@ export const Game: React.FC = () => {
   const baseRef = useRef<BaseSystem | null>(null);
   const bioRef = useRef<BioCreatureSystem | null>(null);
   const activePetSystemRef = useRef<ActivePetSystem | null>(null);
+  const refreshActivePetsRef = useRef<() => void>(() => {});
   const mountainRingRef = useRef<MountainRingSystem | null>(null);
   const alienFoliageRef = useRef<AlienFoliageSystem | null>(null);
   const earthFoliageRef = useRef<EarthFoliageSystem | null>(null);
@@ -330,6 +331,7 @@ export const Game: React.FC = () => {
   const [gardenStructure, setGardenStructure] = useState<BaseStructure | null>(null);
   const [capturedCreatures, setCapturedCreatures] = useState<CapturedCreature[]>([]);
   const [petBondSummary, setPetBondSummary] = useState("Pet Bonds: +0% DMG, +0% FIRE, -0% DMG TAKEN");
+  const [petAugmentSummary, setPetAugmentSummary] = useState("Pet Augments: none active");
   // Persistent "ever caught" species ids for the dex completion UI. Only
   // grows; survives DEPLOY which removes a creature from the live roster.
   const [dexCaughtIds, setDexCaughtIds] = useState<string[]>([]);
@@ -2167,16 +2169,9 @@ export const Game: React.FC = () => {
                 player.setPetBondBoosts(petBondBoosts);
                 weapons.setPlayerBoosts(player.getPlayerBoosts());
               }
-              // Restore active pet assignments from save.
-              if (activePetSystemRef.current && snap.activePets && snap.activePets.length > 0) {
-                activePetSystemRef.current.assignPets(
-                  snap.activePets,
-                  bioRef.current?.getCaptured() ?? [],
-                );
-                // Re-push pet augment bonuses after loading saved pets.
-                player.setPetAugmentBoosts(activePetSystemRef.current.getAugmentBonuses());
-                weapons.setPlayerBoosts(player.getPlayerBoosts());
-              }
+              // Active pets auto-derive from the (now-restored) captured roster,
+              // re-pushing augments, weapon element, and the robot armor combo.
+              refreshActivePetsRef.current();
               // Hidden-temple looted state — keep raided temples dimmed
               // across reloads and (per-level) across deaths.
               if (mountainRingRef.current) {
@@ -2536,6 +2531,11 @@ export const Game: React.FC = () => {
           for (const hit of hits) {
             const modifiedDamage = armorSystem.getModifiedOutgoingDamage(hit.damage);
             routeHit(hit.hitEnemy, modifiedDamage);
+            // Pet/armor elemental on-hit effect applied to NORMAL shots:
+            // a fire pet burns, ice chills, electric shocks. Reconciled with
+            // the manual stance via getEffectiveElement inside ArmorSystem.
+            const onHit = armorSystem.getWeaponOnHitBonus(hit.damage);
+            if (onHit) routeHit(hit.hitEnemy, onHit.bonus);
           }
 
           const specialHits = specialWeapons.update(dt, enemyMeshes, playerPos);
@@ -2786,7 +2786,7 @@ export const Game: React.FC = () => {
             setPlayerState(player.getPlayerState());
             setBeamSabreActive(beamSabre.active);
             setBeamSabreLevel(beamSabre.getLevel);
-            setActiveElement(armorSystem.getActiveElement());
+            setActiveElement(armorSystem.getEffectiveElement());
             setArmorDefense(armorSystem.getTotalDefense());
             setIsFlying(player.getIsFlying());
             setArmorEnergy(player.getArmorEnergy());
@@ -2837,6 +2837,9 @@ export const Game: React.FC = () => {
             setPetBondSummary(petBondBoosts.summary);
             player.setPetBondBoosts(petBondBoosts);
             weapons.setPlayerBoosts(player.getPlayerBoosts());
+            // Keep animated pets + their powers in sync with the live roster
+            // (idempotent: only respawns when the top-N roster actually changes).
+            refreshActivePetsRef.current();
           }
 
           if (player.getHealth() <= 0 && !deathHandledRef.current && respawnTimeoutRef.current === null) {
@@ -3391,6 +3394,7 @@ export const Game: React.FC = () => {
         player.setPetBondBoosts(petBondBoosts);
         weapons.setPlayerBoosts(player.getPlayerBoosts());
       }
+      refreshActivePetsRef.current();
     }
   }, []);
 
@@ -3725,12 +3729,42 @@ export const Game: React.FC = () => {
     if (ok) {
       showMessage(`DEPLOYED ${captured.name.toUpperCase()}`, 1800);
       bioRef.current.removeCaptured(id);
+      refreshActivePets();
       syncResourcesNow();
       forceSaveRef.current?.();
     } else {
       showMessage("DEPLOY FAILED", 1500);
     }
   }, [showMessage, syncResourcesNow]);
+
+  /** Re-derive the active-pet roster from the player's captured creatures and
+   *  push every pet-driven effect through one path: stat augments (incl.
+   *  defense), the imbued weapon element, and the robot armor-set combo (via
+   *  the armor module pipeline). Called on init, load, capture, and deploy so
+   *  the animated robot followers + their powers always match the roster.
+   *  All state derives from capturedCreatures, which already persists. */
+  const refreshActivePets = useCallback(() => {
+    const pets = activePetSystemRef.current;
+    const player = playerRef.current;
+    const armor = armorSystemRef.current;
+    const weapons = weaponsRef.current;
+    const bio = bioRef.current;
+    if (!pets || !player) return;
+    if (bio) pets.syncFromCaptured(bio.getCaptured());
+    const augments = pets.getAugmentBonuses();
+    player.setPetAugmentBoosts(augments);
+    const petElement = pets.getWeaponElement();
+    const elementTag = petElement ? ` · ${String(petElement).toUpperCase()} weapon` : "";
+    setPetAugmentSummary(pets.getEntries().length > 0 ? `${augments.summary}${elementTag}` : "Pet Augments: none active");
+    if (armor) {
+      armor.setPetElement(petElement);
+      armor.setRobotComboBonus(pets.getComboBonus());
+      player.setModuleBoosts(armor.getModuleBonuses());
+      setActiveElement(armor.getEffectiveElement());
+    }
+    if (weapons) weapons.setPlayerBoosts(player.getPlayerBoosts());
+  }, []);
+  refreshActivePetsRef.current = refreshActivePets;
 
   const handleGardenCare = useCallback((id: string) => {
     const bio = bioRef.current;
@@ -4378,6 +4412,7 @@ export const Game: React.FC = () => {
           gardenCaptured={capturedCreatures}
           gardenDexCaughtIds={dexCaughtIds}
           petBondSummary={petBondSummary}
+          petAugmentSummary={petAugmentSummary}
           bioEssenceCount={resourceCounts.bioEssence}
           gardenUpgradeCost={gardenUpgradeCost}
           gardenCanUpgrade={gardenCanUpgrade}

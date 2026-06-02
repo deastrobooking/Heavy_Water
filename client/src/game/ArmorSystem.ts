@@ -96,6 +96,15 @@ const ELEMENTAL_DEFINITIONS: Record<ElementType, ElementalEffect> = {
 export class ArmorSystem {
   private equippedArmor: Map<string, ArmorPiece> = new Map();
   private activeElement: ElementType | null = null;
+  /** Weapon element imbued by the active pet roster. Used ONLY for outgoing
+   *  weapon effects, and only when the player has no manual elemental stance
+   *  (activeElement). This keeps pets from overriding a manual choice while
+   *  still letting a fire pet add burn to normal shots. */
+  private petElement: ElementType | null = null;
+  /** Named robot-collection "armor set" combo, fed into getModuleBonuses so
+   *  it reaches the player through the same pipeline as looted armor mods. */
+  private comboBonus: { name: string; damageMul: number; fireRateMul: number; speedMul: number; critChance: number; damageReduction: number } =
+    { name: "", damageMul: 0, fireRateMul: 0, speedMul: 0, critChance: 0, damageReduction: 0 };
   private bus: EventBus;
 
   constructor() {
@@ -175,6 +184,12 @@ export class ArmorSystem {
         }
       }
     }
+    // Robot-collection armor set combo rides the same pipeline as looted
+    // armor modules so the player feels it through one code path.
+    dmg += this.comboBonus.damageMul;
+    fr += this.comboBonus.fireRateMul;
+    spd += this.comboBonus.speedMul;
+    crit += this.comboBonus.critChance;
     return {
       damageMul: 1 + Math.min(0.50, dmg),
       fireRateMul: 1 + Math.min(0.40, fr),
@@ -183,8 +198,25 @@ export class ArmorSystem {
       healthRegen: Math.min(5.0, hRegen),     // HP / second
       shieldRegen: Math.min(8.0, sRegen),    // shield / second (additive on top of base)
       elementalResist: Math.min(0.30, eResist),
-      damageReduction: 0, // reserved for future module type; currently no modules grant this
+      damageReduction: Math.min(0.30, this.comboBonus.damageReduction),
     };
+  }
+
+  /** Set the active robot-collection armor set combo (from ActivePetSystem). */
+  setRobotComboBonus(combo: { name: string; damageMul: number; fireRateMul: number; speedMul: number; critChance: number; damageReduction: number }): void {
+    this.comboBonus = {
+      name: combo.name || "",
+      damageMul: Math.max(0, combo.damageMul || 0),
+      fireRateMul: Math.max(0, combo.fireRateMul || 0),
+      speedMul: Math.max(0, combo.speedMul || 0),
+      critChance: Math.max(0, combo.critChance || 0),
+      damageReduction: Math.max(0, combo.damageReduction || 0),
+    };
+    this.bus.emit(GameEvents.INVENTORY_CHANGED);
+  }
+
+  getRobotComboName(): string {
+    return this.comboBonus.name;
   }
 
   setElement(element: ElementType | null): void {
@@ -199,9 +231,44 @@ export class ArmorSystem {
     return this.activeElement;
   }
 
+  /** Pet-derived weapon element (offense only). */
+  setPetElement(element: ElementType | null): void {
+    this.petElement = element;
+    this.bus.emit(GameEvents.INVENTORY_CHANGED);
+  }
+
+  getPetElement(): ElementType | null {
+    return this.petElement;
+  }
+
+  /** Effective weapon element: manual stance wins, pet element fills in.
+   *  This is the reconciliation point — pets never override a manual choice. */
+  getEffectiveElement(): ElementType | null {
+    return this.activeElement ?? this.petElement;
+  }
+
   getElementalEffect(): ElementalEffect | null {
     if (!this.activeElement) return null;
     return { ...ELEMENTAL_DEFINITIONS[this.activeElement] };
+  }
+
+  /** Elemental effect driven by the EFFECTIVE element (manual or pet).
+   *  Used for outgoing weapon damage/on-hit so pets imbue normal shots. */
+  getEffectiveElementalEffect(): ElementalEffect | null {
+    const el = this.getEffectiveElement();
+    if (!el) return null;
+    return { ...ELEMENTAL_DEFINITIONS[el] };
+  }
+
+  /** Immediate elemental on-hit bonus for normal weapon shots, scaled off
+   *  the element's poison magnitude. Manifests as a bonus elemental burst
+   *  (burn/chill/shock flavor) since the enemy AI has no DOT/slow ticker. */
+  getWeaponOnHitBonus(baseDamage: number): { bonus: number; element: ElementType } | null {
+    const effect = this.getEffectiveElementalEffect();
+    if (!effect || effect.poisonDamage <= 0) return null;
+    const bonus = Math.round(effect.poisonDamage + baseDamage * 0.12);
+    if (bonus <= 0) return null;
+    return { bonus, element: effect.element };
   }
 
   calculateDamageReduction(incomingDamage: number, damageType: DamageType): number {
@@ -218,7 +285,7 @@ export class ArmorSystem {
   }
 
   getModifiedOutgoingDamage(baseDamage: number): number {
-    const effect = this.getElementalEffect();
+    const effect = this.getEffectiveElementalEffect();
     if (!effect) return baseDamage;
     return baseDamage * (1 + effect.strengthBonus);
   }

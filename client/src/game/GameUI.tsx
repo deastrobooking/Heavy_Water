@@ -108,6 +108,7 @@ interface GameUIProps {
   gardenDexCaughtIds?: string[];
   bioEssenceCount?: number;
   petBondSummary?: string;
+  petAugmentSummary?: string;
   gardenUpgradeCost?: { gears: number; nano: number; cores: number } | null;
   gardenCanUpgrade?: boolean;
   onGardenDeploy?: (id: string) => void;
@@ -225,6 +226,7 @@ export const GameUI: React.FC<GameUIProps> = ({
   gardenDexCaughtIds = [],
   bioEssenceCount = 0,
   petBondSummary,
+  petAugmentSummary,
   gardenUpgradeCost = null,
   gardenCanUpgrade = false,
   onGardenDeploy,
@@ -943,6 +945,7 @@ export const GameUI: React.FC<GameUIProps> = ({
         dexCaughtIds={gardenDexCaughtIds}
         bioEssenceCount={bioEssenceCount}
         petBondSummary={petBondSummary}
+        petAugmentSummary={petAugmentSummary}
         upgradeCost={gardenUpgradeCost}
         canUpgradeGarden={gardenCanUpgrade}
         onDeploy={(id) => onGardenDeploy?.(id)}

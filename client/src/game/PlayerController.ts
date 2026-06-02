@@ -194,7 +194,7 @@ export class PlayerController implements IDamageable {
 
   // ---- Modular armor + active pet augment bonuses (pushed from Game.tsx)
   private moduleBoosts = { damageMul: 1, fireRateMul: 1, speedMul: 1, critChance: 0, healthRegen: 0, shieldRegen: 0, elementalResist: 0, damageReduction: 0 };
-  private petAugmentBoosts = { damageMul: 1, fireRateMul: 1, speedMul: 1, shieldRegen: 0, healthRegen: 0, critChance: 0 };
+  private petAugmentBoosts = { damageMul: 1, fireRateMul: 1, speedMul: 1, defense: 0, shieldRegen: 0, healthRegen: 0, critChance: 0 };
 
   setCameraMode(mode: "first" | "third"): void {
     this.cameraMode = mode;
@@ -1576,7 +1576,8 @@ export class PlayerController implements IDamageable {
       0.60,
       Math.min(0.30, 0.03 * drLvl)
         + this.petBondBoosts.damageReduction
-        + this.moduleBoosts.damageReduction,
+        + this.moduleBoosts.damageReduction
+        + this.petAugmentBoosts.defense,
     );
     if (totalReduction > 0) amount *= (1 - totalReduction);
 
@@ -1812,7 +1813,8 @@ export class PlayerController implements IDamageable {
         0.60,
         Math.min(0.30, 0.03 * drLvl)
           + this.petBondBoosts.damageReduction
-          + this.moduleBoosts.damageReduction,
+          + this.moduleBoosts.damageReduction
+          + this.petAugmentBoosts.defense,
       ),
     };
   }
@@ -1841,11 +1843,12 @@ export class PlayerController implements IDamageable {
   /** Push active pet augment bonuses from ActivePetSystem.getAugmentBonuses(). */
   setPetAugmentBoosts(boosts: {
     damageMul: number; fireRateMul: number; speedMul: number;
-    shieldRegen: number; healthRegen: number; critChance: number;
+    defense?: number; shieldRegen: number; healthRegen: number; critChance: number;
   }): void {
     this.petAugmentBoosts.damageMul = Math.max(1, boosts.damageMul || 1);
     this.petAugmentBoosts.fireRateMul = Math.max(1, boosts.fireRateMul || 1);
     this.petAugmentBoosts.speedMul = Math.max(1, boosts.speedMul || 1);
+    this.petAugmentBoosts.defense = Math.max(0, Math.min(0.25, boosts.defense || 0));
     this.petAugmentBoosts.shieldRegen = Math.max(0, boosts.shieldRegen || 0);
     this.petAugmentBoosts.healthRegen = Math.max(0, boosts.healthRegen || 0);
     this.petAugmentBoosts.critChance = Math.max(0, boosts.critChance || 0);
