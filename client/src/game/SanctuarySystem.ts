@@ -6,6 +6,8 @@ import type { BaseSystem } from "./BaseSystem";
 import type { CityGenerator } from "./CityGenerator";
 import type { AlienFoliageSystem } from "./AlienFoliageSystem";
 import type { EarthFoliageSystem } from "./EarthFoliageSystem";
+import { EarthLSystemPresets } from "./lsystem/EarthLSystemPresets";
+import type { EarthLSystemPresetKey } from "./lsystem/EarthLSystemPresets";
 import type { BioCreatureSystem } from "./BioCreatureSystem";
 import type { WeaponsSystem, WeaponType } from "./WeaponsSystem";
 import {
@@ -1316,28 +1318,120 @@ export class SanctuarySystem {
    *  this returns is what the sanctuary uses on warp-out so we don't leave
    *  trees stranded at (-480,-480) once the player is back in Detroit.
    *
-   *  Plants are placed at y=0 (the sanctuary's playable area is near sea
-   *  level and largely flat around the village) — matching the prior
-   *  placement so the swap stays a pure visual change. */
+   *  Each plant's Y is sampled from the rolling sanctuary terrain (via
+   *  terrainHeightAt, which mirrors the buildGrassPlains displacement) so
+   *  trunks sit flush on the ground over the rises/dips instead of floating
+   *  or sinking at a flat sea level — the same per-point approach Michigan
+   *  Wilds uses. We build an explicit point list (Poisson-ish rejection
+   *  scatter, mirroring EarthFoliageSystem.scatterZone) and hand it to
+   *  scatterPoints, which supports an explicit Y per plant. */
   private scatterEarthFoliage(): void {
     const foliage = this.handles.earthFoliage;
     if (!foliage) return;
     const c = SanctuarySystem.CENTER;
 
+    const points: Array<{ x: number; z: number; y: number; preset: EarthLSystemPresetKey }> = [];
+
     // Inner band: a fuller stand hugging the perimeter. Spacing is wider
     // than the old alien thicket because earth trees scale larger, so a
     // tighter spacing would read as an opaque wall around the village.
-    const innerCenter = new BABYLON.Vector3(c.x, 0, c.z);
-    const innerDispose = foliage.scatterZone(innerCenter, 84, 54, 6.0, 0xA51C2A);
+    this.collectFoliagePoints(points, c.x, c.z, 84, 54, 6.0, 0xA51C2A);
 
     // Outer band: looser scatter filling the gap toward the mountains so
     // the silhouette of the peaks still reads behind the canopy.
-    const outerCenter = new BABYLON.Vector3(c.x + 5, 0, c.z - 5);
-    const outerDispose = foliage.scatterZone(outerCenter, 116, 44, 9.0, 0xEA5704);
+    this.collectFoliagePoints(points, c.x + 5, c.z - 5, 116, 44, 9.0, 0xEA5704);
 
-    this.foliageDisposer = () => {
-      try { innerDispose(); } catch {}
-      try { outerDispose(); } catch {}
+    this.foliageDisposer = foliage.scatterPoints(points, 0xA51C2A);
+  }
+
+  /** Append a rejection-sampled circular scatter of earth plants (with each
+   *  point's Y sampled from the rolling terrain) onto `out`. Mirrors the
+   *  spacing/area-uniform placement of EarthFoliageSystem.scatterZone, but
+   *  resolves the terrain height per point and a uniform-random preset so
+   *  the result can be handed to scatterPoints. */
+  private collectFoliagePoints(
+    out: Array<{ x: number; z: number; y: number; preset: EarthLSystemPresetKey }>,
+    centerX: number,
+    centerZ: number,
+    radius: number,
+    count: number,
+    spacing: number,
+    seed: number,
+  ): void {
+    const rng = SanctuarySystem.makeRng(seed);
+    const presetKeys = Object.keys(EarthLSystemPresets) as EarthLSystemPresetKey[];
+    const local: Array<{ x: number; z: number }> = [];
+    const sp2 = spacing * spacing;
+    // Bury the trunk base a touch so it never floats on a slope, matching
+    // Michigan Wilds' forest lift.
+    const lift = -0.25;
+
+    let placed = 0;
+    let attempts = 0;
+    const maxAttempts = count * 6;
+    while (placed < count && attempts < maxAttempts) {
+      attempts++;
+      const a = rng() * Math.PI * 2;
+      const r = Math.sqrt(rng()) * radius; // sqrt → uniform area distribution
+      const x = centerX + Math.cos(a) * r;
+      const z = centerZ + Math.sin(a) * r;
+
+      let ok = true;
+      for (const p of local) {
+        const dx = x - p.x;
+        const dz = z - p.z;
+        if (dx * dx + dz * dz < sp2) { ok = false; break; }
+      }
+      if (!ok) continue;
+
+      local.push({ x, z });
+      const preset = presetKeys[Math.floor(rng() * presetKeys.length)];
+      const y = SanctuarySystem.terrainHeightAt(x, z) + lift;
+      out.push({ x, z, y, preset });
+      placed++;
+    }
+  }
+
+  /** World-space ground height of the rolling sanctuary terrain at (x, z).
+   *  Replicates the per-vertex displacement applied in buildGrassPlains so
+   *  scattered foliage can rest flush on the terrain without depending on a
+   *  Babylon ray-pick. Inputs/outputs are world coordinates (the terrain is
+   *  centred on SanctuarySystem.CENTER with a small base Y offset). */
+  private static terrainHeightAt(worldX: number, worldZ: number): number {
+    const c = SanctuarySystem.CENTER;
+    const x = worldX - c.x;
+    const z = worldZ - c.z;
+    const dist = Math.sqrt(x * x + z * z);
+    const villageFlatten = BABYLON.Scalar.Clamp((dist - 95) / 150, 0, 1);
+    const ripple =
+      Math.sin(x * 0.010) * 1.10 +
+      Math.cos(z * 0.012) * 0.95 +
+      Math.sin((x - z) * 0.006) * 0.85 +
+      (SanctuarySystem.noise2(Math.floor(x / 42), Math.floor(z / 42), 91) - 0.5) * 0.90;
+    const upperRidge =
+      SanctuarySystem.gaussian(x + 420, z - 360, 360) * 8.0 +
+      SanctuarySystem.gaussian(x - 520, z + 260, 420) * 6.5;
+    const wetland =
+      SanctuarySystem.gaussian(x - 260, z - 120, 170) * -2.4 +
+      SanctuarySystem.gaussian(x + 310, z + 210, 220) * -2.0;
+    const farFoothills = SanctuarySystem.smoothstep(430, 1080, dist) * 11.5;
+    const villagePad = (1 - SanctuarySystem.smoothstep(0, 145, dist)) * -0.08;
+    const displacement =
+      (ripple + upperRidge + wetland + farFoothills) * villageFlatten + villagePad;
+    // buildGrassPlains positions the ground mesh at y = -0.08.
+    return displacement - 0.08;
+  }
+
+  /** Deterministic PRNG (mulberry32) so foliage placement is stable across
+   *  mounts — mirrors EarthFoliageSystem.makeRng. */
+  private static makeRng(seed: number): () => number {
+    let s = seed >>> 0;
+    return () => {
+      s = (s + 0x6D2B79F5) >>> 0;
+      let t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
   }
 
