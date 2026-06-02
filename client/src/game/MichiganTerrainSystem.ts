@@ -62,6 +62,10 @@ export class MichiganTerrainSystem {
   private terrain: BABYLON.Mesh | null = null;
   private water: BABYLON.Mesh | null = null;
   private terrainMaterial: TerrainMaterial | null = null;
+  /** Soft bloom for the bio-luminescent emissives (power blooms, lab/tower
+   *  beacons, mothership glows). Restricted to the decorative meshes so the
+   *  terrain itself and the enemy roster stay un-bloomed. */
+  private glow: BABYLON.GlowLayer | null = null;
   private heightData: HeightData | null = null;
   private hiddenVisibles: Array<{ setVisible(v: boolean): void }> = [];
   private cityHidden = false;
@@ -272,6 +276,10 @@ export class MichiganTerrainSystem {
     } else {
       this.cityHidden = false;
       this.hiddenVisibles = [];
+    }
+    if (this.glow) {
+      try { this.glow.dispose(); } catch {}
+      this.glow = null;
     }
     try { this.root.dispose(); } catch {}
     for (const mat of this.ownedMaterials) {
@@ -527,6 +535,31 @@ export class MichiganTerrainSystem {
     this.buildPowerBlooms();
     this.buildWildsOutposts();
     this.spawnWildsDangerLayer();
+    this.buildGlow();
+  }
+
+  /** Soft neon bloom for the wilds' bio-luminescent dressing. Restricted
+   *  via addIncludedOnlyMesh to ONLY the bright decorative meshes under our
+   *  root (power blooms, lab/tower beacons, mothership glows) so the glow
+   *  never blooms the TerrainMaterial ground or the enemy roster. */
+  private buildGlow(): void {
+    if (this.disposed || this.glow) return;
+    try {
+      const glow = new BABYLON.GlowLayer("miWildsGlow", this.scene, { blurKernelSize: 32 });
+      glow.intensity = 0.6;
+      for (const m of this.root.getChildMeshes()) {
+        const mat = m.material;
+        if (mat instanceof BABYLON.StandardMaterial) {
+          const e = mat.emissiveColor;
+          if (Math.max(e.r, e.g, e.b) >= 0.3) {
+            glow.addIncludedOnlyMesh(m as BABYLON.Mesh);
+          }
+        }
+      }
+      this.glow = glow;
+    } catch (e) {
+      console.warn("[MichiganTerrainSystem] glow setup failed", e);
+    }
   }
 
   private applyHeightDataToTerrain(data: HeightData): void {

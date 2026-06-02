@@ -42,7 +42,14 @@ export class ZugIslandSystem {
   private handles: ZugIslandHandles;
   private hiddenVisibles: Array<{ setVisible(v: boolean): void }> = [];
   private cityHidden: boolean = false;
-  private emberMats: BABYLON.StandardMaterial[] = [];
+  /** Emissive materials that pulse with the furnace "heat shimmer". We
+   *  store the BASE emissive so the shimmer lerps around it instead of
+   *  multiplicatively decaying toward black over time. */
+  private emberMats: Array<{ mat: BABYLON.StandardMaterial; baseR: number; baseG: number; baseB: number }> = [];
+  /** Neon bloom for the molten/hellish emissives (windows, embers, river,
+   *  beacons). Restricted to the decorative meshes so it never blooms the
+   *  hundreds of legion enemies or tanks the player's GPU has to draw. */
+  private glow: BABYLON.GlowLayer | null = null;
 
   /** Total enemies spawned across the entire mount lifetime — capped so
    *  we don't grind the engine into the dirt after a long siege. */
@@ -83,6 +90,7 @@ export class ZugIslandSystem {
     this.root = new BABYLON.TransformNode("zugIslandRoot", scene);
 
     this.buildGround();
+    this.buildEmberCracks();
     this.hideOuterWorld();
     try { this.handles.lodCull?.setSuppressed(true); } catch {}
     this.buildSlagHeaps();
@@ -92,6 +100,7 @@ export class ZugIslandSystem {
     this.buildBridge();
     this.buildGiantFactories();
     this.buildLighting();
+    this.buildGlow();
 
     try { this.spawnInitialGarrison(); } catch (e) {
       console.warn("[ZugIslandSystem] initial garrison failed", e);
@@ -117,6 +126,10 @@ export class ZugIslandSystem {
       this.observer = null;
     }
     this.emberMats = [];
+    if (this.glow) {
+      try { this.glow.dispose(); } catch {}
+      this.glow = null;
+    }
     this.restoreOuterWorld();
     try { this.root.dispose(); } catch {}
     console.log("[ZugIslandSystem] Zug Island disposed");
@@ -187,7 +200,43 @@ export class ZugIslandSystem {
     discMat.emissiveColor = new BABYLON.Color3(0.35, 0.12, 0.04);
     discMat.specularColor = new BABYLON.Color3(0, 0, 0);
     disc.material = discMat;
-    this.emberMats.push(discMat);
+    this.pushEmber(discMat);
+  }
+
+  /** Register an emissive material with the heat-shimmer tick, snapshotting
+   *  its base emissive so the shimmer lerps around it (no decay to black). */
+  private pushEmber(mat: BABYLON.StandardMaterial): void {
+    const e = mat.emissiveColor;
+    this.emberMats.push({ mat, baseR: e.r, baseG: e.g, baseB: e.b });
+  }
+
+  /** Molten cracks fracturing the combat floor — thin glowing seams of
+   *  still-cooling slag scattered inside the arena ring so the ground
+   *  reads as a living foundry floor rather than a flat dark plane. Flat
+   *  (y≈0.06) and non-pickable so they never impede movement. */
+  private buildEmberCracks(): void {
+    const c = ZugIslandSystem.CENTER;
+    const crackMat = new BABYLON.StandardMaterial("zugEmberCrackMat", this.scene);
+    crackMat.diffuseColor = new BABYLON.Color3(0.30, 0.10, 0.03);
+    crackMat.emissiveColor = new BABYLON.Color3(1.1, 0.35, 0.06);
+    crackMat.specularColor = new BABYLON.Color3(0, 0, 0);
+    this.pushEmber(crackMat);
+
+    const cracks = 16;
+    for (let i = 0; i < cracks; i++) {
+      const ang = (i / cracks) * Math.PI * 2 + (i % 3) * 0.4;
+      const r = 18 + (i % 5) * 18; // all within ARENA_R (120)
+      const x = c.x + Math.cos(ang) * r;
+      const z = c.z + Math.sin(ang) * r;
+      const len = 8 + (i % 4) * 5;
+      const crack = BABYLON.MeshBuilder.CreateBox(`zugEmberCrack_${i}`,
+        { width: len, height: 0.08, depth: 0.8 + (i % 3) * 0.4 }, this.scene);
+      crack.position.set(x, 0.06, z);
+      crack.rotation.y = ang + Math.PI / 2;
+      crack.parent = this.root;
+      crack.material = crackMat;
+      crack.isPickable = false;
+    }
   }
 
   /** Slag heaps ringing the arena — irregular cones of cooled metal
@@ -198,7 +247,7 @@ export class ZugIslandSystem {
     slagMat.diffuseColor = new BABYLON.Color3(0.12, 0.09, 0.08);
     slagMat.emissiveColor = new BABYLON.Color3(0.18, 0.06, 0.02);
     slagMat.specularColor = new BABYLON.Color3(0, 0, 0);
-    this.emberMats.push(slagMat);
+    this.pushEmber(slagMat);
 
     // Heaps live ONLY along the east + west edges — the north is reserved
     // for the river + bridge, the south for the factory skyline. Pushed far
@@ -233,7 +282,7 @@ export class ZugIslandSystem {
     tapMat.diffuseColor = new BABYLON.Color3(1.0, 0.45, 0.10);
     tapMat.emissiveColor = new BABYLON.Color3(1.4, 0.55, 0.10);
     tapMat.specularColor = new BABYLON.Color3(0, 0, 0);
-    this.emberMats.push(tapMat);
+    this.pushEmber(tapMat);
 
     // Furnaces along the EAST + WEST flanks only — never inside the
     // combat ring (the previous layout placed them at radius 70-95 which
@@ -634,6 +683,29 @@ export class ZugIslandSystem {
     ambient.parent = this.root;
   }
 
+  /** Neon bloom pass for the hellish emissives. Restricted via
+   *  addIncludedOnlyMesh to ONLY the bright decorative meshes under our
+   *  root (windows, embers, tap-holes, beacons, river, sign panels) so the
+   *  glow cost stays bounded and it never blooms the legion of enemies. */
+  private buildGlow(): void {
+    try {
+      const glow = new BABYLON.GlowLayer("zugGlow", this.scene, { blurKernelSize: 32 });
+      glow.intensity = 0.85;
+      for (const m of this.root.getChildMeshes()) {
+        const mat = m.material;
+        if (mat instanceof BABYLON.StandardMaterial) {
+          const e = mat.emissiveColor;
+          if (Math.max(e.r, e.g, e.b) >= 0.25) {
+            glow.addIncludedOnlyMesh(m as BABYLON.Mesh);
+          }
+        }
+      }
+      this.glow = glow;
+    } catch (e) {
+      console.warn("[ZugIslandSystem] glow setup failed", e);
+    }
+  }
+
   // ------------------------------------------------------------ combat
 
   /** Initial garrison — a thick ring of titans + captains + spider tanks
@@ -688,15 +760,14 @@ export class ZugIslandSystem {
     const dt = Math.min(0.1, (now - this.lastTickMs) / 1000);
     this.lastTickMs = now;
 
-    // Cheap ember shimmer across the slag/disc/tap materials so the
-    // arena reads as "still-cooling industrial floor".
+    // Ember shimmer across the slag/disc/tap/crack materials so the arena
+    // reads as "still-cooling industrial floor". Lerps around each stored
+    // base emissive (range ~0.6–1.0×) instead of repeatedly multiplying the
+    // live value, which used to decay the glow to black over time.
     const t = now * 0.001;
-    const k = 0.85 + 0.15 * Math.sin(t * 1.4);
-    for (const mat of this.emberMats) {
-      const baseR = mat.emissiveColor.r;
-      const baseG = mat.emissiveColor.g;
-      const baseB = mat.emissiveColor.b;
-      mat.emissiveColor.copyFromFloats(baseR * k, baseG * k, baseB * k);
+    const k = 0.80 + 0.20 * Math.sin(t * 1.4);
+    for (const em of this.emberMats) {
+      em.mat.emissiveColor.copyFromFloats(em.baseR * k, em.baseG * k, em.baseB * k);
     }
 
     if (this.spawnedTotal >= ZugIslandSystem.LIFETIME_CAP) return;

@@ -1,1 +1,2 @@
 - [Respawn side-zone limbo](respawn-side-zone-limbo.md) — same-level deaths in side-zones (L4–11) must re-fire LevelSystem.forceStart to re-hide Detroit; forceStart is idempotent and won't reset captain/cleared progress.
+- [Side-zone neon bloom](sidezone-glow-bloom.md) — L9/L10/L11 each own a GlowLayer restricted (addIncludedOnlyMesh) to decor; dispose explicitly; coexists with sabreGlow (first effectLayer, sabre-only).

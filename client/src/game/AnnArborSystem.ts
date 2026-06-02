@@ -51,6 +51,10 @@ export class AnnArborSystem {
    *  glow) — kept SEPARATE from Zug's "decay" pattern: we just lerp
    *  between two intensities, never multiplicatively shrink. */
   private pulseMats: Array<{ mat: BABYLON.StandardMaterial; baseR: number; baseG: number; baseB: number; phase: number }> = [];
+  /** Neon bloom for the alien emissives (UFO underlights, dome, tractor
+   *  beam, lit windows). Restricted to the decorative meshes so it never
+   *  blooms the swarm of ground enemies. */
+  private glow: BABYLON.GlowLayer | null = null;
 
   private spawnedTotal: number = 0;
   private waveTimer: number = 0;
@@ -110,6 +114,7 @@ export class AnnArborSystem {
     this.buildCrushedTowers();
     this.buildMothership();
     this.buildLighting();
+    this.buildGlow();
 
     // Bump the live-enemy cap so the director can actually maintain
     // ~70 ground enemies + 10 throne captains. Default is 50, which
@@ -143,6 +148,10 @@ export class AnnArborSystem {
       this.observer = null;
     }
     this.pulseMats = [];
+    if (this.glow) {
+      try { this.glow.dispose(); } catch {}
+      this.glow = null;
+    }
     this.saucerRoot = null;
     this.throneCaptains = [];
     this.minions = [];
@@ -488,6 +497,29 @@ export class AnnArborSystem {
       spire.isPickable = false;
     }
 
+    // --- Tractor beam: a translucent purple cone widening from the saucer
+    // underside down to the scorched landing zone. Pure menace/landmark
+    // decoration — non-pickable, no collision. Parented to the STATIC root
+    // (not the spinning saucerRoot) so it stays a clean vertical column.
+    const beamH = Y - 4; // from just under the hull down to the ground
+    const beam = BABYLON.MeshBuilder.CreateCylinder("annArborTractorBeam",
+      { height: beamH, diameterTop: 36, diameterBottom: 150, tessellation: 40 }, this.scene);
+    beam.position.set(c.x, beamH / 2 + 1, c.z);
+    beam.parent = this.root;
+    beam.isPickable = false;
+    const beamMat = new BABYLON.StandardMaterial("annArborTractorBeamMat", this.scene);
+    beamMat.diffuseColor = new BABYLON.Color3(0.45, 0.12, 0.65);
+    beamMat.emissiveColor = new BABYLON.Color3(0.85, 0.25, 1.25);
+    beamMat.specularColor = new BABYLON.Color3(0, 0, 0);
+    beamMat.alpha = 0.16;
+    beamMat.backFaceCulling = false;
+    beam.material = beamMat;
+    this.pulseMats.push({
+      mat: beamMat,
+      baseR: 0.85, baseG: 0.25, baseB: 1.25,
+      phase: Math.PI,
+    });
+
     // --- Single large pointlight from the saucer's underside, lighting
     // the city floor with a sickly purple cast.
     const downlight = new BABYLON.PointLight("annArborSaucerDownlight",
@@ -514,6 +546,30 @@ export class AnnArborSystem {
     key.intensity = 0.5;
     key.parent = this.root;
     void c;
+  }
+
+  /** Neon bloom pass for the alien emissives. Restricted via
+   *  addIncludedOnlyMesh to ONLY the bright decorative meshes under our
+   *  root (underlights, dome, tractor beam, lit windows, broken-tower
+   *  embers) so the glow cost stays bounded and it never blooms the
+   *  ground swarm or the throne captains. */
+  private buildGlow(): void {
+    try {
+      const glow = new BABYLON.GlowLayer("annArborGlow", this.scene, { blurKernelSize: 40 });
+      glow.intensity = 0.75;
+      for (const m of this.root.getChildMeshes()) {
+        const mat = m.material;
+        if (mat instanceof BABYLON.StandardMaterial) {
+          const e = mat.emissiveColor;
+          if (Math.max(e.r, e.g, e.b) >= 0.25) {
+            glow.addIncludedOnlyMesh(m as BABYLON.Mesh);
+          }
+        }
+      }
+      this.glow = glow;
+    } catch (e) {
+      console.warn("[AnnArborSystem] glow setup failed", e);
+    }
   }
 
   // ------------------------------------------------------------ combat
