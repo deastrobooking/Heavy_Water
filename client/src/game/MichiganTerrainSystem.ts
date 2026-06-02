@@ -10,6 +10,8 @@ import type { AerialEnemySystem, AerialUnit } from "./AerialEnemySystem";
 import type { EnemyBaseSystem } from "./EnemyBaseSystem";
 import { createRetroTexture, TERRAIN_TEXTURES } from "./TerrainTextureMaterials";
 import type { BossVariantId } from "./BossVariants";
+import type { EarthFoliageSystem } from "./EarthFoliageSystem";
+import type { EarthLSystemPresetKey } from "./lsystem/EarthLSystemPresets";
 
 export interface MichiganTerrainHandles {
   city?: CityGenerator | null;
@@ -21,6 +23,10 @@ export interface MichiganTerrainHandles {
   enemy?: EnemySystem | null;
   aerial?: AerialEnemySystem | null;
   enemyBase?: EnemyBaseSystem | null;
+  /** Realistic terrestrial foliage system. Michigan Wilds is one of only
+   *  two zones (with Ashur Sanctuary) meant to read as real Earth nature,
+   *  so it forests the green terrain tiers through this handle. */
+  earthFoliage?: EarthFoliageSystem | null;
 }
 
 interface HeightData {
@@ -83,6 +89,9 @@ export class MichiganTerrainSystem {
   private observer: BABYLON.Observer<BABYLON.Scene> | null = null;
   private previousEnemyMax: number | null = null;
   private terrainContentSeeded = false;
+  /** Removes ONLY the earth plants this side-zone forested, leaving the
+   *  world's regular wilderness scatter untouched on warp-out. */
+  private foliageDisposer: (() => void) | null = null;
 
   private static readonly HEIGHTMAP_URLS = [
     "/textures/miheightmap.png",
@@ -271,6 +280,10 @@ export class MichiganTerrainSystem {
     this.sectorCullNodes = [];
     this.patrolMotherships = [];
     this.powerBlooms = [];
+    if (this.foliageDisposer) {
+      try { this.foliageDisposer(); } catch {}
+      this.foliageDisposer = null;
+    }
     if (restoreOuterWorld) {
       try { this.restoreOuterWorld(); } catch {}
     } else {
@@ -535,7 +548,206 @@ export class MichiganTerrainSystem {
     this.buildPowerBlooms();
     this.buildWildsOutposts();
     this.spawnWildsDangerLayer();
+    this.buildEarthForest();
+    this.buildShorelineProps();
     this.buildGlow();
+  }
+
+  /** Mulberry32 PRNG — deterministic layout per seed (mirrors the foliage
+   *  systems' generator so the wilds forest is reproducible). */
+  private static makeRng(seed: number): () => number {
+    let s = seed >>> 0;
+    return () => {
+      s = (s + 0x6D2B79F5) >>> 0;
+      let t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /** Classify a world XZ into a plantable terrain tier, or null when it's
+   *  underwater, on bare high rock, or too steep (cliff) for trees. */
+  private classifyTile(
+    x: number,
+    z: number,
+  ): "shore" | "lowland" | "foothill" | "subalpine" | null {
+    const y = this.getHeightAt(x, z);
+    if (y == null) return null;
+    if (y < MichiganTerrainSystem.SEA_LEVEL + 1.2) return null; // wet / underwater
+    if (y > 52) return null;                                    // bare rock / peak
+    const step = 7;
+    const hx = this.getHeightAt(x + step, z);
+    const hz = this.getHeightAt(x, z + step);
+    if (hx == null || hz == null) return null;
+    const slope = Math.max(Math.abs(hx - y), Math.abs(hz - y)) / step;
+    if (slope > 0.9) return null;                               // cliff — keep clear
+    if (y < MichiganTerrainSystem.SEA_LEVEL + 3.5) return "shore";
+    if (y < 17) return "lowland";
+    if (y < MichiganTerrainSystem.ROCK_START) return "foothill";
+    return "subalpine";
+  }
+
+  /** Species mix per tier: willows hug the shore, oak/birch fill lowlands,
+   *  pine climbs the foothills, sparse pine/scrub on the subalpine fringe. */
+  private pickPresetForTier(
+    tier: "shore" | "lowland" | "foothill" | "subalpine",
+    rng: () => number,
+  ): EarthLSystemPresetKey {
+    const pick = (arr: EarthLSystemPresetKey[]) => arr[Math.floor(rng() * arr.length)];
+    switch (tier) {
+      case "shore":
+        return pick(["willowTree", "willowTree", "shrub", "fernShrub"]);
+      case "lowland":
+        return pick(["oakTree", "oakTree", "birchTree", "birchTree", "shrub", "fernShrub"]);
+      case "foothill":
+        return pick(["pineTree", "pineTree", "oakTree", "shrub"]);
+      case "subalpine":
+      default:
+        return pick(["pineTree", "pineTree", "shrub"]);
+    }
+  }
+
+  /** Forest the green tiers of the wilds with realistic trees, keyed to
+   *  elevation + slope. Placed as groves (stands with clearings between)
+   *  rather than a uniform field so it reads as real Michigan woods. The
+   *  EarthFoliageSystem distance-culls far plants per frame, so the total
+   *  count stays cheap to render even on the large heightmap. */
+  private buildEarthForest(): void {
+    const earth = this.handles.earthFoliage;
+    if (!earth || !this.heightData) return;
+
+    const rng = MichiganTerrainSystem.makeRng(0x3EE5C0);
+    const cx = MichiganTerrainSystem.CENTER.x;
+    const cz = MichiganTerrainSystem.CENTER.z;
+    const halfW = MichiganTerrainSystem.TERRAIN_WIDTH / 2 - 90;
+    const halfD = MichiganTerrainSystem.TERRAIN_DEPTH / 2 - 90;
+    const lift = -0.25; // bury trunk base slightly so it never floats on a slope
+
+    const points: Array<{ x: number; z: number; y: number; preset: EarthLSystemPresetKey }> = [];
+
+    const GROVES = 46;
+    let groves = 0;
+    let tries = 0;
+    while (groves < GROVES && tries < GROVES * 8) {
+      tries++;
+      const gx = cx + (rng() * 2 - 1) * halfW;
+      const gz = cz + (rng() * 2 - 1) * halfD;
+      if (!this.classifyTile(gx, gz)) continue; // grove must start on plantable ground
+      groves++;
+      const trees = 4 + Math.floor(rng() * 6); // 4..9
+      const groveR = 14 + rng() * 22;
+      for (let t = 0; t < trees; t++) {
+        const a = rng() * Math.PI * 2;
+        const r = Math.sqrt(rng()) * groveR;
+        const x = gx + Math.cos(a) * r;
+        const z = gz + Math.sin(a) * r;
+        const tier = this.classifyTile(x, z);
+        if (!tier) continue;
+        const y = (this.getHeightAt(x, z) ?? MichiganTerrainSystem.SEA_LEVEL) + lift;
+        points.push({ x, z, y, preset: this.pickPresetForTier(tier, rng) });
+      }
+    }
+
+    // Lone trees / brush sprinkled between groves for variety.
+    const LONE = 60;
+    let lone = 0;
+    tries = 0;
+    while (lone < LONE && tries < LONE * 6) {
+      tries++;
+      const x = cx + (rng() * 2 - 1) * halfW;
+      const z = cz + (rng() * 2 - 1) * halfD;
+      const tier = this.classifyTile(x, z);
+      if (!tier) continue;
+      lone++;
+      const y = (this.getHeightAt(x, z) ?? MichiganTerrainSystem.SEA_LEVEL) + lift;
+      points.push({ x, z, y, preset: this.pickPresetForTier(tier, rng) });
+    }
+
+    this.foliageDisposer = earth.scatterPoints(points, 0x3EE5C0);
+    console.log(
+      `[MichiganTerrainSystem] Earth forest placed ${points.length} plants across ${groves} groves`,
+    );
+  }
+
+  /** Scatter decorative boulders and fallen logs around the shoreline and
+   *  lowlands. Pure decoration (isPickable=false, not in the ground-pick
+   *  whitelist) so they never block standing or weapon rays; parented to
+   *  the root so they hide/dispose with the side-zone. Uses existing rock
+   *  + wood textures — no new assets. */
+  private buildShorelineProps(): void {
+    if (!this.heightData) return;
+    const rng = MichiganTerrainSystem.makeRng(0x5A11E0);
+    const cx = MichiganTerrainSystem.CENTER.x;
+    const cz = MichiganTerrainSystem.CENTER.z;
+    const halfW = MichiganTerrainSystem.TERRAIN_WIDTH / 2 - 70;
+    const halfD = MichiganTerrainSystem.TERRAIN_DEPTH / 2 - 70;
+
+    const rockMat = new BABYLON.StandardMaterial("miShoreRockMat", this.scene);
+    rockMat.diffuseTexture = this.createTerrainTexture("miShoreRockTex", TERRAIN_TEXTURES.rock, 2.0);
+    rockMat.diffuseColor = new BABYLON.Color3(0.62, 0.62, 0.64);
+    rockMat.specularColor = new BABYLON.Color3(0.04, 0.04, 0.04);
+    this.ownedMaterials.push(rockMat);
+
+    const logMat = new BABYLON.StandardMaterial("miShoreLogMat", this.scene);
+    logMat.diffuseTexture = this.createTerrainTexture("miShoreLogTex", "/textures/wood.jpg", 1.4);
+    logMat.diffuseColor = new BABYLON.Color3(0.42, 0.29, 0.17);
+    logMat.specularColor = new BABYLON.Color3(0.03, 0.03, 0.03);
+    this.ownedMaterials.push(logMat);
+
+    // Boulders: most hug the waterline, a few sit on the green tiers.
+    let rocks = 0;
+    let tries = 0;
+    const ROCKS = 46;
+    while (rocks < ROCKS && tries < ROCKS * 8) {
+      tries++;
+      const x = cx + (rng() * 2 - 1) * halfW;
+      const z = cz + (rng() * 2 - 1) * halfD;
+      const h = this.getHeightAt(x, z);
+      if (h == null) continue;
+      if (h < MichiganTerrainSystem.SEA_LEVEL - 1.5 || h > 40) continue;
+      const nearShore = h < MichiganTerrainSystem.SEA_LEVEL + 4;
+      if (!nearShore && rng() > 0.35) continue;
+      rocks++;
+      const size = 1.1 + rng() * 3.2;
+      const rock = BABYLON.MeshBuilder.CreatePolyhedron(
+        `miRock_${rocks}`,
+        { type: rng() > 0.5 ? 1 : 2, size: size * 0.5 },
+        this.scene,
+      );
+      rock.position.set(x, h + size * 0.18, z);
+      rock.scaling.set(1 + rng() * 0.6, 0.7 + rng() * 0.5, 1 + rng() * 0.6);
+      rock.rotation.set(rng() * 0.4, rng() * Math.PI * 2, rng() * 0.4);
+      rock.material = rockMat;
+      rock.isPickable = false;
+      rock.parent = this.root;
+    }
+
+    // Fallen logs: lie flat on the dry lowland grass near the groves.
+    let logs = 0;
+    tries = 0;
+    const LOGS = 16;
+    while (logs < LOGS && tries < LOGS * 8) {
+      tries++;
+      const x = cx + (rng() * 2 - 1) * halfW;
+      const z = cz + (rng() * 2 - 1) * halfD;
+      const h = this.getHeightAt(x, z);
+      if (h == null) continue;
+      if (h < MichiganTerrainSystem.SEA_LEVEL + 2 || h > 30) continue;
+      logs++;
+      const len = 3.5 + rng() * 4.5;
+      const log = BABYLON.MeshBuilder.CreateCylinder(
+        `miLog_${logs}`,
+        { height: len, diameter: 0.6 + rng() * 0.5, tessellation: 8 },
+        this.scene,
+      );
+      log.rotation.z = Math.PI / 2; // lay it down
+      log.rotation.y = rng() * Math.PI * 2;
+      log.position.set(x, h + 0.4, z);
+      log.material = logMat;
+      log.isPickable = false;
+      log.parent = this.root;
+    }
   }
 
   /** Soft neon bloom for the wilds' bio-luminescent dressing. Restricted

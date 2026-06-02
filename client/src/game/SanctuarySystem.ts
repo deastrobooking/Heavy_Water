@@ -5,6 +5,7 @@ import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
 import type { BaseSystem } from "./BaseSystem";
 import type { CityGenerator } from "./CityGenerator";
 import type { AlienFoliageSystem } from "./AlienFoliageSystem";
+import type { EarthFoliageSystem } from "./EarthFoliageSystem";
 import type { BioCreatureSystem } from "./BioCreatureSystem";
 import type { WeaponsSystem, WeaponType } from "./WeaponsSystem";
 import {
@@ -17,12 +18,18 @@ import {
  *  rather than a corner of Detroit with cottages dropped on top. Mirrors
  *  the same "worldVisibles" pattern SpaceLevelSystem uses for the orbital
  *  zone — both levels share the city + mountain + foliage + props bag.
- *  `foliage` is also passed in directly (not just hidden) so the sanctuary
- *  can densely scatter L-system plants of its own around the village. */
+ *  `earthFoliage` is also passed in directly (not just hidden) so the
+ *  sanctuary can scatter REAL trees/shrubs/ferns of its own around the
+ *  village — it reads as realistic Earth woodland, not the alien biome. */
 export interface SanctuaryHandles {
   city?: CityGenerator | null;
   worldVisibles?: Array<{ setVisible(visible: boolean): void } | null | undefined>;
   foliage?: AlienFoliageSystem | null;
+  /** Realistic terrestrial foliage system. The sanctuary is one of only
+   *  two zones (with Michigan Wilds) that reads as real Earth nature, so
+   *  it scatters oak/birch/willow/shrub/fern stands around the village
+   *  through this handle instead of the alien glow-foliage. */
+  earthFoliage?: EarthFoliageSystem | null;
   /** Live world bio-creature roster. Sanctuary spawns a small huntable
    *  population through it on mount (so the Capture Net actually has
    *  targets) and despawns those exact ids on warp-out. Captured creatures
@@ -146,7 +153,7 @@ export class SanctuarySystem {
     // and wandering bio-critters make it feel like a protected preserve.
     this.buildMichiganMeadowBackcountry();
     this.buildCave();
-    this.scatterAlienFoliage();
+    this.scatterEarthFoliage();
     this.buildWildlife();
     // Spawn a small huntable population of REAL bio-creatures through the
     // shared BioCreatureSystem so the Capture Net has live targets in
@@ -367,10 +374,13 @@ export class SanctuarySystem {
     ground.material = mat;
 
     const waterMat = new BABYLON.StandardMaterial("sanctuaryWetlandMat", this.scene);
-    waterMat.diffuseColor = new BABYLON.Color3(0.06, 0.30, 0.38);
-    waterMat.emissiveColor = new BABYLON.Color3(0.02, 0.10, 0.14);
-    waterMat.specularColor = new BABYLON.Color3(0.25, 0.42, 0.46);
-    waterMat.alpha = 0.38;
+    // Natural pond tone: a calmer blue-green with the emissive dialled down
+    // so the wetland reads as still water reflecting sky rather than an
+    // alien glow-pool (the sanctuary is realistic-nature, not neon biome).
+    waterMat.diffuseColor = new BABYLON.Color3(0.07, 0.26, 0.31);
+    waterMat.emissiveColor = new BABYLON.Color3(0.01, 0.05, 0.07);
+    waterMat.specularColor = new BABYLON.Color3(0.30, 0.46, 0.50);
+    waterMat.alpha = 0.40;
     waterMat.backFaceCulling = false;
     const ponds: Array<{ x: number; z: number; sx: number; sz: number; rot: number }> = [
       { x: c.x + 260, z: c.z + 210, sx: 1.55, sz: 0.82, rot: -0.28 },
@@ -1296,28 +1306,34 @@ export class SanctuarySystem {
 
   // ----------------------------------------------------- foliage scatter
 
-  /** Crank the L-system organic life up around the village by piggy-backing
-   *  on the world's AlienFoliageSystem. Plants are added in two clusters:
-   *  one tight ring just outside the perimeter so the village feels nestled
-   *  in jungle, and one looser scatter farther out so the eye reads density
-   *  without choking the playable area. The disposer this returns is what
-   *  the sanctuary uses on warp-out so we don't leave alien plants stranded
-   *  at (-480,-480) when the player is back in Detroit. */
-  private scatterAlienFoliage(): void {
-    const foliage = this.handles.foliage;
+  /** Dress the sanctuary in REALISTIC terrestrial woodland. The sanctuary
+   *  and Michigan Wilds are the only two zones meant to read as real Earth
+   *  nature, so we scatter oak/birch/willow/shrub/fern stands through the
+   *  EarthFoliageSystem rather than the alien glow-foliage every other
+   *  zone uses. Plants are added in two bands: a denser ring hugging the
+   *  village so it feels nestled in trees, and a looser outer scatter so
+   *  the eye reads depth without choking the playable area. The disposer
+   *  this returns is what the sanctuary uses on warp-out so we don't leave
+   *  trees stranded at (-480,-480) once the player is back in Detroit.
+   *
+   *  Plants are placed at y=0 (the sanctuary's playable area is near sea
+   *  level and largely flat around the village) — matching the prior
+   *  placement so the swap stays a pure visual change. */
+  private scatterEarthFoliage(): void {
+    const foliage = this.handles.earthFoliage;
     if (!foliage) return;
     const c = SanctuarySystem.CENTER;
 
-    // Inner band: dense alien thicket hugging the perimeter (40..80 m).
-    // Center the cluster slightly offset so it doesn't perfectly mirror the
-    // mountain ring behind it.
+    // Inner band: a fuller stand hugging the perimeter. Spacing is wider
+    // than the old alien thicket because earth trees scale larger, so a
+    // tighter spacing would read as an opaque wall around the village.
     const innerCenter = new BABYLON.Vector3(c.x, 0, c.z);
-    const innerDispose = foliage.scatterZone(innerCenter, 80, 70, 4.5, 0xA51C2A);
+    const innerDispose = foliage.scatterZone(innerCenter, 84, 54, 6.0, 0xA51C2A);
 
-    // Outer band: looser scatter filling the gap toward the mountains
-    // (75..120 m), thinned out so the silhouette of the peaks still reads.
+    // Outer band: looser scatter filling the gap toward the mountains so
+    // the silhouette of the peaks still reads behind the canopy.
     const outerCenter = new BABYLON.Vector3(c.x + 5, 0, c.z - 5);
-    const outerDispose = foliage.scatterZone(outerCenter, 110, 50, 7.0, 0xC0FFEE);
+    const outerDispose = foliage.scatterZone(outerCenter, 116, 44, 9.0, 0xEA5704);
 
     this.foliageDisposer = () => {
       try { innerDispose(); } catch {}

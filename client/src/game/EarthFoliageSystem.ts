@@ -305,6 +305,43 @@ export class EarthFoliageSystem {
     };
   }
 
+  /**
+   * Place earth plants at explicit world positions with a chosen preset.
+   * Used by terrain side-zones (e.g. Michigan Wilds) that need each plant's
+   * Y sampled from a heightmap and its species keyed to elevation/slope —
+   * logic the foliage system itself has no terrain knowledge for. The
+   * caller does the placement maths and hands us a ready list.
+   *
+   * Returns a disposer that removes ONLY the plants this call placed,
+   * mirroring scatterZone so a side-zone can wipe its forestation on
+   * warp-out without touching the world's regular wilderness scatter.
+   */
+  scatterPoints(
+    points: ReadonlyArray<{ x: number; z: number; y: number; preset: EarthLSystemPresetKey }>,
+    seed: number = 0xF0E57,
+  ): () => void {
+    const rng = EarthFoliageSystem.makeRng(seed);
+    const localPlants: Array<{ root: BABYLON.TransformNode; pos: BABYLON.Vector3 }> = [];
+    for (const pt of points) {
+      const before = this.plants.length;
+      this.spawnPlant(pt.preset, new BABYLON.Vector3(pt.x, pt.y, pt.z), rng);
+      const after = this.plants.length;
+      if (after > before) {
+        localPlants.push(this.plants[after - 1]);
+      }
+    }
+
+    return () => {
+      for (const p of localPlants) {
+        const idx = this.plants.indexOf(p);
+        if (idx !== -1) this.plants.splice(idx, 1);
+        FoliageOccupancy.unregister(p.pos.x, p.pos.z);
+        try { p.root.dispose(false, false); } catch {}
+      }
+      localPlants.length = 0;
+    };
+  }
+
   dispose(): void {
     if (this.observer) {
       this.scene.onBeforeRenderObservable.remove(this.observer);

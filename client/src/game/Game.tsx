@@ -1298,6 +1298,10 @@ export const Game: React.FC = () => {
                 // densely scatter L-system plants of its own around the
                 // village (and dispose only those plants on warp-out).
                 foliage: alienFoliageRef.current,
+                // Realistic terrestrial foliage: the sanctuary forests itself
+                // with real trees/shrubs/ferns through this (not alien glow-
+                // foliage) and disposes only those plants on warp-out.
+                earthFoliage: earthFoliageRef.current,
                 // Bio + weapons handles let the sanctuary spawn huntable
                 // creatures on mount and auto-equip the Capture Net so
                 // the right trigger captures right out of the gate.
@@ -1513,6 +1517,9 @@ export const Game: React.FC = () => {
                 enemy: enemySystem,
                 aerial: aerialEnemySystem,
                 enemyBase: enemyBaseSystem,
+                // Realistic terrestrial foliage: the wilds forests its green
+                // terrain tiers with real trees through this handle.
+                earthFoliage: earthFoliageRef.current,
               },
             );
           } else if (!isMichiganTerrain && michiganTerrainSystemRef.current) {
