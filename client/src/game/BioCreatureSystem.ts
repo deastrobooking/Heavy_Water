@@ -391,7 +391,7 @@ export class BioCreatureSystem {
         hp: typeof e.hp === "number" ? e.hp : fallback.hp,
         attackPower: typeof e.attackPower === "number" ? e.attackPower : fallback.attack,
         speed: typeof e.speed === "number" ? e.speed : fallback.speed,
-        bondLevel: typeof e.bondLevel === "number" ? Math.max(0, Math.min(10, Math.floor(e.bondLevel))) : 0,
+        bondLevel: typeof e.bondLevel === "number" ? Math.max(0, Math.min(20, Math.floor(e.bondLevel))) : 0,
         care: typeof e.care === "number" ? Math.max(0, Math.min(3, Math.floor(e.care))) : 0,
       };
       this.captured.push(cap);
@@ -427,7 +427,7 @@ export class BioCreatureSystem {
     this.inventory.removeItem(feedId, 1);
     const feedPower = feedId === "animaton_feed" ? 2 : 1;
     c.care = Math.min(3, (c.care ?? 0) + feedPower);
-    if (c.care >= 3 && c.bondLevel < 10) {
+    if (c.care >= 3 && c.bondLevel < 20) {
       c.care = 0;
       c.bondLevel += 1;
       c.level += 1;
@@ -475,9 +475,9 @@ export class BioCreatureSystem {
       }
     }
 
-    const damageMul = 1 + Math.min(0.25, damage);
-    const fireRateMul = 1 + Math.min(0.18, fireRate);
-    const damageReduction = Math.min(0.15, reduction);
+    const damageMul = 1 + Math.min(0.40, damage);
+    const fireRateMul = 1 + Math.min(0.28, fireRate);
+    const damageReduction = Math.min(0.24, reduction);
     const summary = `Pet Bonds: +${Math.round((damageMul - 1) * 100)}% DMG, +${Math.round((fireRateMul - 1) * 100)}% FIRE, -${Math.round(damageReduction * 100)}% DMG TAKEN`;
     return { damageMul, fireRateMul, damageReduction, summary };
   }

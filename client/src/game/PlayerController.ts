@@ -1820,7 +1820,7 @@ export class PlayerController implements IDamageable {
   setPetBondBoosts(boosts: { damageMul: number; fireRateMul: number; damageReduction: number }): void {
     this.petBondBoosts.damageMul = Math.max(1, boosts.damageMul || 1);
     this.petBondBoosts.fireRateMul = Math.max(1, boosts.fireRateMul || 1);
-    this.petBondBoosts.damageReduction = Math.max(0, Math.min(0.15, boosts.damageReduction || 0));
+    this.petBondBoosts.damageReduction = Math.max(0, Math.min(0.24, boosts.damageReduction || 0));
   }
 
   /** Push modular armor socket bonuses from ArmorSystem.getModuleBonuses(). */

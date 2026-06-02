@@ -68,7 +68,7 @@ export class ActivePetSystem {
         creatureId: a.creatureId,
         speciesId: creature.speciesId,
         name: creature.name,
-        level: Math.max(1, Math.min(50, a.level)),
+        level: Math.max(1, Math.min(100, a.level)),
         elementalType: sp.elementalType,
       };
       this.entries.push(entry);
@@ -87,11 +87,14 @@ export class ActivePetSystem {
 
   /** Recompute augment bonuses from the active roster.
    *  Each pet's elemental type determines which stat it boosts;
-   *  magnitude scales with pet level (1-50). */
+   *  magnitude scales with pet level (1-100). */
   getAugmentBonuses(): PetAugmentBonuses {
     let dmg = 0, fr = 0, spd = 0, sRegen = 0, hRegen = 0, crit = 0;
     for (const e of this.entries) {
-      const power = 0.003 * e.level; // 0.3% per level → 15% at L50
+      // 0.4% per level. Each elemental family now feeds a DISTINCT augment
+      // axis (previously speed / health-regen / crit were never populated),
+      // so a varied active roster covers more of the player's kit.
+      const power = 0.004 * e.level;
       switch (e.elementalType) {
         case "flame":
         case "dragon":
@@ -100,26 +103,32 @@ export class ActivePetSystem {
           break;
         case "electric":
         case "psychic":
-        case "crystal":
           fr += power * 0.8;
           break;
-        case "water":
-        case "grass":
+        case "crystal":
+          crit += power * 0.5;
+          break;
         case "ice":
+        case "water":
+          sRegen += power * 0.6;
+          break;
+        case "grass":
+          hRegen += power * 0.5;
+          break;
         case "steel":
         case "normal":
         default:
-          sRegen += power * 0.6;
+          spd += power * 0.5;
           break;
       }
     }
-    const damageMul = 1 + Math.min(0.20, dmg);
-    const fireRateMul = 1 + Math.min(0.15, fr);
-    const speedMul = 1 + Math.min(0.10, spd);
-    const shieldRegen = Math.min(4.0, sRegen);
-    const healthRegen = Math.min(3.0, hRegen);
-    const critChance = Math.min(0.10, crit);
-    const summary = `Pet Augments: +${Math.round((damageMul - 1) * 100)}% DMG, +${Math.round((fireRateMul - 1) * 100)}% FIRE, +${Math.round(shieldRegen * 10) / 10} shield/s`;
+    const damageMul = 1 + Math.min(0.30, dmg);
+    const fireRateMul = 1 + Math.min(0.22, fr);
+    const speedMul = 1 + Math.min(0.15, spd);
+    const shieldRegen = Math.min(6.0, sRegen);
+    const healthRegen = Math.min(5.0, hRegen);
+    const critChance = Math.min(0.15, crit);
+    const summary = `Pet Augments: +${Math.round((damageMul - 1) * 100)}% DMG, +${Math.round((fireRateMul - 1) * 100)}% FIRE, +${Math.round((speedMul - 1) * 100)}% SPD, +${Math.round(critChance * 100)}% CRIT, +${Math.round(shieldRegen * 10) / 10} shield/s, +${Math.round(healthRegen * 10) / 10} hp/s`;
     return { damageMul, fireRateMul, speedMul, shieldRegen, healthRegen, critChance, summary };
   }
 

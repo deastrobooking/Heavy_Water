@@ -37,8 +37,8 @@ interface ActiveCompanion {
   baseHeal: number;
   baseMoveSpeed: number;
   baseMaxHealth: number;
-  // Helper-bot weapon level — separate from base level. Each tier 0→3 doubles
-  // the projectile damage scale, halves the cooldown, and increases the
+  // Helper-bot weapon level — separate from base level. Each tier 0→6 raises
+  // the projectile damage scale, cuts the cooldown, and increases the
   // projectile speed/size visual.
   weaponLevel: number;
   baseAttackCooldown: number;
@@ -381,7 +381,7 @@ export class CompanionSystem {
   getUpgradeInfo(id: string, getGearCount: () => number, getCoreCount: () => number): CompanionUpgradeInfo | null {
     const c = this.companions.find(x => x.id === id);
     if (!c) return null;
-    const maxLvl = 5;
+    const maxLvl = 10;
     const tier = c.level;
     const cost = { gears: 8 * tier, energyCores: tier };
     const isMax = c.level >= maxLvl;
@@ -423,7 +423,7 @@ export class CompanionSystem {
   upgradeCompanion(id: string, spend: (gears: number, cores: number) => boolean): boolean {
     const c = this.companions.find(x => x.id === id);
     if (!c) return false;
-    if (c.level >= 5) return false;
+    if (c.level >= 10) return false;
     const cost = { gears: 8 * c.level, energyCores: c.level };
     if (!spend(cost.gears, cost.energyCores)) return false;
     c.level += 1;
@@ -463,7 +463,7 @@ export class CompanionSystem {
   ): { id: string; name: string; weaponLevel: number; maxLevel: number; cost: { gears: number; cores: number } | null; affordable: boolean } | null {
     const c = this.companions.find(x => x.id === id);
     if (!c) return null;
-    const maxLvl = 3;
+    const maxLvl = 6;
     const isMax = c.weaponLevel >= maxLvl;
     const tier = c.weaponLevel + 1;
     const cost = { gears: 25 * tier, cores: 4 * tier };
@@ -482,7 +482,7 @@ export class CompanionSystem {
   upgradeCompanionWeapon(id: string, spend: (gears: number, cores: number) => boolean): boolean {
     const c = this.companions.find(x => x.id === id);
     if (!c) return false;
-    if (c.weaponLevel >= 3) return false;
+    if (c.weaponLevel >= 6) return false;
     const tier = c.weaponLevel + 1;
     const cost = { gears: 25 * tier, cores: 4 * tier };
     if (!spend(cost.gears, cost.cores)) return false;
@@ -536,7 +536,7 @@ export class CompanionSystem {
       const c = this.companions[this.companions.length - 1];
       // Replay the level investment so behavior stats line up with the saved
       // tier (mirrors upgradeCompanion's per-tier scaling).
-      const targetLevel = Math.max(1, Math.min(5, entry.level || 1));
+      const targetLevel = Math.max(1, Math.min(10, entry.level || 1));
       while (c.level < targetLevel) {
         c.level += 1;
         const tier = c.level - 1;
@@ -549,7 +549,7 @@ export class CompanionSystem {
       }
       // weaponLevel scales attack cooldown / damage at fire-time (no stored
       // derived stats), so we just clamp + assign.
-      c.weaponLevel = Math.max(0, Math.min(3, entry.weaponLevel || 0));
+      c.weaponLevel = Math.max(0, Math.min(6, entry.weaponLevel || 0));
     }
   }
 
