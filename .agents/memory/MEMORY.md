@@ -2,4 +2,5 @@
 - [WebGL context exhaustion](webgl-context-exhaustion.md) — "WebGL not supported" = leaked/exhausted contexts, not a dead GPU; dispose engines on failure + auto-reload once.
 - [Side-zone neon bloom](sidezone-glow-bloom.md) — L9/L10/L11 each own a GlowLayer restricted to decor; dispose explicitly; coexists with sabre-only sabreGlow.
 - [Pet & robot upgrade caps](pet-robot-upgrade-caps.md) — raising any pet/robot cap needs the live guard AND the load-time clamp moved together; UI is data-driven.
+- [Captain tint compounding](captain-tint-compounding.md) — captain armor must reuse the 4 shared humanoid materials; the boss-variant tint loop multiplies per-mesh, so it compounds/over-saturates by design — don't dedupe without visual evidence.
 - [Player mecha armor source](player-mecha-armor.md) — player's Mega Man look = modular mm_ parts (hasArmor:false skips captain kit); edit those for player-only changes; helmet accents must clear the opaque dome.

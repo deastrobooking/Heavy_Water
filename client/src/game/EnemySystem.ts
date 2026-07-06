@@ -1459,10 +1459,14 @@ export class EnemySystem {
       // record type so a future EnemyType addition fails to compile if it
       // forgets a preset.
       tank: ["TankTitan"],
-      // Titan reuses the TankTitan robot preset but is upscaled + tougher
-      // when the EnemyUnit constructor runs (config + per-spawn scale).
-      titan: ["TankTitan", "TitanWarrior", "TitanBerserker", "TitanChampion"],
-      wilds_titan: ["TitanWarrior", "TitanBerserker", "TitanChampion", "TankTitan"],
+      // Titans now use dedicated Mega Man–style mecha presets (sphere
+      // helmet + round eye visor + arm-buster) instead of the Transformer
+      // Titan* presets. Bulk/scale is identical so stats + hitboxes are
+      // unchanged; the per-spawn `root.scaling` upscale below still applies.
+      // NOTE: the `heavy` pool intentionally keeps the old Titan* presets so
+      // only Titans (not heavies) get the mecha restyle.
+      titan: ["MegaTitanWarrior", "MegaTitanBerserker", "MegaTitanChampion", "MegaTankTitan"],
+      wilds_titan: ["MegaTitanWarrior", "MegaTitanBerserker", "MegaTitanChampion", "MegaTankTitan"],
       wilds_transformer: ["OptimusForge", "TitanChampion", "GuardianUnit", "ScoutPrime", "ScoutCompanion", "SparkPup", "NeonCat"],
       // Spider tank is parametric; this entry is just a fallback so the
       // exhaustive Record type compiles. createEnemyMesh short-circuits

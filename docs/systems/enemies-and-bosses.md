@@ -47,6 +47,26 @@ Listeners include:
 - Side-zone systems — boss-defeat detection (see `SwarmsLairSystem`).
 - `ProgressSync` — increments `totalKills`.
 
+## Mega Man mecha restyle (Titans & Captains)
+
+Heavy elites read as sleek cel-shaded hero-robot mecha:
+
+- **Titans** (`titan` / `wilds_titan`) build from dedicated
+  `MegaTitan*` / `MegaTankTitan` presets in `RobotPresets.ts` — sphere
+  helmet head, a single **round eye-lens visor**, an **arm-buster cannon**,
+  rounded pauldrons / boots / gauntlets, clean panel lines, and **no**
+  devil horns / transformer vents / wheels / wedges. Their bulk
+  (torso/limb proportions + `scale`) matches the old Titan* presets, and
+  the per-spawn `root.scaling` upscale (1.6 / 2.35) is unchanged — so
+  stats, hitboxes, scale, and AI are identical; only the silhouette +
+  palette differ. Titans are **not** boss-variant tinted, so each preset's
+  bold robot-master palette is final. The `heavy` pool intentionally keeps
+  the old Titan* presets, so only Titans (not heavies) get the restyle.
+- **Captains** keep the humanoid rig but their armor kit is a Mega Man
+  mecha — see [`character-and-armor.md`](character-and-armor.md#captain-look--mega-man-style-mecha).
+  Boss-variant tinting still applies because the kit reuses the shared
+  humanoid materials.
+
 ## Boss Fortresses
 
 `EnemyBaseSystem` builds a defensive base with turrets around each

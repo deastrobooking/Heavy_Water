@@ -321,112 +321,345 @@ export class HumanoidCharacter {
     rightBoot.parent = this.rightLegPivot;
 
     if (armorType === "captain") {
+      // ── Mega Man–style captain mecha ──────────────────────────────
+      // Rebuilds the captain silhouette as a cel-shaded hero-robot:
+      // helmet dome + faceplate + glowing eye visor + forehead power gem,
+      // tapered chest with a reactor core + ab line, rounded pauldrons,
+      // a right-arm buster cannon, and plated legs with glowing knees.
+      // Every piece reuses the four shared humanoid materials (primary /
+      // secondary / skin / glow) so the EnemySystem boss-variant tint loop
+      // (which recolors each child mesh's StandardMaterial) still themes
+      // captains inferno/plague/frost/storm/void. The player is unaffected
+      // because it builds from the modular mm_* armor set (hasArmor:false).
+      const hs = this.definition.headScale;
+      const sw = this.definition.shoulderWidth;
+      const al = this.definition.armLength;
+
+      // ── Torso: tapered chest plate + flaring pecs + reactor + ab line ──
       const chestPlate = BABYLON.MeshBuilder.CreateBox("captainChestPlate", {
-        width: this.definition.shoulderWidth * 0.58,
-        height: torsoHeight * 0.78,
-        depth: 0.42,
+        width: sw * 0.58,
+        height: torsoHeight * 0.82,
+        depth: 0.44,
       }, scene);
-      chestPlate.position.set(0, chestY + torsoHeight * 0.05, torsoRadius + 0.05);
+      chestPlate.position.set(0, chestY + torsoHeight * 0.04, torsoRadius + 0.04);
       chestPlate.material = matArmor;
       chestPlate.parent = this.visualRoot;
 
-      const sternum = BABYLON.MeshBuilder.CreateBox("captainSternumGuard", {
-        width: this.definition.shoulderWidth * 0.16,
-        height: torsoHeight * 0.92,
-        depth: 0.12,
+      for (const side of [-1, 1]) {
+        const pec = BABYLON.MeshBuilder.CreateBox(`captainPec_${side}`, {
+          width: sw * 0.24,
+          height: torsoHeight * 0.34,
+          depth: 0.32,
+        }, scene);
+        pec.position.set(side * sw * 0.20, chestY + torsoHeight * 0.24, torsoRadius + 0.02);
+        pec.rotation.z = side * 0.28;
+        pec.material = matArmor;
+        pec.parent = this.visualRoot;
+      }
+
+      const coreRing = BABYLON.MeshBuilder.CreateTorus("captainCoreRing", {
+        diameter: sw * 0.30,
+        thickness: 0.05,
+        tessellation: 18,
       }, scene);
-      sternum.position.set(0, chestY, torsoRadius + 0.30);
-      sternum.material = matPrimary;
-      sternum.parent = this.visualRoot;
+      coreRing.rotation.x = Math.PI / 2;
+      coreRing.position.set(0, chestY + torsoHeight * 0.10, torsoRadius + 0.26);
+      coreRing.material = matPrimary;
+      coreRing.parent = this.visualRoot;
 
       const core = BABYLON.MeshBuilder.CreateCylinder("captainCore", {
-        height: 0.08,
-        diameter: this.definition.shoulderWidth * 0.16,
-        tessellation: 14,
+        height: 0.12,
+        diameter: sw * 0.20,
+        tessellation: 16,
       }, scene);
       core.rotation.x = Math.PI / 2;
-      core.position.set(0, chestY + torsoHeight * 0.12, torsoRadius + 0.39);
+      core.position.set(0, chestY + torsoHeight * 0.10, torsoRadius + 0.30);
       core.material = matGlow;
       core.parent = this.visualRoot;
 
-      const visor = BABYLON.MeshBuilder.CreateBox("captainFaceVisor", {
-        width: this.definition.headScale * 0.72,
-        height: this.definition.headScale * 0.14,
+      const abLine = BABYLON.MeshBuilder.CreateBox("captainAbLine", {
+        width: sw * 0.30,
+        height: 0.06,
         depth: 0.06,
       }, scene);
-      visor.position.set(0, this.definition.headScale * 0.02, this.definition.headScale * 0.46);
+      abLine.position.set(0, chestY - torsoHeight * 0.24, torsoRadius + 0.16);
+      abLine.material = matGlow;
+      abLine.parent = this.visualRoot;
+
+      const collar = BABYLON.MeshBuilder.CreateBox("captainCollarGuard", {
+        width: sw * 0.42,
+        height: 0.22,
+        depth: 0.38,
+      }, scene);
+      collar.position.set(0, neckY - 0.10, torsoRadius * 0.20);
+      collar.material = matArmor;
+      collar.parent = this.visualRoot;
+
+      // ── Pelvis: centre crotch plate + hip guards + glowing belt ──
+      const crotch = BABYLON.MeshBuilder.CreateBox("captainCrotchPlate", {
+        width: sw * 0.20,
+        height: torsoHeight * 0.30,
+        depth: 0.30,
+      }, scene);
+      crotch.position.set(0, pelvisY - torsoRadius * 0.55, torsoRadius * 0.30);
+      crotch.material = matPrimary;
+      crotch.parent = this.visualRoot;
+
+      for (const side of [-1, 1]) {
+        const hipGuard = BABYLON.MeshBuilder.CreateBox(`captainHipGuard_${side}`, {
+          width: sw * 0.20,
+          height: torsoHeight * 0.34,
+          depth: 0.34,
+        }, scene);
+        hipGuard.position.set(side * sw * 0.24, pelvisY - torsoRadius * 0.42, torsoRadius * 0.20);
+        hipGuard.rotation.z = side * 0.12;
+        hipGuard.material = matArmor;
+        hipGuard.parent = this.visualRoot;
+      }
+
+      const belt = BABYLON.MeshBuilder.CreateBox("captainWarBelt", {
+        width: sw * 0.44,
+        height: 0.16,
+        depth: 0.40,
+      }, scene);
+      belt.position.set(0, pelvisY - torsoRadius * 0.28, torsoRadius * 0.36);
+      belt.material = matGlow;
+      belt.parent = this.visualRoot;
+
+      // ── Back thrusters (jet vents) ──
+      for (const side of [-1, 1]) {
+        const thruster = BABYLON.MeshBuilder.CreateCylinder(`captainThruster_${side}`, {
+          height: torsoHeight * 0.6,
+          diameterTop: 0.16,
+          diameterBottom: 0.24,
+          tessellation: 10,
+        }, scene);
+        thruster.position.set(side * sw * 0.20, chestY - torsoHeight * 0.05, -torsoRadius - 0.16);
+        thruster.rotation.x = 0.18;
+        thruster.material = matArmor;
+        thruster.parent = this.visualRoot;
+
+        const thrusterGlow = BABYLON.MeshBuilder.CreateDisc(`captainThrusterGlow_${side}`, {
+          radius: 0.10,
+          tessellation: 12,
+        }, scene);
+        thrusterGlow.position.set(side * sw * 0.20, chestY - torsoHeight * 0.34, -torsoRadius - 0.20);
+        thrusterGlow.rotation.x = Math.PI / 2 + 0.18;
+        thrusterGlow.material = matGlow;
+        thrusterGlow.parent = this.visualRoot;
+      }
+
+      // ── Helmet: dome + faceplate + eye visor + forehead gem + crest + ear pods ──
+      const helmet = BABYLON.MeshBuilder.CreateSphere("captainHelmet", {
+        diameterX: hs * 1.10,
+        diameterY: hs * 1.02,
+        diameterZ: hs * 1.10,
+        segments: 16,
+      }, scene);
+      helmet.position.set(0, hs * 0.10, -hs * 0.04);
+      helmet.material = matArmor;
+      helmet.parent = this.headMesh;
+
+      const facePlate = BABYLON.MeshBuilder.CreateBox("captainFacePlate", {
+        width: hs * 0.62,
+        height: hs * 0.44,
+        depth: hs * 0.30,
+      }, scene);
+      facePlate.position.set(0, -hs * 0.16, hs * 0.42);
+      facePlate.material = matPrimary;
+      facePlate.parent = this.headMesh;
+
+      const visor = BABYLON.MeshBuilder.CreateBox("captainFaceVisor", {
+        width: hs * 0.66,
+        height: hs * 0.16,
+        depth: 0.08,
+      }, scene);
+      visor.position.set(0, hs * 0.06, hs * 0.50);
       visor.material = matGlow;
       visor.parent = this.headMesh;
 
-      const crest = BABYLON.MeshBuilder.CreateBox("captainHeadCrest", {
-        width: this.definition.headScale * 0.24,
-        height: this.definition.headScale * 0.52,
-        depth: this.definition.headScale * 0.12,
+      const gemBezel = BABYLON.MeshBuilder.CreateCylinder("captainGemBezel", {
+        height: 0.06,
+        diameter: hs * 0.26,
+        tessellation: 6,
       }, scene);
-      crest.position.set(0, this.definition.headScale * 0.48, -this.definition.headScale * 0.08);
-      crest.rotation.x = -0.18;
+      gemBezel.rotation.x = Math.PI / 2;
+      gemBezel.position.set(0, hs * 0.30, hs * 0.46);
+      gemBezel.material = matPrimary;
+      gemBezel.parent = this.headMesh;
+
+      const gem = BABYLON.MeshBuilder.CreateCylinder("captainForeheadGem", {
+        height: 0.08,
+        diameter: hs * 0.18,
+        tessellation: 6,
+      }, scene);
+      gem.rotation.x = Math.PI / 2;
+      gem.position.set(0, hs * 0.30, hs * 0.50);
+      gem.material = matGlow;
+      gem.parent = this.headMesh;
+
+      const crest = BABYLON.MeshBuilder.CreateBox("captainHeadCrest", {
+        width: hs * 0.16,
+        height: hs * 0.46,
+        depth: hs * 0.60,
+      }, scene);
+      crest.position.set(0, hs * 0.46, -hs * 0.10);
+      crest.rotation.x = 0.12;
       crest.material = matArmor;
       crest.parent = this.headMesh;
 
       for (const side of [-1, 1]) {
-        const shoulder = BABYLON.MeshBuilder.CreateBox(
-          side < 0 ? "captainLeftShoulderSlab" : "captainRightShoulderSlab",
-          { width: 0.78, height: 0.28, depth: 0.55 },
+        const ear = BABYLON.MeshBuilder.CreateCylinder(`captainEarPod_${side}`, {
+          height: 0.16,
+          diameter: hs * 0.30,
+          tessellation: 12,
+        }, scene);
+        ear.rotation.z = Math.PI / 2;
+        ear.position.set(side * hs * 0.52, hs * 0.02, 0);
+        ear.material = matArmor;
+        ear.parent = this.headMesh;
+
+        const earGlow = BABYLON.MeshBuilder.CreateCylinder(`captainEarGlow_${side}`, {
+          height: 0.04,
+          diameter: hs * 0.14,
+          tessellation: 12,
+        }, scene);
+        earGlow.rotation.z = Math.PI / 2;
+        earGlow.position.set(side * hs * 0.60, hs * 0.02, 0);
+        earGlow.material = matGlow;
+        earGlow.parent = this.headMesh;
+      }
+
+      // ── Shoulders + arms: rounded pauldrons, plated forearms, glowing joints ──
+      for (const side of [-1, 1]) {
+        const pivot = side < 0 ? this.leftArmPivot : this.rightArmPivot;
+
+        const pauldron = BABYLON.MeshBuilder.CreateSphere(
+          side < 0 ? "captainLeftPauldron" : "captainRightPauldron",
+          { diameterX: 0.9, diameterY: 0.7, diameterZ: 0.85, segments: 12 },
           scene,
         );
-        shoulder.position.set(side * 0.10, 0.08, 0);
-        shoulder.rotation.z = side * 0.16;
-        shoulder.material = matArmor;
-        shoulder.parent = side < 0 ? this.leftArmPivot : this.rightArmPivot;
+        pauldron.position.set(side * 0.08, 0.10, 0);
+        pauldron.material = matArmor;
+        pauldron.parent = pivot;
+
+        const pauldronGlow = BABYLON.MeshBuilder.CreateTorus(
+          side < 0 ? "captainLeftPauldronGlow" : "captainRightPauldronGlow",
+          { diameter: 0.5, thickness: 0.06, tessellation: 14 },
+          scene,
+        );
+        pauldronGlow.position.set(side * 0.08, 0.10, 0);
+        pauldronGlow.rotation.x = Math.PI / 2;
+        pauldronGlow.material = matGlow;
+        pauldronGlow.parent = pivot;
+
+        const upperPlate = BABYLON.MeshBuilder.CreateBox(
+          side < 0 ? "captainLeftUpperPlate" : "captainRightUpperPlate",
+          { width: 0.34, height: al * 0.34, depth: 0.34 },
+          scene,
+        );
+        upperPlate.position.set(0, -al * 0.28, 0.02);
+        upperPlate.material = matPrimary;
+        upperPlate.parent = pivot;
 
         const forearm = BABYLON.MeshBuilder.CreateBox(
           side < 0 ? "captainLeftForearmGuard" : "captainRightForearmGuard",
-          { width: 0.34, height: 0.42, depth: 0.44 },
+          { width: 0.38, height: al * 0.30, depth: 0.42 },
           scene,
         );
-        forearm.position.set(0, -this.definition.armLength * 0.66, 0.07);
-        forearm.material = matPrimary;
-        forearm.parent = side < 0 ? this.leftArmPivot : this.rightArmPivot;
+        forearm.position.set(0, -al * 0.70, 0.06);
+        forearm.material = matArmor;
+        forearm.parent = pivot;
+
+        const elbow = BABYLON.MeshBuilder.CreateSphere(
+          side < 0 ? "captainLeftElbow" : "captainRightElbow",
+          { diameter: 0.20, segments: 8 },
+          scene,
+        );
+        elbow.position.set(0, -al * 0.50, 0.06);
+        elbow.material = matGlow;
+        elbow.parent = pivot;
+      }
+
+      // Right arm buster cannon (iconic) — a barrel replacing the hand,
+      // aligned down the arm axis (-y) with a glowing muzzle facing down,
+      // so it sits at the wrist below the forearm gauntlet without clipping
+      // back through the arm. Left arm keeps a fist.
+      const buster = BABYLON.MeshBuilder.CreateCylinder("captainBusterHousing", {
+        height: al * 0.34,
+        diameterTop: 0.42,
+        diameterBottom: 0.52,
+        tessellation: 16,
+      }, scene);
+      buster.position.set(0, -al * 0.92, 0.06);
+      buster.material = matArmor;
+      buster.parent = this.rightArmPivot;
+
+      const busterMuzzle = BABYLON.MeshBuilder.CreateTorus("captainBusterMuzzle", {
+        diameter: 0.52,
+        thickness: 0.08,
+        tessellation: 16,
+      }, scene);
+      busterMuzzle.position.set(0, -al * 1.09, 0.06);
+      busterMuzzle.material = matArmor;
+      busterMuzzle.parent = this.rightArmPivot;
+
+      const busterCore = BABYLON.MeshBuilder.CreateDisc("captainBusterCore", {
+        radius: 0.22,
+        tessellation: 16,
+      }, scene);
+      busterCore.rotation.x = Math.PI / 2;
+      busterCore.position.set(0, -al * 1.10, 0.06);
+      busterCore.material = matGlow;
+      busterCore.parent = this.rightArmPivot;
+
+      const leftFist = BABYLON.MeshBuilder.CreateSphere("captainLeftFist", {
+        diameterX: 0.42, diameterY: 0.40, diameterZ: 0.46, segments: 10,
+      }, scene);
+      leftFist.position.set(0, -al * 0.96, 0.06);
+      leftFist.material = matPrimary;
+      leftFist.parent = this.leftArmPivot;
+
+      // ── Legs: knee guards + glowing knees + shin plates + vents ──
+      for (const side of [-1, 1]) {
+        const pivot = side < 0 ? this.leftLegPivot : this.rightLegPivot;
 
         const knee = BABYLON.MeshBuilder.CreateBox(
           side < 0 ? "captainLeftKneeGuard" : "captainRightKneeGuard",
-          { width: 0.34, height: 0.22, depth: 0.36 },
+          { width: 0.40, height: 0.30, depth: 0.40 },
           scene,
         );
-        knee.position.set(0, -thighLen, 0.13);
-        knee.material = matPrimary;
-        knee.parent = side < 0 ? this.leftLegPivot : this.rightLegPivot;
+        knee.position.set(0, -thighLen, 0.12);
+        knee.material = matArmor;
+        knee.parent = pivot;
+
+        const kneeGlow = BABYLON.MeshBuilder.CreateSphere(
+          side < 0 ? "captainLeftKneeGlow" : "captainRightKneeGlow",
+          { diameter: 0.16, segments: 8 },
+          scene,
+        );
+        kneeGlow.position.set(0, -thighLen, 0.30);
+        kneeGlow.material = matGlow;
+        kneeGlow.parent = pivot;
+
+        const shinPlate = BABYLON.MeshBuilder.CreateBox(
+          side < 0 ? "captainLeftShinPlate" : "captainRightShinPlate",
+          { width: 0.40, height: shinLen * 0.7, depth: 0.16 },
+          scene,
+        );
+        shinPlate.position.set(0, -thighLen - shinLen * 0.5, 0.22);
+        shinPlate.material = matPrimary;
+        shinPlate.parent = pivot;
+
+        const shinVent = BABYLON.MeshBuilder.CreateBox(
+          side < 0 ? "captainLeftShinVent" : "captainRightShinVent",
+          { width: 0.24, height: 0.06, depth: 0.06 },
+          scene,
+        );
+        shinVent.position.set(0, -thighLen - shinLen * 0.35, 0.30);
+        shinVent.material = matGlow;
+        shinVent.parent = pivot;
       }
-
-      for (const side of [-1, 1]) {
-        const backFin = BABYLON.MeshBuilder.CreateBox(`captainBackFin_${side}`, {
-          width: 0.20,
-          height: torsoHeight * 0.72,
-          depth: 0.16,
-        }, scene);
-        backFin.position.set(side * this.definition.shoulderWidth * 0.18, chestY, -torsoRadius - 0.18);
-        backFin.rotation.z = side * 0.22;
-        backFin.material = matArmor;
-        backFin.parent = this.visualRoot;
-      }
-
-      const belt = BABYLON.MeshBuilder.CreateBox("captainWarBelt", {
-        width: this.definition.shoulderWidth * 0.46,
-        height: 0.18,
-        depth: 0.42,
-      }, scene);
-      belt.position.set(0, pelvisY - torsoRadius * 0.38, torsoRadius * 0.42);
-      belt.material = matGlow;
-      belt.parent = this.visualRoot;
-
-      const collar = BABYLON.MeshBuilder.CreateBox("captainCollarGuard", {
-        width: this.definition.shoulderWidth * 0.42,
-        height: 0.20,
-        depth: 0.36,
-      }, scene);
-      collar.position.set(0, neckY - 0.10, torsoRadius * 0.25);
-      collar.material = matArmor;
-      collar.parent = this.visualRoot;
     }
   }
 

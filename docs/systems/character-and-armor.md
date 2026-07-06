@@ -90,6 +90,36 @@ changes the player without touching captains/NPCs. Every piece parents to
 an existing limb pivot, so the modular swap pipeline and all procedural
 animations keep working with no floating pieces.
 
+### Captain look — Mega Man–style mecha
+
+Captains (and commanders / General Voidcrown) share the humanoid rig with
+`hasArmor: true` + `armorType: "captain"`, so the `armorType === "captain"`
+branch of `HumanoidCharacter.buildArmor` builds their whole look. That
+branch is a cel-shaded hero-robot mecha:
+
+- **Helmet**: a dome shell over the head, a **faceplate** that covers the
+  lower face (so it reads robotic, not as a bare skin sphere), a glowing
+  **eye visor** band, an iconic **forehead power gem** + bezel, a central
+  crest fin, and side ear-pods with glow discs.
+- **Chest**: a tapered chest plate with flaring pecs, a neon **reactor
+  core** + ring, and a lit **ab energy line**; a neck collar above.
+- **Pelvis**: centre crotch plate + hip guards below a glowing belt, plus
+  two back **jet thrusters** with glowing exhausts.
+- **Shoulders/arms**: rounded pauldrons with a joint-glow ring, an
+  upper-arm plate, a plated forearm gauntlet, and glowing elbows. The
+  **right arm is a buster cannon** (housing + glowing muzzle ring); the
+  left ends in a fist.
+- **Legs**: knee guards with glowing knees, shin plates with neon vents,
+  over the shared thigh armor + boots.
+
+Every piece reuses the four shared humanoid materials (`primary`,
+`secondary`, `skin`, and the `hair`/glow material) — **no new materials** —
+so the `EnemySystem` boss-variant tint loop (which recolors each captain
+child mesh's `StandardMaterial` by the level's variant) keeps theming
+captains inferno / plague / frost / storm / void. The player is untouched
+because it builds from the modular `mm_*` armor set with `hasArmor: false`,
+so this branch never runs for the player.
+
 ### Swimming & water exit
 
 `PlayerController` drives water traversal (`updateWaterContact` /
