@@ -1,9 +1,10 @@
 # Heavy Water — Gameplay Guide
 
 Welcome to Heavy Water. You are a pilot defending far-future Detroit from the
-Insane Hybrid Organoids. This guide is your full pilot's reference: every
-control, every system, every combat tool. The same content is available
-in-game from the **GUIDE** button on the main menu.
+Insane Hybrid Organoids, piloting a Mega Man–style cel-shaded hero-robot you
+can fully customize from the main-menu Character Editor. This guide is your
+full pilot's reference: every control, every system, every combat tool. The
+same content is available in-game from the **GUIDE** button on the main menu.
 
 ---
 
@@ -30,6 +31,12 @@ button** — three quick `SPACE` taps (or three taps of the gamepad `A` button)
 while flying or hovering disengage flight and drop you back toward the ground.
 Holding `SPACE` still climbs as normal; only rapid discrete taps trigger the
 escape, so you won't fall out of the sky by accident.
+
+**Leave the water.** While swimming, hold `SPACE` to rise until you clear the
+surface, or **tap `SPACE` at the surface** to leap straight out — the tap gives
+a real upward launch plus a little forward momentum to clear the bank, and drops
+you into the normal jump/flight flow, so double-jump and Rocket Skates are
+available the instant you're airborne.
 
 ---
 

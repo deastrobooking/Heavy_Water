@@ -118,6 +118,23 @@ sometimes Animaton Feed, and the visible pet clinic marks the in-world
 hospital for rescued Animatons. Michigan Wilds is the rare-pet hunting
 loop, seeding rare/legendary species plus power blooms.
 
+### Active pet followers
+
+The top-3 captured creatures by level automatically become animated robot
+followers via
+[`ActivePetSystem.ts`](../../client/src/game/ActivePetSystem.ts)
+(`syncFromCaptured`) — there is no separate assignment UI. Followers reuse
+`CreatureMechaDesigner` with `follower: true`, so each looks identical to
+its wild form (just shrunk and articulated for per-frame animation).
+
+Beyond the passive `getPetBondBonuses()` that *every* captured creature
+contributes, the active trio drives three player-facing effects — stat
+augments (incl. defense), an imbued weapon element, and a robot armor-set
+combo. That augment/element/combo pipeline (and its single
+`refreshActivePets` refresh path) is documented in the **Active Pets &
+Robot Powers** section of [`replit.md`](../../replit.md); treat that as the
+source of truth so it isn't duplicated here.
+
 ### Adding a species or companion
 
 See [`how-to/add-a-companion-or-creature.md`](../how-to/add-a-companion-or-creature.md).

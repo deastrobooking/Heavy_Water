@@ -126,57 +126,57 @@ The game is orchestrated by `client/src/game/Game.tsx`, which creates and wires 
 
 ```mermaid
 flowchart TD
-	G[Game.tsx Orchestrator] --> BE[BabylonEngine]
-	G --> CG[CityGenerator]
-	G --> SK[SkySystem]
-	G --> PC[PlayerController]
-	G --> WS[WeaponsSystem]
-	G --> SW[SpecialWeaponsSystem]
-	G --> ES[ElementalSpecialsSystem]
-	G --> BS[BeamSabreSystem]
-	G --> EN[EnemySystem]
-	G --> AE[AerialEnemySystem]
-	G --> EB[EnemyBaseSystem]
-	G --> INV[InventorySystem]
-	G --> CR[CraftingSystem]
-	G --> CO[CompanionSystem]
-	G --> BLD[BuildingSystem]
-	G --> PF[PrefabSystem]
-	G --> VEH[VehicleSystem]
-	G --> MP[MultiplayerSystem]
-	G --> UI[GameUI / Menus]
+        G[Game.tsx Orchestrator] --> BE[BabylonEngine]
+        G --> CG[CityGenerator]
+        G --> SK[SkySystem]
+        G --> PC[PlayerController]
+        G --> WS[WeaponsSystem]
+        G --> SW[SpecialWeaponsSystem]
+        G --> ES[ElementalSpecialsSystem]
+        G --> BS[BeamSabreSystem]
+        G --> EN[EnemySystem]
+        G --> AE[AerialEnemySystem]
+        G --> EB[EnemyBaseSystem]
+        G --> INV[InventorySystem]
+        G --> CR[CraftingSystem]
+        G --> CO[CompanionSystem]
+        G --> BLD[BuildingSystem]
+        G --> PF[PrefabSystem]
+        G --> VEH[VehicleSystem]
+        G --> MP[MultiplayerSystem]
+        G --> UI[GameUI / Menus]
 
-	PC --> EV[EventBus]
-	EN --> EV
-	WS --> EV
-	CO --> EV
-	EV --> UI
+        PC --> EV[EventBus]
+        EN --> EV
+        WS --> EV
+        CO --> EV
+        EV --> UI
 
-	MP --> WSOCK[WebSocket /ws]
+        MP --> WSOCK[WebSocket /ws]
 ```
 
 ### Backend and Multiplayer Flow
 
 ```mermaid
 sequenceDiagram
-	participant C as Client
-	participant E as Express Server
-	participant P as Passport Session
-	participant DB as PostgreSQL
-	participant W as WebSocket Server
+        participant C as Client
+        participant E as Express Server
+        participant P as Passport Session
+        participant DB as PostgreSQL
+        participant W as WebSocket Server
 
-	C->>E: POST /api/auth/register or /api/auth/login
-	E->>P: authenticate + create session
-	P->>DB: store/read user_sessions
-	E->>DB: users/player_progress queries
-	E-->>C: authenticated user JSON
+        C->>E: POST /api/auth/register or /api/auth/login
+        E->>P: authenticate + create session
+        P->>DB: store/read user_sessions
+        E->>DB: users/player_progress queries
+        E-->>C: authenticated user JSON
 
-	C->>W: ws connect + auth message
-	W-->>C: auth_ok
-	C->>W: create_room / join_room
-	W-->>C: room_created / room_joined
-	C->>W: position_update / action / chat / enemy_damage
-	W-->>C: broadcast to room peers
+        C->>W: ws connect + auth message
+        W-->>C: auth_ok
+        C->>W: create_room / join_room
+        W-->>C: room_created / room_joined
+        C->>W: position_update / action / chat / enemy_damage
+        W-->>C: broadcast to room peers
 ```
 
 ## Repository Structure
@@ -212,10 +212,14 @@ The game code in `client/src/game` is broad and feature-rich. High-level grouped
 
 ### Player, Combat, and Movement
 
-- `PlayerController`: player movement, physics, stats, stamina/health/armor/shield model
+- `PlayerController`: player movement, physics, stats, stamina/health/armor/shield model, swimming with tap-to-jump-out-of-water exit
 - `CombatSystem`: combo handling and melee logic
 - `BeamSabreSystem`: dedicated sabre combat and special slash flows
 - `GamepadInput`: controller-to-key/mouse translation for parity with keyboard controls
+
+The player renders as a modular Mega Man–style cel-shaded hero-robot (the
+`mm_*` armor set); see
+[character-and-armor](docs/systems/character-and-armor.md).
 
 ### Weapons and Abilities
 
@@ -252,6 +256,8 @@ The game code in `client/src/game` is broad and feature-rich. High-level grouped
 
 - `CompanionSystem`: companion AI/behavior/upgrade stats
 - `BioCreatureSystem` + capture UI: capture/companion-style flows
+- `CreatureMechaDesigner`: single source of truth for creature looks (chibi chassis → archetype → element → rarity → face → evolution stage); wild and captured forms share it
+- `ActivePetSystem`: the top-3 captured creatures auto-become animated robot followers that augment player stats, weapon element, and armor combos
 - `RobotDesigner`, `RobotFactory`, `RobotPresets`, armor parts/systems: parametric robot generation
 
 ### UI and UX Layers
@@ -315,8 +321,8 @@ Request body:
 
 ```json
 {
-	"username": "pilot01",
-	"password": "secret123"
+        "username": "pilot01",
+        "password": "secret123"
 }
 ```
 
@@ -324,17 +330,17 @@ Success response (201):
 
 ```json
 {
-	"id": 1,
-	"username": "pilot01",
-	"displayName": null,
-	"level": 1,
-	"credits": 0,
-	"experience": 0,
-	"highestWave": 0,
-	"totalKills": 0,
-	"hasFlightArmor": false,
-	"lastLogin": null,
-	"createdAt": "2026-04-28T12:00:00.000Z"
+        "id": 1,
+        "username": "pilot01",
+        "displayName": null,
+        "level": 1,
+        "credits": 0,
+        "experience": 0,
+        "highestWave": 0,
+        "totalKills": 0,
+        "hasFlightArmor": false,
+        "lastLogin": null,
+        "createdAt": "2026-04-28T12:00:00.000Z"
 }
 ```
 
@@ -349,8 +355,8 @@ Request body:
 
 ```json
 {
-	"username": "pilot01",
-	"password": "secret123"
+        "username": "pilot01",
+        "password": "secret123"
 }
 ```
 
@@ -368,7 +374,7 @@ Success response (200):
 
 ```json
 {
-	"message": "Logged out"
+        "message": "Logged out"
 }
 ```
 
@@ -390,19 +396,19 @@ Success response (200): array of users (password omitted), sorted by highestWave
 
 ```json
 [
-	{
-		"id": 17,
-		"username": "ace",
-		"displayName": "Ace",
-		"level": 14,
-		"credits": 9200,
-		"experience": 18100,
-		"highestWave": 32,
-		"totalKills": 740,
-		"hasFlightArmor": true,
-		"lastLogin": "2026-04-27T19:20:00.000Z",
-		"createdAt": "2026-03-01T10:00:00.000Z"
-	}
+        {
+                "id": 17,
+                "username": "ace",
+                "displayName": "Ace",
+                "level": 14,
+                "credits": 9200,
+                "experience": 18100,
+                "highestWave": 32,
+                "totalKills": 740,
+                "hasFlightArmor": true,
+                "lastLogin": "2026-04-27T19:20:00.000Z",
+                "createdAt": "2026-03-01T10:00:00.000Z"
+        }
 ]
 ```
 
@@ -414,15 +420,15 @@ Request body:
 
 ```json
 {
-	"saveData": {
-		"wave": 8,
-		"inventory": [],
-		"weaponLevels": {},
-		"playerStats": {
-			"level": 5,
-			"credits": 1500
-		}
-	}
+        "saveData": {
+                "wave": 8,
+                "inventory": [],
+                "weaponLevels": {},
+                "playerStats": {
+                        "level": 5,
+                        "credits": 1500
+                }
+        }
 }
 ```
 
@@ -430,18 +436,18 @@ Success response (200):
 
 ```json
 {
-	"id": 3,
-	"userId": 1,
-	"saveData": {
-		"wave": 8,
-		"inventory": [],
-		"weaponLevels": {},
-		"playerStats": {
-			"level": 5,
-			"credits": 1500
-		}
-	},
-	"updatedAt": "2026-04-28T12:40:00.000Z"
+        "id": 3,
+        "userId": 1,
+        "saveData": {
+                "wave": 8,
+                "inventory": [],
+                "weaponLevels": {},
+                "playerStats": {
+                        "level": 5,
+                        "credits": 1500
+                }
+        },
+        "updatedAt": "2026-04-28T12:40:00.000Z"
 }
 ```
 
@@ -460,7 +466,7 @@ Success response (200):
 
 ```json
 {
-	"saveData": null
+        "saveData": null
 }
 ```
 
@@ -481,9 +487,9 @@ Example request:
 
 ```json
 {
-	"level": 7,
-	"credits": 2100,
-	"highestWave": 11
+        "level": 7,
+        "credits": 2100,
+        "highestWave": 11
 }
 ```
 
