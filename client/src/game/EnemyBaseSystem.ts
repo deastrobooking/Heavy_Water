@@ -466,6 +466,20 @@ export class EnemyBaseSystem {
     return out;
   }
 
+  /** Append live turret + vault hitboxes into `out` (allocation-free, for
+   *  the per-frame hit pipeline). Mirrors getActiveMeshes' liveness filter. */
+  appendActiveMeshes(out: BABYLON.Mesh[]): void {
+    const bases = this.bases;
+    for (let i = 0; i < bases.length; i++) {
+      const base = bases[i];
+      const turrets = base.turrets;
+      for (let j = 0; j < turrets.length; j++) {
+        if (turrets[j].isAlive) out.push(turrets[j].hitbox);
+      }
+      if (base.vault.alive) out.push(base.vault.hitbox);
+    }
+  }
+
   /** Position + alive-state of every base. The `alive` flag tracks the
    *  vault — once the vault is destroyed the base is essentially "cleared"
    *  and HUD overlays (mini-map icons, etc.) can dim or drop the marker. */

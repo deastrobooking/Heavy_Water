@@ -46,6 +46,19 @@ export class MultiplayerSystem {
   private chatMessages: { username: string; message: string; time: number }[] = [];
   private username = "";
 
+  // Last position_update actually sent to the server. Used to skip redundant
+  // broadcasts for an idle player: with a 50ms tick, a stationary player was
+  // spamming 20 identical packets/sec to every peer. We only send when the
+  // player has meaningfully moved/turned, a discrete field changed, or a
+  // low-rate heartbeat is due (so peers/the server never see us go silent).
+  private lastSent: {
+    x: number; y: number; z: number; ry: number;
+    state: string; health: number; weaponId: number; isFlying: boolean; time: number;
+  } | null = null;
+  private static readonly POS_THRESHOLD_SQ = 0.0025; // (0.05 m)^2
+  private static readonly ROT_Y_THRESHOLD = 0.01;    // radians (~0.57°)
+  private static readonly HEARTBEAT_MS = 1000;
+
   constructor(scene: BABYLON.Scene) {
     this.scene = scene;
   }
@@ -338,6 +351,8 @@ export class MultiplayerSystem {
 
   private startPositionSync(): void {
     this.stopPositionSync();
+    // Force the first tick of a fresh room to always send a full snapshot.
+    this.lastSent = null;
     this.sendInterval = setInterval(() => {
       this.emit("request_position", {});
     }, 50);
@@ -352,6 +367,31 @@ export class MultiplayerSystem {
 
   sendPositionUpdate(position: { x: number; y: number; z: number }, rotation: { x: number; y: number; z: number }, state: string, health: number, weaponId: number, isFlying: boolean): void {
     if (!this.connected || !this.roomCode) return;
+
+    const now = Date.now();
+    const last = this.lastSent;
+    if (last) {
+      const dx = position.x - last.x;
+      const dy = position.y - last.y;
+      const dz = position.z - last.z;
+      const movedSq = dx * dx + dy * dy + dz * dz;
+      const rotDelta = Math.abs(rotation.y - last.ry);
+      const fieldsChanged =
+        state !== last.state ||
+        health !== last.health ||
+        weaponId !== last.weaponId ||
+        isFlying !== last.isFlying;
+      const heartbeatDue = now - last.time >= MultiplayerSystem.HEARTBEAT_MS;
+      if (
+        movedSq <= MultiplayerSystem.POS_THRESHOLD_SQ &&
+        rotDelta <= MultiplayerSystem.ROT_Y_THRESHOLD &&
+        !fieldsChanged &&
+        !heartbeatDue
+      ) {
+        return;
+      }
+    }
+
     this.send({
       type: "position_update",
       position,
@@ -361,6 +401,10 @@ export class MultiplayerSystem {
       weaponId,
       isFlying,
     });
+    this.lastSent = {
+      x: position.x, y: position.y, z: position.z, ry: rotation.y,
+      state, health, weaponId, isFlying, time: now,
+    };
   }
 
   sendAction(action: string, data: any): void {
@@ -413,6 +457,7 @@ export class MultiplayerSystem {
     this.clearRemotePlayers();
     this.roomCode = null;
     this.isHost = false;
+    this.lastSent = null;
   }
 
   on(event: string, callback: MultiplayerCallback): void {
@@ -449,6 +494,16 @@ export class MultiplayerSystem {
       meshes.push(remote.mesh);
     });
     return meshes;
+  }
+
+  /** Append live remote-player meshes into `out` (allocation-free variant of
+   *  getRemoteHitMeshes for the per-frame Versus hit pipeline). */
+  appendRemoteHitMeshes(out: BABYLON.Mesh[]): void {
+    this.remotePlayers.forEach((remote) => {
+      if (remote.health <= 0) return;
+      if (remote.mesh.isDisposed() || !remote.mesh.isEnabled()) return;
+      out.push(remote.mesh);
+    });
   }
 
   disconnect(): void {

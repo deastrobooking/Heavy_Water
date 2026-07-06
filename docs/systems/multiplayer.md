@@ -23,6 +23,17 @@ for the formatted message catalog. Categories:
 - **Real-time sync**: `position_update`, `action`, `enemy_damage`.
 - **Out-of-band**: `chat`, `ping`.
 
+`position_update` is polled on a 50 ms `request_position` tick but
+**change-gated** in `MultiplayerSystem.sendPositionUpdate`: a packet is
+only sent when the player moved past a small threshold (~0.05 m),
+turned (~0.01 rad on Y), a discrete field changed (`state` / `health` /
+`weaponId` / `isFlying`), or a ~1 s heartbeat is due. An idle player
+therefore emits ~1 packet/s instead of 20, while any real movement or a
+health change still sends immediately on the next tick. The heartbeat
+sits well inside the server's 60 s stale-kick, and the snapshot is reset
+(`lastSent = null`) on room join/cleanup so a fresh room always sends a
+full first frame.
+
 The server tracks each authenticated socket by an internal `playerId`
 and routes broadcasts using the player's current `roomCode`. Most
 inbound client messages are echoed back out as `player_*` events

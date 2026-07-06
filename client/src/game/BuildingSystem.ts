@@ -267,6 +267,13 @@ export class BuildingSystem {
   private minedChunks: MinedChunk[] = [];
   private blockIdCounter: number = 0;
 
+  // Distance-culling hooks (wired to LODCullSystem). Dense player builds
+  // otherwise grow draw cost without bound; registering each block lets the
+  // cull system setEnabled(false) on blocks far from the player.
+  private cullRegister: ((node: BABYLON.TransformNode, radius: number) => void) | null = null;
+  private cullUnregister: ((node: BABYLON.TransformNode) => void) | null = null;
+  private static readonly CULL_RADIUS = 200;
+
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
   private clickHandler: ((e: PointerEvent) => void) | null = null;
 
@@ -278,6 +285,15 @@ export class BuildingSystem {
 
     this.setupControls();
     console.log("[BuildingSystem] Initialized");
+  }
+
+  /** Wire distance-culling for placed blocks (mirrors EnemyBaseSystem). */
+  setCullRegistrar(
+    register: (node: BABYLON.TransformNode, radius: number) => void,
+    unregister: (node: BABYLON.TransformNode) => void,
+  ): void {
+    this.cullRegister = register;
+    this.cullUnregister = unregister;
   }
 
   private wheelHandler: ((e: WheelEvent) => void) | null = null;
@@ -637,9 +653,12 @@ export class BuildingSystem {
     if (this.selectedBlockType === BlockType.Light) {
       blockLight = new BABYLON.PointLight(
         `blockLight_${this.blockIdCounter}`,
-        pos.clone().add(new BABYLON.Vector3(0, 0.5, 0)),
+        new BABYLON.Vector3(0, 0.5, 0),
         this.scene
       );
+      // Parent to the mesh so LOD culling's setEnabled(false) cascades to the
+      // light — otherwise a culled block leaves an orphaned light burning.
+      blockLight.parent = mesh;
       blockLight.diffuse = new BABYLON.Color3(0.8, 0.9, 1.0);
       blockLight.intensity = 0.6;
       blockLight.range = 15;
@@ -658,6 +677,7 @@ export class BuildingSystem {
 
     this.placedBlocks.push(block);
     this.blockIdCounter++;
+    this.cullRegister?.(mesh, BuildingSystem.CULL_RADIUS);
 
     this.bus.emit(GameEvents.UI_MESSAGE, `Placed ${def.name}`);
     this.bus.emit(GameEvents.INVENTORY_CHANGED);
@@ -754,6 +774,7 @@ export class BuildingSystem {
     this.spawnDebrisChunks(block.mesh.position, def.color, 4);
     this.dropMaterials(hitPoint);
 
+    this.cullUnregister?.(block.mesh);
     block.mesh.dispose();
     if (block.light) {
       block.light.dispose();
@@ -915,6 +936,7 @@ export class BuildingSystem {
 
   clearAll(): void {
     for (const block of this.placedBlocks) {
+      this.cullUnregister?.(block.mesh);
       if (!block.mesh.isDisposed()) block.mesh.dispose();
       if (block.light) block.light.dispose();
     }
@@ -944,9 +966,12 @@ export class BuildingSystem {
     if (type === BlockType.Light) {
       blockLight = new BABYLON.PointLight(
         `blockLight_${id}`,
-        pos.clone().add(new BABYLON.Vector3(0, 0.5, 0)),
+        new BABYLON.Vector3(0, 0.5, 0),
         this.scene
       );
+      // Parent to the mesh so LOD culling's setEnabled(false) cascades to the
+      // light — otherwise a culled block leaves an orphaned light burning.
+      blockLight.parent = mesh;
       blockLight.diffuse = new BABYLON.Color3(0.8, 0.9, 1.0);
       blockLight.intensity = 0.6;
       blockLight.range = 15;
@@ -958,6 +983,7 @@ export class BuildingSystem {
       rotation: rotationDeg,
       light: blockLight,
     });
+    this.cullRegister?.(mesh, BuildingSystem.CULL_RADIUS);
     return true;
   }
 
@@ -981,6 +1007,7 @@ export class BuildingSystem {
     }
 
     for (const block of this.placedBlocks) {
+      this.cullUnregister?.(block.mesh);
       block.mesh.dispose();
       if (block.light) block.light.dispose();
     }

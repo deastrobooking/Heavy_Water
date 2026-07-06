@@ -311,6 +311,16 @@ export class EnvironmentPropSystem {
     return this.props.filter(p => p.damageable.isAlive).map(p => p.hitbox);
   }
 
+  /** Append live prop hitboxes into `out`. Allocation-free variant of
+   *  getHitboxMeshes for the per-frame hit pipeline (no filter/map garbage). */
+  appendHitboxMeshes(out: BABYLON.Mesh[]): void {
+    const list = this.props;
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      if (p.damageable.isAlive) out.push(p.hitbox);
+    }
+  }
+
   /** Spawn a single prop; returns the active record (or throws if over budget). */
   spawn(kind: PropKind, position: BABYLON.Vector3, yaw: number = 0): ActiveProp {
     if (this.props.length >= EnvironmentPropSystem.MAX_PROPS) {

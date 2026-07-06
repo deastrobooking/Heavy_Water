@@ -83,3 +83,26 @@ inline in `CombatSystem.ts` — search for `autoTargetEnabled`.
 - **Cell-shading materials.** Reuse the materials in `CombatSystem` /
   `SpecialWeaponsSystem` rather than rolling your own — outline + tint
   consistency across weapons matters for the art direction.
+
+## Performance (hot path)
+
+The per-frame hit pipeline in `Game.tsx` runs once per rendered frame and
+touches every live target, so it must not allocate:
+
+- **Allocation-free target scratch.** The frame builds one reused array
+  (`enemyMeshScratch`) and each source system appends its live meshes into
+  it via `appendEnemyMeshes` / `appendMeshes` / `appendActiveMeshes` /
+  `appendHitboxMeshes` / `appendRemoteHitMeshes`. These mirror the liveness
+  filters of their `get*Meshes()` siblings but push into a caller-supplied
+  array instead of returning a fresh `filter().map()` result. Never revert
+  to `scratch.push(...getWhatever())` — the spread reintroduces per-frame
+  garbage *and* risks a stack overflow on large target counts. The scratch
+  must be rebuilt **before** the melee updates that read it (BeamSabre /
+  MeleeArsenal target providers hand back the same array).
+- **Frozen elemental effects.** `ELEMENTAL_DEFINITIONS` entries are
+  `Object.freeze`d at module load, and `getElementalEffect()` /
+  `getEffectiveElementalEffect()` return the shared frozen reference
+  (`Readonly<ElementalEffect>`) instead of cloning `{...}` on every hit.
+  Treat the returned object as immutable — mutating it is a compile error
+  and, at runtime, would corrupt shared state. If a caller ever needs a
+  mutable copy, clone at the call site.

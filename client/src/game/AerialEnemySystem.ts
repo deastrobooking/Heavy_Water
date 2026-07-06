@@ -939,6 +939,16 @@ export class AerialEnemySystem {
     return out;
   }
 
+  /** Append live aerial meshes into `out` (allocation-free, for the
+   *  per-frame hit pipeline). */
+  appendMeshes(out: BABYLON.Mesh[]): void {
+    const list = this.units;
+    for (let i = 0; i < list.length; i++) {
+      const u = list[i];
+      if (u.isAlive) out.push(u.getMesh());
+    }
+  }
+
   // Try to damage the unit owning this mesh. Returns true if found.
   damageEnemy(mesh: BABYLON.Mesh, amount: number): boolean {
     for (const u of this.units) {

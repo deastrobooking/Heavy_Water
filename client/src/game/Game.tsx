@@ -775,6 +775,11 @@ export const Game: React.FC = () => {
 
         const buildingSystem = new BuildingSystem(scene, engine.getCamera(), inventory);
         buildingRef.current = buildingSystem;
+        // Bound draw cost of dense player builds: distant blocks get culled.
+        buildingSystem.setCullRegistrar(
+          (node, r) => lodCull.register(node, r),
+          (node) => lodCull.unregister(node),
+        );
         setHotbarBlocks(buildingSystem.getHotbar());
         setSelectedBlock(buildingSystem.getSelectedBlockType());
 
@@ -2502,22 +2507,19 @@ export const Game: React.FC = () => {
 
           combatSystem.update(dt);
 
-          const groundEnemyMeshes = enemySystem.getEnemyMeshes();
-          const aerialMeshes = aerialEnemySystem.getMeshes();
-          const miningMeshes = miningSystem.getActiveMeshes();
-          const baseMeshes = enemyBaseSystem.getActiveMeshes();
-          const propMeshes = propSystem.getHitboxMeshes();
+          // Build the shared hit-target scratch with ZERO per-frame array
+          // allocations: each system appends its live meshes directly into
+          // the reused scratch instead of returning a fresh filter/map array
+          // that we then spread (arg-list alloc + stack-overflow risk).
           const enemyMeshes = enemyMeshScratch;
           enemyMeshes.length = 0;
-          enemyMeshes.push(
-            ...groundEnemyMeshes,
-            ...aerialMeshes,
-            ...miningMeshes,
-            ...baseMeshes,
-            ...propMeshes,
-          );
+          enemySystem.appendEnemyMeshes(enemyMeshes);
+          aerialEnemySystem.appendMeshes(enemyMeshes);
+          miningSystem.appendActiveMeshes(enemyMeshes);
+          enemyBaseSystem.appendActiveMeshes(enemyMeshes);
+          propSystem.appendHitboxMeshes(enemyMeshes);
           if (versusModeRef.current.active && multiplayerRef.current) {
-            enemyMeshes.push(...multiplayerRef.current.getRemoteHitMeshes());
+            multiplayerRef.current.appendRemoteHitMeshes(enemyMeshes);
           }
           const specialTargets = specialTargetScratch;
           specialTargets.length = 0;

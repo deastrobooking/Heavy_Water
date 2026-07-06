@@ -93,6 +93,16 @@ const ELEMENTAL_DEFINITIONS: Record<ElementType, ElementalEffect> = {
   },
 };
 
+// Elemental definitions are immutable, shared constants. Freeze them so the
+// hot combat path (getElementalEffect / getEffectiveElementalEffect — called
+// on every projectile hit) can hand back the shared reference instead of
+// cloning `{...}` per hit, and so any accidental future mutation is a hard
+// error rather than silent state corruption.
+for (const key of Object.keys(ELEMENTAL_DEFINITIONS) as ElementType[]) {
+  Object.freeze(ELEMENTAL_DEFINITIONS[key]);
+}
+Object.freeze(ELEMENTAL_DEFINITIONS);
+
 export class ArmorSystem {
   private equippedArmor: Map<string, ArmorPiece> = new Map();
   private activeElement: ElementType | null = null;
@@ -247,17 +257,19 @@ export class ArmorSystem {
     return this.activeElement ?? this.petElement;
   }
 
-  getElementalEffect(): ElementalEffect | null {
+  getElementalEffect(): Readonly<ElementalEffect> | null {
     if (!this.activeElement) return null;
-    return { ...ELEMENTAL_DEFINITIONS[this.activeElement] };
+    // Frozen shared reference — never mutate the returned object.
+    return ELEMENTAL_DEFINITIONS[this.activeElement];
   }
 
   /** Elemental effect driven by the EFFECTIVE element (manual or pet).
    *  Used for outgoing weapon damage/on-hit so pets imbue normal shots. */
-  getEffectiveElementalEffect(): ElementalEffect | null {
+  getEffectiveElementalEffect(): Readonly<ElementalEffect> | null {
     const el = this.getEffectiveElement();
     if (!el) return null;
-    return { ...ELEMENTAL_DEFINITIONS[el] };
+    // Frozen shared reference — never mutate the returned object.
+    return ELEMENTAL_DEFINITIONS[el];
   }
 
   /** Immediate elemental on-hit bonus for normal weapon shots, scaled off

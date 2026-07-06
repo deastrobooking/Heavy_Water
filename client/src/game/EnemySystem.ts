@@ -1988,6 +1988,16 @@ export class EnemySystem {
     return this.enemies.filter(e => e.isAlive).map(e => e.mesh);
   }
 
+  /** Append live enemy meshes into `out`. Allocation-free variant of
+   *  getEnemyMeshes for the per-frame hit pipeline (no filter/map garbage). */
+  appendEnemyMeshes(out: BABYLON.Mesh[]): void {
+    const list = this.enemies;
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i];
+      if (e.isAlive) out.push(e.mesh);
+    }
+  }
+
   getActiveEnemies(): EnemyUnit[] {
     return this.enemies.filter(e => e.isAlive);
   }

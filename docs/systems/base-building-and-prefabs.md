@@ -41,3 +41,11 @@ snapshot.
 - Multi-level upgrades should reuse the same root TransformNode; only
   swap the visual mesh. That keeps placement state stable across
   upgrades.
+- **Placed blocks are distance-culled.** `BuildingSystem.setCullRegistrar`
+  (wired to `LODCullSystem` in `Game.tsx`) registers every placed block at
+  a ~200 m radius on `placeBlock` / `placeAt` and unregisters it on
+  `destroyBlock` / `clearAll` / `dispose`, so a dense build's draw cost
+  stays bounded. Light blocks parent their `PointLight` to the block mesh
+  so LOD `setEnabled(false)` cascades to the light — never create a
+  free-standing light for a cullable block, or it will keep burning
+  per-frame lighting cost after the mesh is culled.

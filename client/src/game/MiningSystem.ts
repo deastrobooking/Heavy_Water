@@ -289,6 +289,16 @@ export class MiningSystem {
     return out;
   }
 
+  /** Append live mining-node hitboxes into `out` (allocation-free, for the
+   *  per-frame hit pipeline). */
+  appendActiveMeshes(out: BABYLON.Mesh[]): void {
+    const list = this.nodes;
+    for (let i = 0; i < list.length; i++) {
+      const n = list[i];
+      if (n.alive) out.push(n.hitbox);
+    }
+  }
+
   seedWorld(count: number = 28): void {
     const kinds: MiningNodeKind[] = ["scrap_pile", "scrap_pile", "crystal_cluster", "bio_pod", "gear_cache"];
     for (let i = 0; i < count; i++) {
