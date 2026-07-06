@@ -225,6 +225,46 @@ export const HUMANOID_HELMET_PARTS: ArmorPartDefinition[] = [
       chinGuard.material = ctx.materials.metal();
       meshes.push(chinGuard);
 
+      // Iconic forehead power gem — a glowing domed disc centred on the
+      // brow between the visor and the crest. This is the single most
+      // recognisable Mega Man helmet cue, so it reads as the "hero robot"
+      // silhouette even at distance under the cell-shading bloom.
+      const gem = BABYLON.MeshBuilder.CreateSphere("mm_helm_gem", {
+        diameter: 0.5,
+        segments: 16,
+      }, ctx.scene);
+      gem.scaling.z = 0.6;
+      // Pushed forward to z=1.28 so it protrudes through the opaque helmet
+      // dome (front surface ~z=1.196 at the brow) instead of being buried
+      // inside it — otherwise the marquee gem would be invisible.
+      gem.position.set(0, 0.34, 1.28);
+      gem.material = ctx.materials.neon();
+      meshes.push(gem);
+
+      const gemBezel = BABYLON.MeshBuilder.CreateTorus("mm_helm_gem_bezel", {
+        diameter: 0.62,
+        thickness: 0.1,
+        tessellation: 20,
+      }, ctx.scene);
+      gemBezel.rotation.x = Math.PI / 2;
+      gemBezel.position.set(0, 0.34, 1.22);
+      gemBezel.material = ctx.materials.gold();
+      meshes.push(gemBezel);
+
+      // Cheek vents — small angled jaw plates that frame the exposed face,
+      // reading as a robotic jawline instead of a bare skin sphere.
+      for (const sx of [-1, 1]) {
+        const cheek = BABYLON.MeshBuilder.CreateBox(`mm_helm_cheek_${sx}`, {
+          width: 0.3,
+          height: 0.55,
+          depth: 0.5,
+        }, ctx.scene);
+        cheek.position.set(sx * 0.72, -0.28, 0.7);
+        cheek.rotation.y = sx * 0.25;
+        cheek.material = ctx.materials.metal();
+        meshes.push(cheek);
+      }
+
       return attach(meshes, ctx.parent);
     },
   },
@@ -307,6 +347,44 @@ export const HUMANOID_CHEST_PARTS: ArmorPartDefinition[] = [
       beltBuckle.material = ctx.materials.gold();
       meshes.push(beltBuckle);
 
+      // Ab energy line — thin neon strip linking the reactor core down to
+      // the belt, giving the torso a lit "power spine" accent.
+      const abLine = BABYLON.MeshBuilder.CreateBox("mm_chest_ab_line", {
+        width: 0.14,
+        height: h * 0.32,
+        depth: 0.08,
+      }, ctx.scene);
+      abLine.position.set(0, -h * 0.26, 0.3);
+      abLine.material = ctx.materials.neon();
+      meshes.push(abLine);
+
+      // Defined pelvis — a tapered centre plate plus flanking hip guards
+      // below the belt so the lower torso reads as a plated pelvis rather
+      // than tapering off into bare capsule legs.
+      const crotch = createTaperedBox(
+        ctx.scene,
+        "mm_chest_crotch",
+        w * 0.3,
+        w * 0.18,
+        h * 0.22,
+        0.42,
+      );
+      crotch.position.set(0, -h * 0.72, 0.04);
+      crotch.material = ctx.materials.metal();
+      meshes.push(crotch);
+
+      for (const sx of [-1, 1]) {
+        const hip = BABYLON.MeshBuilder.CreateBox(`mm_chest_hip_${sx}`, {
+          width: w * 0.22,
+          height: h * 0.28,
+          depth: 0.5,
+        }, ctx.scene);
+        hip.position.set(sx * w * 0.42, -h * 0.6, 0.02);
+        hip.rotation.z = sx * 0.12;
+        hip.material = ctx.materials.metal();
+        meshes.push(hip);
+      }
+
       return attach(meshes, ctx.parent);
     },
   },
@@ -362,6 +440,26 @@ export const HUMANOID_SHOULDER_PARTS: ArmorPartDefinition[] = [
       stripe.material = ctx.materials.ceramic();
       meshes.push(stripe);
 
+      // Upper-arm plate — segments the otherwise-bare upper-arm capsule
+      // below the pauldron so the limb reads as plated/armoured. Parented
+      // to the arm pivot, so it swings correctly with every animation.
+      const upperArm = BABYLON.MeshBuilder.CreateBox("mm_shoulder_upperarm", {
+        width: 0.62,
+        height: ctx.armLength * 0.34,
+        depth: 0.6,
+      }, ctx.scene);
+      upperArm.position.set(sx * 0.08, -ctx.armLength * 0.24, 0);
+      upperArm.material = ctx.materials.metal();
+      meshes.push(upperArm);
+
+      // Neon shoulder-joint accent so the joints glow under the outline.
+      const jointGlow = BABYLON.MeshBuilder.CreateSphere("mm_shoulder_joint", {
+        diameter: 0.26,
+      }, ctx.scene);
+      jointGlow.position.set(sx * 0.34, -0.34, 0.42);
+      jointGlow.material = ctx.materials.neon();
+      meshes.push(jointGlow);
+
       return attach(meshes, ctx.parent);
     },
   },
@@ -400,6 +498,34 @@ export const HUMANOID_ARM_PARTS: ArmorPartDefinition[] = [
       fist.position.y = -ctx.armLength - foreLen * 0.55;
       fist.material = ctx.materials.metal();
       meshes.push(fist);
+
+      // Forearm plate over the forearm capsule for a segmented gauntlet.
+      const forearmPlate = BABYLON.MeshBuilder.CreateBox("mm_arm_forearm_plate", {
+        width: 0.7,
+        height: foreLen * 0.7,
+        depth: 0.68,
+      }, ctx.scene);
+      forearmPlate.position.y = -ctx.armLength * 0.75;
+      forearmPlate.material = ctx.materials.metal();
+      meshes.push(forearmPlate);
+
+      // Elbow joint glow.
+      const elbowGlow = BABYLON.MeshBuilder.CreateSphere("mm_arm_elbow", {
+        diameter: 0.3,
+      }, ctx.scene);
+      elbowGlow.position.set(0, -ctx.armLength * 0.5, 0.02);
+      elbowGlow.material = ctx.materials.neon();
+      meshes.push(elbowGlow);
+
+      // Knuckle glow across the fist front.
+      const knuckle = BABYLON.MeshBuilder.CreateBox("mm_arm_knuckle", {
+        width: 0.5,
+        height: 0.1,
+        depth: 0.14,
+      }, ctx.scene);
+      knuckle.position.set(0, -ctx.armLength - foreLen * 0.5, 0.28);
+      knuckle.material = ctx.materials.neon();
+      meshes.push(knuckle);
 
       return attach(meshes, ctx.parent);
     },
@@ -488,6 +614,27 @@ export const HUMANOID_WEAPON_PARTS: ArmorPartDefinition[] = [
       muzzleCore.position.y = muzzleTipY + 0.18;
       muzzleCore.material = ctx.materials.neon();
       meshes.push(muzzleCore);
+
+      // Neon charge line running along the top of the barrel — reads as an
+      // energised buster instead of a plain gun tube.
+      const energyLine = BABYLON.MeshBuilder.CreateBox("mm_blaster_energy_line", {
+        width: 0.1,
+        height: barrelLen * 0.8,
+        depth: 0.1,
+      }, ctx.scene);
+      energyLine.position.set(0, yWrist - 0.34 - barrelLen * 0.5, 0.42);
+      energyLine.material = ctx.materials.neon();
+      meshes.push(energyLine);
+
+      // Rear cooling-vent block at the back of the housing for bulk.
+      const backVent = BABYLON.MeshBuilder.CreateBox("mm_blaster_back_vent", {
+        width: 0.5,
+        height: 0.5,
+        depth: 0.3,
+      }, ctx.scene);
+      backVent.position.set(0, yWrist, -0.6);
+      backVent.material = ctx.materials.metal();
+      meshes.push(backVent);
 
       return attach(meshes, ctx.parent);
     },
@@ -587,6 +734,26 @@ export const HUMANOID_LEG_PARTS: ArmorPartDefinition[] = [
       toeStripe.position.set(0, bootGroundY + 0.06, 0.05 + 1.05 / 2 + 0.22 - 0.08);
       toeStripe.material = ctx.materials.gold();
       meshes.push(toeStripe);
+
+      // Neon shin vent — a lit energy strip down the front of the shin.
+      const shinVent = BABYLON.MeshBuilder.CreateBox("mm_leg_shin_vent", {
+        width: 0.16,
+        height: shinLen * 0.4,
+        depth: 0.1,
+      }, ctx.scene);
+      shinVent.position.set(0, -thighLen - shinLen * 0.42, 0.28);
+      shinVent.material = ctx.materials.neon();
+      meshes.push(shinVent);
+
+      // Gold band around the thigh plate for a segmented look.
+      const thighBand = BABYLON.MeshBuilder.CreateBox("mm_leg_thigh_band", {
+        width: 0.6,
+        height: 0.12,
+        depth: 0.6,
+      }, ctx.scene);
+      thighBand.position.y = -thighLen * 0.32;
+      thighBand.material = ctx.materials.gold();
+      meshes.push(thighBand);
 
       return attach(meshes, ctx.parent);
     },

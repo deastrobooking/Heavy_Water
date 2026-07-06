@@ -42,6 +42,10 @@ configured in `BabylonEngine.ts`.
   `ceramic`, `gold`, `neon`, `trim`).
 - **Emissive surfaces** (jewels, neon, weapon trails) bias their colour
   high on the green/cyan channels so they bloom strongly.
+- The **player mecha** leans on `neon()` accents — helmet forehead gem,
+  shoulder/elbow/knuckle joints, chest reactor + ab line, shin vent, and
+  the buster's charge line/muzzle core. They are unlit full-emissive, so
+  they read as glowing energy under the outline + bloom passes.
 - **Tints** — many materials accept a runtime `Color3` tint multiplier
   so per-level `cityTheme` can recolor without rebuilding meshes.
 

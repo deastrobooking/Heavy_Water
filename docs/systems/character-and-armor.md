@@ -62,6 +62,34 @@ authored at ~18-unit "mech" scale but the player's collision capsule
 assumes a 2 m humanoid. Setting `visualScale: 0.12` shrinks the body to
 ~2.16 m without rewriting every preset.
 
+### Default player look — Mega Man–style mecha
+
+`DEFAULT_ARMOR_SET` (`RobotArmorSystem.ts`) dresses the base humanoid body
+in the `mm_*` "humanoid" armor kit (`HumanoidArmorParts.ts`) — a
+blue/gold cel-shaded hero-robot silhouette:
+
+- **Helmet** (`helmet_humanoid`): crested dome with ear-pods, a neon visor
+  band, a glowing **forehead power gem** (the iconic Mega Man cue), and
+  cheek/jaw vents that frame the face so the head reads robotic rather
+  than as a bare skin sphere.
+- **Chest** (`chest_humanoid`): tapered "X" core plate with a neon reactor
+  core + ring, a lit ab energy line, and a **defined pelvis** (centre
+  crotch plate + flanking hip guards) below the belt.
+- **Shoulders/arms**: round pauldrons with a segmenting **upper-arm
+  plate**, a plated forearm gauntlet, and neon shoulder/elbow/knuckle
+  joint glows.
+- **Right buster** (`weapon_humanoid_blaster`): flared arm-cannon with a
+  glowing muzzle core, a neon charge line, and a rear vent block.
+- **Legs** (`legs_humanoid`): plated thigh/knee/shin with a gold thigh
+  band, a neon shin vent, and wedge boots.
+
+Because `createPlayerMesh` sets `hasArmor: false` whenever an armor set is
+present, the shared `buildArmor` captain kit does **not** run for the
+player — the whole look comes from these modular parts, so refining them
+changes the player without touching captains/NPCs. Every piece parents to
+an existing limb pivot, so the modular swap pipeline and all procedural
+animations keep working with no floating pieces.
+
 ### Swimming & water exit
 
 `PlayerController` drives water traversal (`updateWaterContact` /
