@@ -115,6 +115,13 @@ export class PlayerController implements IDamageable {
   private swimAscendSpeed: number = 0.12;
   private swimDiveSpeed: number = 0.10;
   private swimDrag: number = 0.86;
+  // Short window (seconds) after a surface jump-out during which
+  // updateWaterContact won't re-latch swimming, so the launch impulse
+  // survives instead of being snapped back to the surface clamp.
+  private waterExitGraceTimer: number = 0;
+  // Timestamp (performance.now ms) of the last swim-entry toast, so bobbing
+  // in and out of the surface doesn't spam the "SWIMMING" message.
+  private lastSwimEnterMs: number = 0;
 
   health: number = 250;
   maxHealth: number = 250;
@@ -454,6 +461,10 @@ export class PlayerController implements IDamageable {
 
       if (e.code === "Space") {
         if (this.isSwimming) {
+          // Tap jump at/near the surface to leap out of the water. A HELD
+          // Space (OS key auto-repeat) keeps ascending via updateSwimming,
+          // so only a genuine discrete press triggers the launch.
+          if (!e.repeat) this.tryJumpOutOfWater();
           return;
         }
         if (this.isFlying || this.isSupermanFlight) {
@@ -745,6 +756,7 @@ export class PlayerController implements IDamageable {
     }
 
     this.stateMachine.update(deltaTime);
+    if (this.waterExitGraceTimer > 0) this.waterExitGraceTimer -= deltaTime;
     this.updateWaterContact();
 
     if (this.isSwimming) {
@@ -931,6 +943,11 @@ export class PlayerController implements IDamageable {
   }
 
   private updateWaterContact(): void {
+    // During the brief post-jump-out grace window, don't re-latch swimming
+    // even if the body is still below the surface threshold — otherwise the
+    // launch impulse would be zeroed and the player snaps back into the water.
+    if (this.waterExitGraceTimer > 0) return;
+
     const contact = this.getWaterContact();
     const canSwim =
       !!contact &&
@@ -956,7 +973,11 @@ export class PlayerController implements IDamageable {
       this.boostDashTimer = 0;
       this.cancelAirSmash();
       this.velocity.y = Math.min(this.velocity.y, 0);
-      this.bus.emit(GameEvents.UI_MESSAGE, { text: "SWIMMING", duration: 1.1 });
+      const nowMs = performance.now();
+      if (nowMs - this.lastSwimEnterMs > 1200) {
+        this.bus.emit(GameEvents.UI_MESSAGE, { text: "SWIMMING", duration: 1.1 });
+      }
+      this.lastSwimEnterMs = nowMs;
     }
     this.stateMachine.changeState("swimming");
   }
@@ -966,6 +987,44 @@ export class PlayerController implements IDamageable {
     if (!this.stateMachine.isInState("dead", "stunned")) {
       this.stateMachine.changeState(this.isMoving() ? "moving" : "idle");
     }
+  }
+
+  /** Leap up and out of the water when the player taps jump at/near the
+   *  surface. Applies a real upward impulse (a touch stronger than a normal
+   *  jump) plus a little forward momentum so the player clears the bank,
+   *  drops the swimming state, and opens a short grace window so
+   *  updateWaterContact can't immediately re-latch swimming and cancel the
+   *  launch. Deep underwater this is a no-op — the continuous ascend in
+   *  updateSwimming brings the player up to the surface first. */
+  private tryJumpOutOfWater(): void {
+    if (this.isDodging) return;
+    const contact = this.getWaterContact();
+    if (!contact) {
+      this.exitSwimming();
+      return;
+    }
+    const nearSurface = this.meshRoot.position.y >= contact.waterY - 0.4;
+    if (!nearSurface) return;
+
+    this.exitSwimming();
+    this.isGrounded = false;
+    this.jumpCount = 1;
+    this.velocity.y = this.jumpForce * 1.25;
+
+    // Carry a little camera-forward momentum so the leap actually clears the
+    // shoreline instead of dropping straight back into the water.
+    const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
+    forward.y = 0;
+    if (forward.lengthSquared() > 0.0001) {
+      forward.normalize();
+      this.velocity.x += forward.x * 0.14;
+      this.velocity.z += forward.z * 0.14;
+    }
+    this.airMomentumX = this.velocity.x;
+    this.airMomentumZ = this.velocity.z;
+
+    this.waterExitGraceTimer = 0.4;
+    console.log("[PlayerController] Jump out of water");
   }
 
   private updateSwimming(dt: number): void {
@@ -1011,7 +1070,10 @@ export class PlayerController implements IDamageable {
     this.meshRoot.position.addInPlace(this.velocity.scale(frameScale));
 
     const minBodyY = contact.groundY + 0.75;
-    const maxBodyY = contact.waterY + 0.72;
+    // Ceiling sits ABOVE the "still submerged" exit threshold (waterY+0.95 in
+    // updateWaterContact) so holding ascend can rise past it and leave the
+    // water, instead of being clamped forever just below the surface.
+    const maxBodyY = contact.waterY + 1.05;
     if (this.meshRoot.position.y < minBodyY) {
       this.meshRoot.position.y = minBodyY;
       this.velocity.y = Math.max(0, this.velocity.y);
@@ -1034,7 +1096,7 @@ export class PlayerController implements IDamageable {
   }
 
   private updateJetpack(dt: number): void {
-    if (this.keys["Space"] && !this.isGrounded && this.jetpackFuel > 0 && !this.isDodging && !this.isFlying && !this.isSupermanFlight) {
+    if (this.keys["Space"] && !this.isGrounded && this.jetpackFuel > 0 && !this.isDodging && !this.isFlying && !this.isSupermanFlight && this.waterExitGraceTimer <= 0) {
       this.isJetpacking = true;
       this.velocity.y = Math.min(this.velocity.y + this.jetpackForce, 0.35);
       this.jetpackFuel -= this.jetpackFuelCost * dt;

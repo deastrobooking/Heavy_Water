@@ -10,6 +10,9 @@ This page is the **developer** reference — which file owns each input.
 | Jump / Triple-Jump → flight | `SPACE` | `PlayerController` |
 | Boost Dash (mid-air) | `SHIFT + SPACE` | `PlayerController` |
 | Look | Mouse | `PlayerController` |
+| Ascend (while swimming) | hold `SPACE` | `PlayerController` |
+| Dive (while swimming) | `CTRL` / `SHIFT` | `PlayerController` |
+| Jump out of water | tap `SPACE` at the surface | `PlayerController` |
 | Climb (in flight) | `SPACE` | `PlayerController` |
 | Dive (in flight) | `CTRL` | `PlayerController` |
 | Smash (in flight) | mouse + downward | [`SmashAttackSystem.ts`](../../client/src/game/SmashAttackSystem.ts) |

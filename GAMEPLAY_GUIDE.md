@@ -17,6 +17,8 @@ in-game from the **GUIDE** button on the main menu.
 | Boost Dash (mid-air) | `SHIFT + SPACE` |
 | Land / cancel flight | `X` |
 | **Escape flight/hover** | tap `SPACE` (jump) 3× quickly |
+| Swim up / dive | hold `SPACE` / `CTRL` |
+| **Jump out of water** | tap `SPACE` at the surface |
 | Look | Mouse |
 
 **Triple-jump → Rocket Skates flight.** Press `SPACE` three times in the air to

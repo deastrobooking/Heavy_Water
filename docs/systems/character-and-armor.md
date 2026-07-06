@@ -62,6 +62,28 @@ authored at ~18-unit "mech" scale but the player's collision capsule
 assumes a 2 m humanoid. Setting `visualScale: 0.12` shrinks the body to
 ~2.16 m without rewriting every preset.
 
+### Swimming & water exit
+
+`PlayerController` drives water traversal (`updateWaterContact` /
+`updateSwimming`). The player enters swimming whenever the body drops to
+within the surface threshold (`waterY + 0.95`) over water at least ~1 m
+deep. While swimming, hold `SPACE` to ascend and `CTRL`/`SHIFT` to dive;
+releasing both lets buoyancy float the body back to the surface.
+
+Two paths get the player *out* of the water:
+
+- **Hold ascend:** the swim ceiling (`maxBodyY = waterY + 1.05`) sits
+  above the exit threshold, so holding `SPACE` rises past it and exits.
+- **Tap jump:** a discrete `SPACE` tap at/near the surface calls
+  `tryJumpOutOfWater()`, which applies a real upward launch (a touch
+  stronger than a normal jump) plus a little camera-forward momentum to
+  clear the bank. A short `waterExitGraceTimer` suppresses swim re-entry
+  (and the jetpack cap) for ~0.4 s so the launch impulse survives instead
+  of snapping the player back to the surface.
+
+Both exits drop the swimming state back into the normal jump/airborne
+flow, so double-jump and flight remain available after leaving the water.
+
 ## Cell-shading & materials
 
 `ArmorMaterialFactory` is the canonical place to ask for a cell-shaded
