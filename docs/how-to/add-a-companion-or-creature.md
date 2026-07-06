@@ -61,7 +61,8 @@ if (stats.companions.length >= stats.maxCompanions) {
 
 ## B. Add a bio-creature to the Dex
 
-Bio-creatures are pure data + a shared rendering pipeline.
+Bio-creatures are pure data + a shared rendering pipeline. You almost
+never touch the rendering code: adding a species is a data-only change.
 
 ### 1. Add a species
 
@@ -70,22 +71,39 @@ File: [`client/src/game/BioSpecies.ts`](../../client/src/game/BioSpecies.ts)
 Add an entry with:
 
 - `id` (unique string).
-- `archetype` (e.g. `"crawler"`, `"floater"`, `"swarmer"`).
-- `element` (fire / water / void / nature / …).
-- `rarity` tier (`"common" | "rare" | "legendary" | …`).
-- Visual params (colours, body parts, scale).
-- Combat stats.
+- `archetype` (e.g. `"crawler"`, `"floater"`, `"swarmer"`, `"brute"`).
+- `elementalType` (flame / ice / water / electric / psychic / grass /
+  dragon / steel / evil / crystal / normal).
+- `rarity` tier (`"common" | "uncommon" | "rare" | "legendary"`).
+- `primary` / `secondary` / `emissive` colours + `scale`.
+- Combat stats + `baseCaptureChance`.
 
-### 2. Spawn it
+### 2. It renders automatically
 
-`BioCreatureSystem.spawnSpecies(id, position)` will instantiate it and
-register it for capture and loot.
+You do **not** write any mesh code. Both the wild spawn and the captured
+follower call `buildCreatureDescriptor` in
+[`CreatureMechaDesigner.ts`](../../client/src/game/CreatureMechaDesigner.ts),
+which derives the full look from the species data: chibi chassis →
+archetype silhouette → elemental accents → rarity flair → face →
+evolution stage. New `archetype`/`elementalType` values only need a case
+added in that one file — every consumer (wild, follower, Dex) picks it up.
+
+`BioCreatureSystem.spawnSpecies(id, position)` instantiates a wild one and
+registers it for capture and loot.
 
 ### 3. Capture flow
 
-Capture orbs throw triggers `CAPTURE_ORB_THROWN` →
-`BioCreatureSystem` rolls capture chance based on rarity → emits
-`CREATURE_CAPTURED` on success. The HUD picks up the event.
+Throwing a capture orb triggers `CAPTURE_ORB_THROWN` → the orb arcs to
+the target with a sparkle trail while it shudders → on impact
+`BioCreatureSystem` rolls `captureChance()` (species base + garden
+bonus). Success fires a celebratory burst + `CREATURE_CAPTURED`; failure
+shows a red flash + smoke puff and the creature resumes wandering. The
+HUD and Bio Garden pick up the event.
+
+Captured creatures evolve over time: `deriveEvolutionStage(level, bond)`
+(gated on both level AND bond) upgrades their look through Prototype →
+Enhanced → Advanced → Prime, and the top-3 by level auto-become animated
+robot followers via `ActivePetSystem` — no separate assignment UI.
 
 ### 4. Garden integration
 

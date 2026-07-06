@@ -1,10 +1,7 @@
 import * as BABYLON from "@babylonjs/core";
 import { RobotFactory } from "./RobotFactory";
-import { RobotDescriptor, RobotStyle } from "./RobotDesigner";
-import {
-  BIO_SPECIES, BioCreatureSpecies, Archetype, ElementalType,
-  getSpeciesById,
-} from "./BioSpecies";
+import { buildCreatureDescriptor } from "./CreatureMechaDesigner";
+import { getSpeciesById } from "./BioSpecies";
 import { EventBus, GameEvents } from "./EventBus";
 import { ElementType } from "./ArmorSystem";
 import type { CapturedCreature } from "./BioCreatureSystem";
@@ -14,6 +11,7 @@ export interface ActivePetEntry {
   speciesId: string;
   name: string;
   level: number;
+  bondLevel: number;
   elementalType: string;
 }
 
@@ -68,7 +66,7 @@ const PET_FOLLOW_DISTANCE = 2.5;
 
 const LEG_NAMES = new Set(["th", "sn", "ft"]);
 const ARM_NAMES = new Set(["ua", "fa", "hd"]);
-const GLOW_NAMES = new Set(["v", "antTip", "cg", "core", "wt", "tl", "lg", "mz"]);
+const GLOW_NAMES = new Set(["v", "antTip", "cg", "core", "wt", "tl", "lg", "mz", "eye", "chk"]);
 
 /** Map a creature's bio elemental type to an ArmorSystem weapon element.
  *  Returns null for families that don't map to a combat element. */
@@ -144,6 +142,7 @@ export class ActivePetSystem {
         speciesId: creature.speciesId,
         name: creature.name,
         level: Math.max(1, Math.min(100, a.level)),
+        bondLevel: Math.max(0, creature.bondLevel ?? 0),
         elementalType: sp.elementalType,
       };
       this.entries.push(entry);
@@ -165,8 +164,10 @@ export class ActivePetSystem {
       .slice(0, MAX_ACTIVE_PETS);
     // Idempotent: if the resulting top-N roster matches the live one, skip the
     // clear/respawn so this is safe to call every frame / on a throttle.
-    const nextSig = ranked.map(c => `${c.id}:${c.level ?? 1}`).join("|");
-    const curSig = this.entries.map(e => `${e.creatureId}:${e.level}`).join("|");
+    // Bond is part of the signature so crossing an evolution threshold (which
+    // depends on both level AND bond) respawns the follower with the new look.
+    const nextSig = ranked.map(c => `${c.id}:${c.level ?? 1}:${c.bondLevel ?? 0}`).join("|");
+    const curSig = this.entries.map(e => `${e.creatureId}:${e.level}:${e.bondLevel}`).join("|");
     if (nextSig === curSig) return;
     this.assignPets(
       ranked.map(c => ({ creatureId: c.id, level: c.level ?? 1 })),
@@ -315,12 +316,12 @@ export class ActivePetSystem {
       for (const a of lp.anim.arms) a.mesh.rotation.x = a.baseRotX - swing * 0.32 * a.side;
 
       // Emissive "breathing" via per-mesh scaling (safe — doesn't touch the
-      // shared cached materials) + a slow head spin to read as alive.
+      // shared cached materials). The head is NOT spun: it now carries a face
+      // (eyes/mouth/cheeks) that must stay oriented forward with the body.
       const pulse = 1 + 0.22 * Math.sin(lp.bobTimer * 1.6);
       for (const g of lp.anim.glow) {
         g.mesh.scaling.set(g.baseScale.x * pulse, g.baseScale.y * pulse, g.baseScale.z * pulse);
       }
-      if (lp.anim.head) lp.anim.head.rotation.y += dt * 0.8;
     }
   }
 
@@ -344,7 +345,14 @@ export class ActivePetSystem {
   private spawnLivePet(entry: ActivePetEntry): void {
     const sp = getSpeciesById(entry.speciesId);
     if (!sp) return;
-    const descriptor = this.makeDescriptor(sp);
+    // Followers share the exact same mecha-designer pipeline as wild creatures
+    // (archetype silhouette, type accents, face, evolution stage) so a captured
+    // pet looks identical to its wild form — just articulated + slightly smaller.
+    const descriptor = buildCreatureDescriptor(sp, {
+      level: entry.level,
+      bond: entry.bondLevel,
+      follower: true,
+    });
     const offset = new BABYLON.Vector3(
       Math.cos(this.pets.length * 1.2) * 3,
       0,
@@ -379,38 +387,6 @@ export class ActivePetSystem {
       try { lp.root.dispose(); } catch {}
     }
     this.pets = [];
-  }
-
-  private makeDescriptor(species: BioCreatureSpecies): RobotDescriptor {
-    const style: RobotStyle = {
-      archetype: "pet",
-      scale: species.scale * 0.7,
-      torsoWidth: 0.7, torsoHeight: 0.45, torsoDepth: 0.7,
-      headSize: 0.45, headShape: "sphere",
-      armLength: 0.32, armThickness: 0.1, armStyle: "cylinder",
-      legLength: 0.32, legThickness: 0.14, legStyle: "box",
-      shoulderPadSize: 0.12, hipPadSize: 0.16,
-      hasWings: false, wingSpan: 0.8, wingAngle: 0.3,
-      hasCannons: false, cannonSize: 0.15,
-      hasBackpack: false, backpackSize: 0.3,
-      hasVisor: true, visorStyle: "round",
-      hasHorns: false, hornLength: 0.18,
-      hasTail: true, tailLength: 0.4, tailSegments: 3,
-      hasAntennae: true, antennaLength: 0.18,
-      hasShield: false, shieldSize: 0.4,
-      extraPlating: 0, asymmetry: 0,
-      hasPanelLines: true, panelLineDensity: 1.0,
-      colors: {
-        primary: species.primary,
-        secondary: species.secondary,
-        emissive: species.emissive,
-      },
-    };
-    return {
-      name: species.name,
-      style,
-      faction: "neutral",
-    };
   }
 
   dispose(): void {

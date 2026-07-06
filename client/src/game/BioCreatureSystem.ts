@@ -1,10 +1,11 @@
 import * as BABYLON from "@babylonjs/core";
 import { EventBus, GameEvents } from "./EventBus";
 import { RobotFactory } from "./RobotFactory";
-import { RobotDescriptor, RobotStyle } from "./RobotDesigner";
+import { RobotDescriptor } from "./RobotDesigner";
+import { buildCreatureDescriptor, isFlyer } from "./CreatureMechaDesigner";
 import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
 import {
-  BIO_SPECIES, BioCreatureSpecies, Archetype, ElementalType,
+  BIO_SPECIES, BioCreatureSpecies,
   getSpeciesById, pickWeightedSpecies, statsFromRarity,
 } from "./BioSpecies";
 
@@ -54,6 +55,8 @@ interface CaptureOrb {
   age: number;
   totalDuration: number;
   startPos: BABYLON.Vector3;
+  /** Countdown to the next sparkle emitted along the orb's flight path. */
+  trailTimer: number;
 }
 
 const CAPTURE_DURATION = 1.6;
@@ -167,41 +170,11 @@ export class BioCreatureSystem {
    * from `elementalType` unless overridden.
    */
   private makeDescriptor(species: BioCreatureSpecies): RobotDescriptor {
-    const t = species.elementalType;
-    const a = species.archetype;
-
-    // Defaults: chibi proportions — short stout torso, oversized head, big
-    // visor eyes — that read as cute robot mascots.
-    const style: RobotStyle = {
-      archetype: "pet",
-      scale: species.scale,
-      torsoWidth: 0.85, torsoHeight: 0.55, torsoDepth: 0.85,
-      headSize: 0.55, headShape: "sphere",
-      armLength: 0.42, armThickness: 0.13, armStyle: "cylinder",
-      legLength: 0.42, legThickness: 0.18, legStyle: "box",
-      shoulderPadSize: 0.18, hipPadSize: 0.22,
-      hasWings: false, wingSpan: 1.0, wingAngle: 0.4,
-      hasCannons: false, cannonSize: 0.2,
-      hasBackpack: false, backpackSize: 0.4,
-      hasVisor: true, visorStyle: "round",
-      hasHorns: false, hornLength: 0.25,
-      hasTail: false, tailLength: 0.5, tailSegments: 4,
-      hasAntennae: false, antennaLength: 0.25,
-      hasShield: false, shieldSize: 0.6,
-      extraPlating: 0, asymmetry: 0,
-      hasPanelLines: true, panelLineDensity: 1.2,
-      colors: {
-        primary: species.primary,
-        secondary: species.secondary,
-        emissive: species.emissive,
-      },
-    };
-
-    applyArchetype(a, style);
-    applyTypeAccents(t, style);
-    applyRarityFlair(style, species.rarity);
-
-    return { name: species.name, faction: "pet", style };
+    // Wild creatures render at base evolution stage (level 1 / bond 0) and stay
+    // MERGED (not articulated). The captured-follower path in ActivePetSystem
+    // calls the SAME builder with the creature's real level/bond + articulate,
+    // so a wild mon and its captured follower are visually identical.
+    return buildCreatureDescriptor(species);
   }
 
   attemptCaptureNearest(): boolean {
@@ -232,7 +205,16 @@ export class BioCreatureSystem {
     }
 
     this.inventory.removeItem("bio_essence", 1);
+    const chance = this.captureChance(nearest);
     this.bus.emit(GameEvents.CAPTURE_ORB_THROWN, { creatureId: nearest.id });
+    this.bus.emit(GameEvents.UI_MESSAGE, {
+      message: `Orb away! ${nearest.species.name} · ${Math.round(chance * 100)}% capture`,
+    });
+    this.bus.emit("effect:sparkle", {
+      position: this.playerPos.add(new BABYLON.Vector3(0, 1.2, 0)),
+      color: new BABYLON.Color3(0.4, 1.0, 0.6),
+      count: 10,
+    });
     nearest.capturing = true;
     nearest.captureProgress = 0;
 
@@ -251,14 +233,31 @@ export class BioCreatureSystem {
       age: 0,
       totalDuration: CAPTURE_DURATION,
       startPos: orbMesh.position.clone(),
+      trailTimer: 0,
     });
     return true;
+  }
+
+  /** Clamped capture probability, shared by the thrown-orb UI readout and the
+   *  actual roll in resolveCapture so the displayed % always matches the odds. */
+  private captureChance(c: ActiveCreature): number {
+    return Math.max(0.05, Math.min(0.95, c.species.baseCaptureChance + this.getCaptureBonus()));
+  }
+
+  /** Struggle animation while an orb closes in — the creature shudders and
+   *  spins in place so the capture reads as a real tug-of-war. */
+  private animateCapturing(c: ActiveCreature, dt: number): void {
+    c.bobTimer += dt * 22;
+    const shake = 0.06 * Math.sin(c.bobTimer);
+    c.hitbox.position.x = c.position.x + shake;
+    c.hitbox.position.z = c.position.z + shake * 0.5;
+    c.hitbox.rotation.y += dt * 8;
   }
 
   private tick(dt: number): void {
     for (const c of this.creatures) {
       if (c.captured) continue;
-      if (c.capturing) continue;
+      if (c.capturing) { this.animateCapturing(c, dt); continue; }
       c.bobTimer += dt * 2;
       c.wanderTimer -= dt;
       if (c.wanderTimer <= 0) {
@@ -296,7 +295,24 @@ export class BioCreatureSystem {
 
       o.target.captureProgress = t;
 
+      // Sparkle trail so the orb reads as a charged projectile in flight.
+      o.trailTimer -= dt;
+      if (o.trailTimer <= 0) {
+        o.trailTimer = 0.06;
+        this.bus.emit("effect:sparkle", {
+          position: o.mesh.position.clone(),
+          color: new BABYLON.Color3(0.4, 1.0, 0.6),
+          count: 3,
+        });
+      }
+
       if (t >= 1) {
+        // Impact punch: flash + a small camera shake right as the orb lands.
+        this.bus.emit("effect:hitImpact", {
+          position: o.target.position.clone(),
+          color: new BABYLON.Color3(0.5, 1.0, 0.6),
+        });
+        this.bus.emit("effect:cameraShake", { intensity: 0.18, duration: 0.2 });
         o.mesh.dispose();
         this.orbs.splice(i, 1);
         this.resolveCapture(o.target);
@@ -319,8 +335,7 @@ export class BioCreatureSystem {
   }
 
   private resolveCapture(c: ActiveCreature): void {
-    const baseChance = c.species.baseCaptureChance + this.getCaptureBonus();
-    if (Math.random() < baseChance) {
+    if (Math.random() < this.captureChance(c)) {
       c.captured = true;
       const baseStats = statsFromRarity(c.species.rarity);
       const cap: CapturedCreature = {
@@ -341,6 +356,9 @@ export class BioCreatureSystem {
         position: c.position.clone(),
         color: c.species.emissive.clone(),
       });
+      // Celebratory burst + confirmation on a successful capture.
+      this.bus.emit("effect:levelUp", { position: c.position.clone() });
+      this.bus.emit(GameEvents.UI_MESSAGE, { message: `Captured ${c.species.name}!` });
       this.bus.emit(GameEvents.CREATURE_CAPTURED, cap);
       const idx = this.creatures.indexOf(c);
       if (idx >= 0) this.creatures.splice(idx, 1);
@@ -348,6 +366,17 @@ export class BioCreatureSystem {
     } else {
       c.capturing = false;
       c.captureProgress = 0;
+      // Reset the shudder transform so the freed creature resumes clean wander.
+      c.hitbox.position.copyFrom(c.position);
+      // Red break-free flash + smoke puff so failure reads clearly.
+      this.bus.emit("effect:capture", {
+        position: c.position.clone(),
+        color: new BABYLON.Color3(1.0, 0.3, 0.2),
+      });
+      this.bus.emit("effect:smokePuff", {
+        position: c.position.clone(),
+        color: new BABYLON.Color3(0.4, 0.4, 0.45),
+      });
       this.bus.emit(GameEvents.UI_MESSAGE, { message: `${c.species.name} broke free!` });
     }
   }
@@ -535,324 +564,4 @@ export class BioCreatureSystem {
     this.creatures = [];
     this.factory.dispose();
   }
-}
-
-// ============================================================ archetype rigs
-// Each archetype mutates the base style to give the pet a recognizable
-// silhouette. The player sees a bunny by its tall ear-antennae, a dragon
-// by its wings + horns + tail, a turtle by its shell-backpack, etc.
-
-function applyArchetype(a: Archetype, s: RobotStyle): void {
-  switch (a) {
-    case "fox":
-      s.headSize = 0.6; s.headShape = "sphere";
-      s.hasTail = true; s.tailLength = 0.7; s.tailSegments = 5;
-      s.hasAntennae = true; s.antennaLength = 0.35; // ears
-      s.legStyle = "digitigrade"; s.legLength = 0.45;
-      s.visorStyle = "round";
-      break;
-    case "cat":
-      s.headSize = 0.6; s.headShape = "sphere";
-      s.hasTail = true; s.tailLength = 0.65; s.tailSegments = 5;
-      s.hasAntennae = true; s.antennaLength = 0.3;
-      s.legStyle = "digitigrade"; s.legLength = 0.42;
-      s.torsoWidth = 0.8; s.torsoHeight = 0.5;
-      break;
-    case "bunny":
-      s.headSize = 0.55; s.headShape = "sphere";
-      s.hasAntennae = true; s.antennaLength = 0.7; // tall ears
-      s.hasTail = true; s.tailLength = 0.18; s.tailSegments = 2;
-      s.legStyle = "digitigrade"; s.legLength = 0.55;
-      s.legThickness = 0.22;
-      s.visorStyle = "round";
-      break;
-    case "mouse":
-      s.scale *= 0.85;
-      s.headSize = 0.6; s.headShape = "sphere";
-      s.hasAntennae = true; s.antennaLength = 0.35;
-      s.hasTail = true; s.tailLength = 0.85; s.tailSegments = 6;
-      s.torsoHeight = 0.45;
-      break;
-    case "pup":
-      s.headSize = 0.6; s.headShape = "sphere";
-      s.hasTail = true; s.tailLength = 0.4; s.tailSegments = 3;
-      s.hasAntennae = true; s.antennaLength = 0.28;
-      s.legStyle = "digitigrade"; s.legLength = 0.45;
-      s.torsoWidth = 0.85;
-      break;
-    case "beetle":
-      s.headSize = 0.5; s.headShape = "sphere";
-      s.hasHorns = true; s.hornLength = 0.45;
-      s.hasAntennae = true; s.antennaLength = 0.4;
-      s.hasBackpack = true; s.backpackSize = 0.55; // shell
-      s.extraPlating = 2;
-      s.legLength = 0.32;
-      break;
-    case "frog":
-      s.headSize = 0.65; s.headShape = "sphere";
-      s.legLength = 0.6; s.legThickness = 0.22;
-      s.hasAntennae = true; s.antennaLength = 0.18;
-      s.torsoWidth = 0.95; s.torsoHeight = 0.5;
-      s.visorStyle = "full";
-      break;
-    case "lizard":
-      s.headSize = 0.55; s.headShape = "cone";
-      s.hasTail = true; s.tailLength = 0.85; s.tailSegments = 6;
-      s.legStyle = "digitigrade"; s.legLength = 0.4;
-      s.extraPlating = 1;
-      break;
-    case "salamander":
-      s.headSize = 0.55; s.headShape = "cone";
-      s.hasTail = true; s.tailLength = 0.95; s.tailSegments = 7;
-      s.legLength = 0.32; s.legThickness = 0.16;
-      s.torsoHeight = 0.45;
-      break;
-    case "serpent":
-      s.headSize = 0.5; s.headShape = "cone";
-      s.hasTail = true; s.tailLength = 1.4; s.tailSegments = 9;
-      s.hasWings = true; s.wingSpan = 0.9; s.wingAngle = 0.2;
-      s.legLength = 0.18; s.legThickness = 0.1;
-      s.torsoHeight = 0.4; s.torsoWidth = 0.6;
-      break;
-    case "owl":
-      s.headSize = 0.65; s.headShape = "sphere";
-      s.hasWings = true; s.wingSpan = 1.3; s.wingAngle = 0.45;
-      s.hasAntennae = true; s.antennaLength = 0.3; // ear tufts
-      s.legLength = 0.35;
-      s.visorStyle = "full";
-      break;
-    case "bird":
-      s.headSize = 0.55; s.headShape = "cone";
-      s.hasWings = true; s.wingSpan = 1.4; s.wingAngle = 0.5;
-      s.hasTail = true; s.tailLength = 0.55; s.tailSegments = 4;
-      s.legStyle = "digitigrade"; s.legLength = 0.4;
-      break;
-    case "dragon":
-      s.headSize = 0.6; s.headShape = "cone";
-      s.hasHorns = true; s.hornLength = 0.5;
-      s.hasWings = true; s.wingSpan = 1.5; s.wingAngle = 0.5;
-      s.hasTail = true; s.tailLength = 0.95; s.tailSegments = 6;
-      s.extraPlating = 2;
-      s.legStyle = "digitigrade"; s.legLength = 0.5;
-      break;
-    case "fish":
-      s.headSize = 0.6; s.headShape = "cone";
-      s.hasWings = true; s.wingSpan = 0.7; s.wingAngle = 0.7; // fins
-      s.hasTail = true; s.tailLength = 0.7; s.tailSegments = 3;
-      s.legLength = 0.15; s.legThickness = 0.08;
-      s.torsoWidth = 0.6; s.torsoHeight = 0.6; s.torsoDepth = 1.0;
-      break;
-    case "crab":
-      s.torsoWidth = 1.05; s.torsoHeight = 0.45; s.torsoDepth = 0.95;
-      s.shoulderPadSize = 0.4;
-      s.hasAntennae = true; s.antennaLength = 0.25;
-      s.armLength = 0.55; s.armStyle = "tapered";
-      s.legLength = 0.3;
-      s.extraPlating = 2;
-      break;
-    case "turtle":
-      s.torsoWidth = 0.9; s.torsoHeight = 0.55;
-      s.hasBackpack = true; s.backpackSize = 0.85; // shell
-      s.hasTail = true; s.tailLength = 0.3; s.tailSegments = 2;
-      s.legLength = 0.32; s.legThickness = 0.22;
-      s.extraPlating = 3;
-      break;
-    case "bear":
-      s.scale *= 1.05;
-      s.headSize = 0.6; s.headShape = "sphere";
-      s.hasAntennae = true; s.antennaLength = 0.2;
-      s.torsoWidth = 1.1; s.torsoHeight = 0.7; s.torsoDepth = 0.95;
-      s.armThickness = 0.22; s.armLength = 0.55;
-      s.legLength = 0.5; s.legThickness = 0.28;
-      s.extraPlating = 2;
-      break;
-    case "monkey":
-      s.headSize = 0.55; s.headShape = "sphere";
-      s.armLength = 0.7; s.armStyle = "tapered";
-      s.hasTail = true; s.tailLength = 1.0; s.tailSegments = 7;
-      s.legStyle = "digitigrade"; s.legLength = 0.5;
-      break;
-    case "golem":
-      s.scale *= 1.15;
-      s.headShape = "box"; s.headSize = 0.55;
-      s.torsoWidth = 1.2; s.torsoHeight = 0.85; s.torsoDepth = 1.05;
-      s.armThickness = 0.28; s.armStyle = "box";
-      s.legThickness = 0.32; s.legLength = 0.55;
-      s.extraPlating = 3;
-      s.shoulderPadSize = 0.45;
-      break;
-    case "flutter":
-      s.scale *= 0.9;
-      s.headSize = 0.5;
-      s.hasWings = true; s.wingSpan = 1.5; s.wingAngle = 0.6;
-      s.hasAntennae = true; s.antennaLength = 0.45;
-      s.legLength = 0.25; s.legThickness = 0.1;
-      s.torsoHeight = 0.4; s.torsoWidth = 0.55;
-      break;
-    case "slime":
-      s.headSize = 0.85; s.headShape = "sphere";
-      s.torsoWidth = 1.0; s.torsoHeight = 0.4; s.torsoDepth = 1.0;
-      s.armLength = 0.25; s.armThickness = 0.1;
-      s.legLength = 0.15; s.legThickness = 0.18;
-      s.visorStyle = "round";
-      break;
-    case "bot":
-      s.scale *= 0.95;
-      s.headSize = 0.66; s.headShape = "box";
-      s.torsoWidth = 0.72; s.torsoHeight = 0.55; s.torsoDepth = 0.68;
-      s.armLength = 0.32; s.armThickness = 0.12; s.armStyle = "box";
-      s.legLength = 0.26; s.legThickness = 0.18; s.legStyle = "box";
-      s.hasAntennae = true; s.antennaLength = 0.28;
-      s.hasBackpack = true; s.backpackSize = 0.36;
-      s.hasVisor = true; s.visorStyle = "round";
-      s.extraPlating = Math.max(s.extraPlating, 1);
-      s.bootStyle = "rounded"; s.gauntletStyle = "rounded";
-      break;
-    case "drone":
-      s.scale *= 0.86;
-      s.headSize = 0.62; s.headShape = "sphere";
-      s.torsoWidth = 0.58; s.torsoHeight = 0.42; s.torsoDepth = 0.58;
-      s.armLength = 0.18; s.armThickness = 0.08;
-      s.legLength = 0.16; s.legThickness = 0.10; s.legStyle = "hoverpads";
-      s.hasWings = true; s.wingSpan = 1.0; s.wingAngle = 0.78;
-      s.hasAntennae = true; s.antennaLength = 0.36;
-      s.hasBackpackEngine = true; s.engineVentCount = 2;
-      s.hasVisor = true; s.visorStyle = "full";
-      break;
-    case "roller":
-      s.scale *= 0.9;
-      s.headSize = 0.56; s.headShape = "sphere";
-      s.torsoWidth = 0.88; s.torsoHeight = 0.44; s.torsoDepth = 0.98;
-      s.armLength = 0.24; s.armThickness = 0.10; s.armStyle = "tapered";
-      s.legLength = 0.18; s.legThickness = 0.16;
-      s.hasWheels = true; s.wheelStyle = "feet"; s.bootStyle = "wheeled";
-      s.hasBackpack = true; s.backpackSize = 0.42;
-      s.hasVisor = true; s.visorStyle = "round";
-      s.extraPlating = Math.max(s.extraPlating, 1);
-      break;
-  }
-}
-
-/** Type-themed accent flourishes that don't override archetype silhouette.
- *  Each type adds two or more visible flairs (horns, antennae, wings,
- *  visor, plating, panel lines, asymmetry, glowing tail, etc.) so a
- *  player can read the elemental type at a glance even before the colour
- *  palette registers. Renamed in this pass: "fire" → "flame" and "dark"
- *  → "evil" to keep the dex distinct from the obvious franchise. */
-function applyTypeAccents(t: ElementalType, s: RobotStyle): void {
-  switch (t) {
-    case "flame":
-      // Twin horns + a subtle asymmetric plate so flame creatures read
-      // as "battle-scarred fire-breathers" rather than just "orange".
-      s.hasHorns = true; s.hornLength = Math.max(s.hornLength, 0.35);
-      s.hasTail = s.hasTail || true;
-      s.tailLength = Math.max(s.tailLength, 0.55);
-      s.panelLineDensity = (s.panelLineDensity ?? 1.0) * 1.2;
-      s.asymmetry = Math.max(s.asymmetry, 0.15);
-      break;
-    case "electric":
-      // Long whip antennae + amplified emissive panel lines.
-      s.hasAntennae = true; s.antennaLength = Math.max(s.antennaLength, 0.55);
-      s.panelLineDensity = (s.panelLineDensity ?? 1.0) * 1.4;
-      break;
-    case "ice":
-      // Heavy plating like rime caked on, with a chest plate (backpack).
-      s.extraPlating = Math.max(s.extraPlating, 2);
-      s.hasBackpack = s.hasBackpack || true;
-      s.backpackSize = Math.max(s.backpackSize, 0.5);
-      break;
-    case "crystal":
-      // Geometric plating + cone horns reading as raw crystal shards.
-      s.extraPlating = Math.max(s.extraPlating, 3);
-      s.hasHorns = true; s.hornLength = Math.max(s.hornLength, 0.4);
-      break;
-    case "psychic":
-      // Full visor (no separate eyes) + tall single antenna for that
-      // mind-control silhouette.
-      s.visorStyle = "full";
-      s.hasAntennae = true; s.antennaLength = Math.max(s.antennaLength, 0.5);
-      break;
-    case "evil":
-      // Asymmetric, jagged silhouette: shoulder asymmetry + dense panel
-      // lines + a single longer horn make evil units look unhinged
-      // rather than merely shadowy.
-      s.panelLineDensity = (s.panelLineDensity ?? 1.0) * 1.6;
-      s.asymmetry = Math.max(s.asymmetry, 0.35);
-      s.hasHorns = true; s.hornLength = Math.max(s.hornLength, 0.45);
-      s.shoulderPadSize = Math.max(s.shoulderPadSize, 0.3);
-      break;
-    case "steel":
-      // Boxy heavy industrial silhouette.
-      s.extraPlating = Math.max(s.extraPlating, 3);
-      s.armStyle = "box";
-      s.shoulderPadSize = Math.max(s.shoulderPadSize, 0.32);
-      break;
-    case "dragon":
-      // Wings + horns + a long armoured tail.
-      s.hasWings = true; s.wingSpan = Math.max(s.wingSpan, 1.2);
-      s.hasHorns = true; s.hornLength = Math.max(s.hornLength, 0.45);
-      s.hasTail = true; s.tailLength = Math.max(s.tailLength, 1.0);
-      s.extraPlating = Math.max(s.extraPlating, 2);
-      break;
-    case "water":
-      // Side fins (small wings, swept back) + a flow-cell backpack so
-      // water mons stop looking like blue-painted normal mons.
-      s.hasWings = true; s.wingSpan = Math.max(s.wingSpan, 0.7);
-      s.wingAngle = Math.max(s.wingAngle, 0.65);
-      s.hasBackpack = s.hasBackpack || true;
-      s.backpackSize = Math.max(s.backpackSize, 0.45);
-      break;
-    case "grass":
-      // Leafy ear-antennae + a small back tuft (backpack) reading as
-      // sprouting foliage.
-      s.hasAntennae = true; s.antennaLength = Math.max(s.antennaLength, 0.45);
-      s.hasBackpack = s.hasBackpack || true;
-      s.backpackSize = Math.max(s.backpackSize, 0.4);
-      s.panelLineDensity = (s.panelLineDensity ?? 1.0) * 0.8;
-      break;
-    case "normal":
-      // Reads as a clean utility chassis — short tufts + tidy round
-      // visor, no extra plating clutter.
-      s.hasAntennae = s.hasAntennae || true;
-      s.antennaLength = Math.max(s.antennaLength, 0.25);
-      s.visorStyle = s.visorStyle === "full" ? "full" : "round";
-      break;
-    default:
-      break;
-  }
-}
-
-/** Bigger / shinier rare and legendary mons read as "boss-tier" without
- *  needing custom geometry per species. Uses Math.max so an archetype
- *  that already sets a higher value isn't shrunk back down. */
-function applyRarityFlair(s: RobotStyle, rarity: import("./BioSpecies").Rarity): void {
-  switch (rarity) {
-    case "rare":
-      s.scale *= 1.08;
-      s.extraPlating = Math.max(s.extraPlating, 1);
-      s.shoulderPadSize = Math.max(s.shoulderPadSize, 0.25);
-      s.hasPanelLines = true;
-      s.panelLineDensity = (s.panelLineDensity ?? 1.0) * 1.15;
-      break;
-    case "legendary":
-      s.scale *= 1.18;
-      s.extraPlating = Math.max(s.extraPlating, 2);
-      s.shoulderPadSize = Math.max(s.shoulderPadSize, 0.32);
-      s.panelLineDensity = (s.panelLineDensity ?? 1.0) * 1.3;
-      s.hasHorns = s.hasHorns || true;
-      s.hornLength = Math.max(s.hornLength, 0.42);
-      s.hasShield = s.hasShield || true;
-      s.shieldSize = Math.max(s.shieldSize, 0.8);
-      s.hasCannons = s.hasCannons || true;
-      s.cannonSize = Math.max(s.cannonSize, 0.26);
-      break;
-    case "uncommon":
-    case "common":
-    default:
-      break;
-  }
-}
-
-function isFlyer(a: Archetype): boolean {
-  return a === "owl" || a === "bird" || a === "serpent" || a === "dragon" || a === "flutter" || a === "fish" || a === "drone";
 }

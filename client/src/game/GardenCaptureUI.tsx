@@ -4,6 +4,23 @@ import {
   BIO_SPECIES, ALL_TYPES, TYPE_HEX, getSpeciesById,
   ElementalType, Rarity,
 } from "./BioSpecies";
+import {
+  deriveEvolutionStage, EVOLUTION_STAGE_NAMES, EVOLUTION_THRESHOLDS,
+} from "./CreatureMechaDesigner";
+
+/** Active followers auto-derive from the top-N captured creatures by level
+ *  (mirrors ActivePetSystem.syncFromCaptured). Kept here so the roster can
+ *  flag which creatures are live followers without a separate assignment UI. */
+const MAX_ACTIVE_PETS = 3;
+
+function computeActiveIds(captured: CapturedCreature[]): Set<string> {
+  const ranked = captured
+    .filter(c => !!getSpeciesById(c.speciesId))
+    .slice()
+    .sort((a, b) => (b.level ?? 1) - (a.level ?? 1))
+    .slice(0, MAX_ACTIVE_PETS);
+  return new Set(ranked.map(c => c.id));
+}
 
 interface GardenCaptureUIProps {
   open: boolean;
@@ -335,6 +352,7 @@ const RosterView: React.FC<{
   setRowRef: (id: string, el: HTMLDivElement | null) => void;
   onHover: (id: string) => void;
 }> = ({ captured, onDeploy, onCare, selectedId, setRowRef, onHover }) => {
+  const activeIds = useMemo(() => computeActiveIds(captured), [captured]);
   if (captured.length === 0) {
     return <div className="text-center text-zinc-500 py-8 text-sm">Garden roster empty. Find wild bio-creatures, helper bots, and sanctuary pets.</div>;
   }
@@ -347,27 +365,44 @@ const RosterView: React.FC<{
         const role = sp?.role ?? "Bio-companion";
         const rarity = sp?.rarity ?? "common";
         const focused = c.id === selectedId;
+        const isActive = activeIds.has(c.id);
+        const stage = deriveEvolutionStage(c.level, c.bondLevel ?? 0);
+        const stageName = EVOLUTION_STAGE_NAMES[stage];
+        // Next-stage requirement (null once the creature is at Prime).
+        const next = stage < 3 ? EVOLUTION_THRESHOLDS[stage] : null;
+        const nextName = stage < 3 ? EVOLUTION_STAGE_NAMES[stage + 1] : null;
         return (
           <div
             key={c.id}
             ref={(el) => setRowRef(c.id, el)}
             onMouseEnter={() => onHover(c.id)}
-            className={`bg-zinc-800/80 border border-lime-800 rounded-lg p-3 hover:border-lime-500 transition ${focused ? "ring-2 ring-amber-400 ring-offset-1 ring-offset-zinc-900" : ""}`}
+            className={`bg-zinc-800/80 border rounded-lg p-3 hover:border-lime-500 transition ${isActive ? "border-fuchsia-500" : "border-lime-800"} ${focused ? "ring-2 ring-amber-400 ring-offset-1 ring-offset-zinc-900" : ""}`}
           >
             <div className="flex items-start justify-between">
               <div className="flex-1">
                 <div className="flex items-center gap-3 flex-wrap">
                   <div className="text-white font-bold">{c.name}</div>
+                  {isActive && (
+                    <span className="px-2 py-[1px] rounded text-[9px] font-bold tracking-wider bg-fuchsia-500 text-black">ACTIVE</span>
+                  )}
                   <span
                     style={{ backgroundColor: color, color: "#0a0a0a" }}
                     className="px-2 py-[1px] rounded text-[9px] font-bold tracking-wider"
                   >{tp.toUpperCase()}</span>
+                  <span className="px-2 py-[1px] rounded text-[9px] font-bold tracking-wider bg-indigo-500/80 text-indigo-50">{stageName.toUpperCase()}</span>
                   <div className={`text-[10px] ${RARITY_COLOR[rarity]}`}>{RARITY_STARS[rarity]}</div>
                   <div className="text-lime-400 text-xs font-mono">LVL {c.level}</div>
                   <div className="text-cyan-300 text-xs font-mono">BOND {c.bondLevel ?? 0}</div>
                   <div className="text-emerald-300 text-[10px] uppercase">CARE {c.care ?? 0}/3</div>
                   <div className="text-zinc-500 text-[10px] uppercase">{role}</div>
                 </div>
+                {next && nextName ? (
+                  <div className="text-indigo-300/80 text-[10px] mt-1">
+                    → {nextName} at Lv {next.level} · Bond {next.bond}
+                  </div>
+                ) : (
+                  <div className="text-amber-300/80 text-[10px] mt-1">Fully evolved · Prime form</div>
+                )}
                 <div className="grid grid-cols-3 gap-2 mt-2 text-[11px]">
                   <Mini label="HP" value={c.hp.toString()} />
                   <Mini label="ATK" value={c.attackPower.toString()} />

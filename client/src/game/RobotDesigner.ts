@@ -79,12 +79,29 @@ export interface RobotStyle {
   gauntletStyle?: "standard" | "rounded" | "armored";
   hasPanelLines?: boolean;
   panelLineDensity?: number;
+
+  // --- Expressive Digimon-style face (creatures only). All optional and
+  // default OFF so enemy/companion/preset chassis are unaffected. Built by
+  // RobotFactory.buildFace when `hasFace` is true. ---
+  hasFace?: boolean;
+  faceStyle?: "twinEyes" | "insectEyes" | "visorFace" | "singleEye";
+  eyeSize?: number;
+  hasBrow?: boolean;
+  mouthStyle?: "none" | "grill" | "fang" | "jaw" | "beak";
+  hasCheekLights?: boolean;
+  /** Multiplies emissive brightness for evolved creatures (>= 1). */
+  emissiveBoost?: number;
 }
 
 export interface RobotDescriptor {
   name: string;
   faction: "enemy" | "ally" | "pet" | "neutral";
   style: RobotStyle;
+  /** When true the rig is built as separate NAMED meshes (no MergeMeshes)
+   *  so ActivePetSystem can animate limbs/glow/face by mesh name. Use ONLY
+   *  for the few animated followers — wild creatures stay merged for perf,
+   *  because MergeMeshes(disposeSource=true) destroys the named sub-meshes. */
+  articulate?: boolean;
 }
 
 export function createDefaultStyle(archetype: RobotArchetype = "scout"): RobotStyle {
@@ -290,5 +307,7 @@ export function validateStyle(style: RobotStyle): RobotStyle {
   s.shieldSize = Math.max(0.5, Math.min(2.5, s.shieldSize));
   s.extraPlating = Math.max(0, Math.min(3, Math.floor(s.extraPlating)));
   s.asymmetry = Math.max(0, Math.min(1, s.asymmetry));
+  if (s.eyeSize !== undefined) s.eyeSize = Math.max(0.05, Math.min(0.5, s.eyeSize));
+  if (s.emissiveBoost !== undefined) s.emissiveBoost = Math.max(1, Math.min(2.2, s.emissiveBoost));
   return s;
 }

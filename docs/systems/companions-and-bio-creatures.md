@@ -44,17 +44,59 @@ Files: [`BioCreatureSystem.ts`](../../client/src/game/BioCreatureSystem.ts)
 + [`BioSpecies.ts`](../../client/src/game/BioSpecies.ts)
 
 A 125+ entry collectible roster — robotic creatures with archetypes,
-elemental types, and rarity tiers.
+elemental types, and rarity tiers, styled as Pokémon/Digimon-flavored
+mecha-monsters (cute chibi battle-bots with expressive faces).
+
+### Visual pipeline — the mecha designer
+
+File: [`CreatureMechaDesigner.ts`](../../client/src/game/CreatureMechaDesigner.ts)
+
+`buildCreatureDescriptor(species, { level, bond, follower })` is the
+**single source of truth** for how every creature looks. It layers, in
+order:
+
+1. `baseChibiStyle` — the shared chibi chassis (stout torso, oversized
+   head, big face).
+2. `applyArchetype` — per-archetype silhouette (crawler / floater /
+   swarmer / brute / …).
+3. `applyTypeAccents` — elemental theming (horns, wings, glow colour).
+4. `applyRarityFlair` — rarer species get extra plating / flair.
+5. `applyFace` — eyes, brow, mouth, cheek-lights (drives `RobotStyle`'s
+   optional face fields, rendered by `RobotFactory.buildFace`).
+6. `applyEvolutionStage` — visible growth by stage (see below).
+
+Because **wild creatures and captured followers both call this exact
+function**, a follower looks identical to its wild form — just
+`follower: true` shrinks it ×0.85 and sets `articulate: true` so
+`RobotFactory` parents named limb/glow parts to the root (instead of
+merging) for per-frame animation in `ActivePetSystem`.
+
+### Evolution stages
+
+`deriveEvolutionStage(level, bond)` returns 0–3, gated on BOTH level and
+bond (`EVOLUTION_THRESHOLDS`): Prototype → Enhanced (lv≥4) → Advanced
+(lv≥10 & bond≥6) → Prime (lv≥18 & bond≥12). `EVOLUTION_STAGE_NAMES` holds
+the display labels. Higher stages scale the rig up and add plating/flair,
+so a well-bonded, high-level creature visibly outgrows a fresh capture.
+The Bio Garden roster shows each creature's current stage badge and the
+level/bond needed for the next one.
 
 ### Capture loop
 
 ```
 Player throws capture orb (CombatSystem) → CAPTURE_ORB_THROWN
-    → BioCreatureSystem rolls capture chance by rarity
+    → orb flies in an arc with a sparkle trail; target shudders
+    → on land: hitImpact flash + camera shake
+    → BioCreatureSystem rolls capture chance (captureChance())
+    → success: capture burst + levelUp burst + "Captured X!" message
+    → fail:    red flash + smoke puff + "X broke free!"; creature resumes
     → on success: CREATURE_CAPTURED { speciesId }
     → ProgressSync persists captured ids
     → HUD updates Dex
 ```
+
+The rolled capture chance (`captureChance()` = species base + garden
+bonus) is surfaced to the player as a percentage when the orb is thrown.
 
 ### Garden integration
 

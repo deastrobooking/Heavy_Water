@@ -15,10 +15,15 @@ export class RobotFactory {
   }
 
   private getMat(key: MatKey, style: RobotStyle): BABYLON.StandardMaterial {
-    const c =
+    const base =
       key === "primary" ? style.colors.primary :
       key === "secondary" ? style.colors.secondary :
       style.colors.emissive;
+    // Evolved creatures glow brighter — boost only the emissive channel. The
+    // boosted colour becomes part of the cache id below, so this stays cache-
+    // safe (a small, bounded set of distinct boosted colours).
+    const boost = key === "emissive" ? (style.emissiveBoost ?? 1) : 1;
+    const c = boost !== 1 ? base.scale(boost) : base;
 
     const id = `robotMat_${key}_${c.r.toFixed(2)}_${c.g.toFixed(2)}_${c.b.toFixed(2)}`;
     const cached = this.mats.get(id);
@@ -168,6 +173,10 @@ export class RobotFactory {
       };
       makeAntenna(-1);
       makeAntenna(1);
+    }
+
+    if (style.hasFace) {
+      this.buildFace(style, headY, primaryParts, secondaryParts, emissiveParts);
     }
 
     const shoulderY = torsoY + style.torsoHeight * 0.35;
@@ -690,32 +699,148 @@ export class RobotFactory {
       emissiveParts.push(vert);
     }
 
-    if (primaryParts.length > 0) {
-      const merged = BABYLON.Mesh.MergeMeshes(primaryParts, true, true, undefined, false, true);
-      if (merged) {
-        merged.name = `${desc.name}_primary`;
-        merged.material = this.getMat("primary", style);
-        merged.parent = root;
+    // Finalize each material group. Wild creatures MERGE (3 draw calls each,
+    // disposeSource=true) for perf. Animated followers keep their parts as
+    // separate NAMED meshes parented to the root so ActivePetSystem can find
+    // and animate limbs/glow/face by name — MergeMeshes would destroy those
+    // names (disposeSource), silently no-op-ing the follower animation.
+    const finalize = (parts: BABYLON.Mesh[], key: MatKey) => {
+      if (parts.length === 0) return;
+      if (desc.articulate) {
+        const mat = this.getMat(key, style);
+        for (const m of parts) {
+          m.material = mat;
+          m.isPickable = false;
+          m.parent = root;
+        }
+      } else {
+        const merged = BABYLON.Mesh.MergeMeshes(parts, true, true, undefined, false, true);
+        if (merged) {
+          merged.name = `${desc.name}_${key}`;
+          merged.material = this.getMat(key, style);
+          merged.parent = root;
+        }
       }
-    }
-    if (secondaryParts.length > 0) {
-      const merged = BABYLON.Mesh.MergeMeshes(secondaryParts, true, true, undefined, false, true);
-      if (merged) {
-        merged.name = `${desc.name}_secondary`;
-        merged.material = this.getMat("secondary", style);
-        merged.parent = root;
-      }
-    }
-    if (emissiveParts.length > 0) {
-      const merged = BABYLON.Mesh.MergeMeshes(emissiveParts, true, true, undefined, false, true);
-      if (merged) {
-        merged.name = `${desc.name}_emissive`;
-        merged.material = this.getMat("emissive", style);
-        merged.parent = root;
-      }
-    }
+    };
+    finalize(primaryParts, "primary");
+    finalize(secondaryParts, "secondary");
+    finalize(emissiveParts, "emissive");
 
     return root;
+  }
+
+  /**
+   * Build an expressive Digimon-style face on the head front: glowing eyes
+   * (named "eye" so they can pulse), dark eye sockets ("eyb"), an optional
+   * angled brow ("brw"), a mouth ("mth" — grill/fang/jaw/beak) and cheek
+   * lights ("chk"). Parts are pushed into the caller's material groups so
+   * they merge with wild creatures and stay named for animated followers.
+   */
+  private buildFace(
+    style: RobotStyle,
+    headY: number,
+    primary: BABYLON.Mesh[],
+    secondary: BABYLON.Mesh[],
+    emissive: BABYLON.Mesh[],
+  ): void {
+    const hs = style.headSize;
+    const front = hs * 0.46; // z of the face plane (works for sphere + box heads)
+    const eyeSize = style.eyeSize ?? hs * 0.22;
+    const faceStyle = style.faceStyle ?? "twinEyes";
+
+    const addEye = (sideX: number, up: number, size: number, flat = false) => {
+      const socket = BABYLON.MeshBuilder.CreateSphere("eyb", { diameter: size * 1.4, segments: 8 }, this.scene);
+      socket.position.set(sideX, headY + up, front - size * 0.15);
+      if (flat) socket.scaling.z = 0.55;
+      secondary.push(socket);
+
+      const pupil = BABYLON.MeshBuilder.CreateSphere("eye", { diameter: size, segments: 8 }, this.scene);
+      pupil.position.set(sideX, headY + up, front);
+      if (flat) pupil.scaling.z = 0.45;
+      emissive.push(pupil);
+    };
+
+    if (faceStyle === "visorFace") {
+      const band = BABYLON.MeshBuilder.CreateBox("v", {
+        width: hs * 0.82, height: hs * 0.24, depth: hs * 0.12,
+      }, this.scene);
+      band.position.set(0, headY + hs * 0.06, front);
+      emissive.push(band);
+    } else if (faceStyle === "insectEyes") {
+      addEye(-hs * 0.27, hs * 0.06, eyeSize * 1.3, true);
+      addEye(hs * 0.27, hs * 0.06, eyeSize * 1.3, true);
+    } else if (faceStyle === "singleEye") {
+      addEye(0, hs * 0.05, eyeSize * 1.5);
+    } else {
+      addEye(-hs * 0.22, hs * 0.06, eyeSize);
+      addEye(hs * 0.22, hs * 0.06, eyeSize);
+    }
+
+    if (style.hasBrow && faceStyle !== "visorFace") {
+      const makeBrow = (sideX: number, tilt: number) => {
+        const brow = BABYLON.MeshBuilder.CreateBox("brw", {
+          width: hs * 0.3, height: hs * 0.06, depth: hs * 0.1,
+        }, this.scene);
+        brow.position.set(sideX, headY + hs * 0.2, front - 0.01);
+        brow.rotation.z = tilt;
+        secondary.push(brow);
+      };
+      // inner ends angled down = a determined/fierce expression
+      makeBrow(-hs * 0.22, -0.35);
+      makeBrow(hs * 0.22, 0.35);
+    }
+
+    const mouth = style.mouthStyle ?? "none";
+    if (mouth === "grill") {
+      for (let i = 0; i < 3; i++) {
+        const bar = BABYLON.MeshBuilder.CreateBox("mth", {
+          width: hs * 0.34, height: hs * 0.03, depth: hs * 0.08,
+        }, this.scene);
+        bar.position.set(0, headY - hs * 0.16 + i * hs * 0.06, front);
+        emissive.push(bar);
+      }
+    } else if (mouth === "fang") {
+      const jaw = BABYLON.MeshBuilder.CreateBox("mth", {
+        width: hs * 0.4, height: hs * 0.07, depth: hs * 0.12,
+      }, this.scene);
+      jaw.position.set(0, headY - hs * 0.18, front - hs * 0.02);
+      secondary.push(jaw);
+      for (const sx of [-1, 1]) {
+        const fang = BABYLON.MeshBuilder.CreateCylinder("mth", {
+          height: hs * 0.12, diameterTop: 0, diameterBottom: hs * 0.06, tessellation: 6,
+        }, this.scene);
+        fang.rotation.x = Math.PI; // point down
+        fang.position.set(sx * hs * 0.12, headY - hs * 0.24, front);
+        secondary.push(fang);
+      }
+    } else if (mouth === "jaw") {
+      const jaw = BABYLON.MeshBuilder.CreateBox("mth", {
+        width: hs * 0.42, height: hs * 0.12, depth: hs * 0.16,
+      }, this.scene);
+      jaw.position.set(0, headY - hs * 0.2, front - hs * 0.02);
+      secondary.push(jaw);
+      const teeth = BABYLON.MeshBuilder.CreateBox("mth", {
+        width: hs * 0.38, height: hs * 0.04, depth: hs * 0.1,
+      }, this.scene);
+      teeth.position.set(0, headY - hs * 0.16, front);
+      emissive.push(teeth);
+    } else if (mouth === "beak") {
+      const beak = BABYLON.MeshBuilder.CreateCylinder("mth", {
+        height: hs * 0.28, diameterTop: 0, diameterBottom: hs * 0.22, tessellation: 6,
+      }, this.scene);
+      beak.rotation.x = Math.PI / 2; // point forward
+      beak.position.set(0, headY - hs * 0.06, front + hs * 0.08);
+      secondary.push(beak);
+    }
+
+    if (style.hasCheekLights) {
+      for (const sx of [-1, 1]) {
+        const cheek = BABYLON.MeshBuilder.CreateSphere("chk", { diameter: hs * 0.16, segments: 8 }, this.scene);
+        cheek.scaling.z = 0.5;
+        cheek.position.set(sx * hs * 0.32, headY - hs * 0.02, front - hs * 0.05);
+        emissive.push(cheek);
+      }
+    }
   }
 
   buildFromTheme(themeId: RobotThemeId, name: string, position: BABYLON.Vector3): BABYLON.TransformNode {
