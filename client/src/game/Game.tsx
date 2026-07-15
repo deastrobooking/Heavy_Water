@@ -4295,6 +4295,7 @@ export const Game: React.FC = () => {
         <MainMenu
           onStart={handleStart}
           onCustomize={() => setShowCustomizer(true)}
+          onLogout={handleLogout}
           saveSummary={saveSummary}
         />
       )}

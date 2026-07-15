@@ -29,6 +29,7 @@ export interface StartPayload {
 interface MainMenuProps {
   onStart: (payload: StartPayload) => void;
   onCustomize?: () => void;
+  onLogout?: () => void;
   saveSummary?: SaveSummary | null;
 }
 
@@ -49,7 +50,7 @@ const formatSavedAt = (ts: number): string => {
   return `${Math.floor(ms / 86_400_000)} d ago`;
 };
 
-export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize, saveSummary }) => {
+export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize, onLogout, saveSummary }) => {
   const [showGuide, setShowGuide] = useState(false);
   const [showVersus, setShowVersus] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -150,6 +151,21 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize, saveSu
 
   return (
     <div className="fixed inset-0 bg-gradient-to-b from-black via-purple-950 to-black flex flex-col items-center overflow-hidden">
+      {/* Logout button — top-right corner, only for authenticated sessions */}
+      {onLogout && (
+        <button
+          onClick={onLogout}
+          className="absolute top-4 right-4 z-50 px-4 py-2 text-[10px] font-bold tracking-widest
+                     bg-black/70 border border-red-500/60 text-red-400 rounded-lg
+                     hover:bg-red-500/20 hover:border-red-400 hover:text-red-300
+                     backdrop-blur-md transition-all duration-200
+                     shadow-md shadow-red-900/30"
+          style={{ fontFamily: "'Press Start 2P', monospace" }}
+        >
+          ⏻ LOGOUT
+        </button>
+      )}
+
       {/* Star field */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         {stars.map((s, i) => (
