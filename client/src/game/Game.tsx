@@ -55,6 +55,7 @@ import { ExplosionSystem } from "./ExplosionSystem";
 import { PropAudioSystem } from "./PropAudioSystem";
 import { SoundSystem } from "./SoundSystem";
 import { SkySystem } from "./SkySystem";
+import { BoundarySystem } from "./BoundarySystem";
 import { MiningSystem } from "./MiningSystem";
 import { EnemyBaseSystem } from "./EnemyBaseSystem";
 import { LevelSystem, WorldLevel } from "./LevelSystem";
@@ -164,6 +165,7 @@ export const Game: React.FC = () => {
   // runs every render frame). Reset on initializeGame / handleRestart.
   const deathHandledRef = useRef(false);
   const playerRef = useRef<PlayerController | null>(null);
+  const boundarySystemRef = useRef<BoundarySystem | null>(null);
   const weaponsRef = useRef<WeaponsSystem | null>(null);
   const enemySystemRef = useRef<EnemySystem | null>(null);
   const aerialEnemyRef = useRef<AerialEnemySystem | null>(null);
@@ -556,6 +558,12 @@ export const Game: React.FC = () => {
           engine.getCamera(),
         );
         skyRef.current = sky;
+
+        // Glowing barrier at each level's playable-area edge + soft clamp,
+        // so fast travel / flight can never strand the player off-map where
+        // no level geometry or game logic exists.
+        const boundarySystem = new BoundarySystem(scene);
+        boundarySystemRef.current = boundarySystem;
 
         const player = new PlayerController(scene, engine.getCamera());
         player.setBuildingColliders(cityGenerator.getWallColliders());
@@ -1148,6 +1156,9 @@ export const Game: React.FC = () => {
           const nextWorldLevel: WorldLevel | null =
             typeof payload?.level === "number" ? payload.level as WorldLevel : null;
           const levelChanged = payload?.levelChanged !== false;
+          if (nextWorldLevel !== null) {
+            boundarySystemRef.current?.setLevel(nextWorldLevel);
+          }
           // Compute the target zone once, then tear down any inactive
           // side-zone before mounting the new one. The old interleaved
           // mount/dispose order let a later-disposed zone restore the
@@ -1678,6 +1689,9 @@ export const Game: React.FC = () => {
         // load handler's subsequent LEVEL_STARTED emit will swap to the
         // correct roster (setLevel disposes the L1 roster first).
         rescueSystem.setLevel(levelSystem.getCurrentLevel());
+        // Same fresh-boot gap applies to the boundary barrier: seed it for
+        // the current level since LEVEL_STARTED doesn't fire at construction.
+        boundarySystem.setLevel(levelSystem.getCurrentLevel());
 
         const gamepad = new GamepadInput(engine.getCamera());
         gamepad.onConnectionChange((connected, padId) => {
@@ -2760,6 +2774,20 @@ export const Game: React.FC = () => {
           effects.update(dt);
           explosions.update(dt);
           sky.update(dt);
+          {
+            const clamped = boundarySystem.update(dt, playerPos);
+            if (clamped) {
+              // While mounted, the player's position is overwritten from the
+              // vehicle each tick — clamp the vehicle too or the barrier is
+              // driveable-through.
+              const activeVehicle = vehicleSystem.getActive();
+              if (player.isMounted() && activeVehicle) {
+                activeVehicle.position.x = clamped.x;
+                activeVehicle.position.z = clamped.z;
+              }
+              player.setPosition(clamped);
+            }
+          }
           multiplayer.update(dt);
           invasionDirector.update(dt);
 
@@ -2995,6 +3023,7 @@ export const Game: React.FC = () => {
         // listener-owning friendly NPCs / rescue / multiplayer trees all
         // hold EventBus subscriptions + scene refs. Without explicit
         // dispose here they'd leak listeners across a failed-init retry.
+        if (boundarySystemRef.current) { try { boundarySystemRef.current.dispose(); } catch {} boundarySystemRef.current = null; }
         if (sanctuarySystemRef.current) { try { sanctuarySystemRef.current.dispose(); } catch {} sanctuarySystemRef.current = null; }
         if (pontiacLabSystemRef.current) { try { pontiacLabSystemRef.current.dispose(); } catch {} pontiacLabSystemRef.current = null; }
         if (spaceLevelSystemRef.current) { try { spaceLevelSystemRef.current.dispose(); } catch {} spaceLevelSystemRef.current = null; }

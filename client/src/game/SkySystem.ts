@@ -104,7 +104,17 @@ export class SkySystem {
       varying vec3 vPos;
       void main(){
         vPos = position;
-        gl_Position = worldViewProjection * vec4(position, 1.0);
+        vec4 pos = worldViewProjection * vec4(position, 1.0);
+        // Pin the sky to the far plane (classic skybox trick). Without this
+        // the dome is a real 450-radius sphere: any building/floor farther
+        // than ~450 units from the camera sat BEHIND the dome's depth, so
+        // whenever the dome happened to draw after them (overcast/cloud
+        // shading passing overhead made it obvious) the sky painted right
+        // over distant geometry — "buildings lose their textures" and the
+        // sky "impacting the floor". Forcing z to ~w puts every sky
+        // fragment at max depth so real geometry always wins the depth test.
+        pos.z = pos.w * 0.9999;
+        gl_Position = pos;
       }
     `;
     BABYLON.Effect.ShadersStore["skyGradientFragmentShader"] = `
