@@ -78,6 +78,8 @@ import { DamageType } from "./DamageSystem";
 import { GameUI } from "./GameUI";
 import { MainMenu, SaveSummary } from "./MainMenu";
 import { CharacterEditor, refreshEnemyStyleOverrides } from "./CharacterEditor";
+import { CreatorSuite } from "./CreatorSuite";
+import { designsForSnapshot, mergeDesignsFromSnapshot, drainDeployQueue, getDesign, descriptorFromDesign } from "./CreatorDesigns";
 import AuthUI from "./AuthUI";
 import type { TravelWarpPoint } from "./UpgradeMenu";
 
@@ -308,6 +310,7 @@ export const Game: React.FC = () => {
   const [lobbyRooms, setLobbyRooms] = useState<any[]>([]);
   const [showLobby, setShowLobby] = useState(false);
   const [showCustomizer, setShowCustomizer] = useState(false);
+  const [showCreator, setShowCreator] = useState(false);
   const [selectedBlock, setSelectedBlock] = useState<BlockType | null>(null);
   const [selectedBlockDef, setSelectedBlockDef] = useState<BlockDefinition | null>(null);
   const [hotbarBlocks, setHotbarBlocks] = useState<BlockType[]>([]);
@@ -1988,6 +1991,10 @@ export const Game: React.FC = () => {
             // Active bio-creature pet assignments (which creatures follow
             // the player and their active-pet levels).
             activePets: activePetSystem.serialize(),
+            // Creator Suite designs — mirrored from the local design store
+            // so player-made robots/pets/characters/enemies follow the
+            // cloud save across devices.
+            creatorDesigns: designsForSnapshot(),
           };
         };
 
@@ -2249,6 +2256,9 @@ export const Game: React.FC = () => {
               // `registerStructure` reads `savedLevels` to pre-bump the
               // newly-spawned structure to the saved tier. Wiring this
               // after worldLevel restore would race past that mount.
+              // Creator Suite designs — merge the cloud copy into the local
+              // store (newest updatedAt wins) so designs follow the account.
+              mergeDesignsFromSnapshot(snap.creatorDesigns);
               if (snap.baseStructureLevels) {
                 baseSystem.applyLoadedLevels(snap.baseStructureLevels);
                 // Companion cap is derived from lab level — re-sync it
@@ -2279,6 +2289,48 @@ export const Game: React.FC = () => {
           // doesn't get stuck without one. (No-op until currentUser exists.)
           startAutosaveTimer();
         }
+
+        // ---- Creator Suite deploy queue ----
+        // The editor lives on the main menu (and can be opened mid-run), so
+        // deploys are queued in the design store and drained here: robots &
+        // pets join the companion squad, enemies spawn as hostile test units
+        // near the player. Polled so a deploy queued from an in-game open of
+        // the editor takes effect within a couple of seconds.
+        const consumeCreatorDeploys = () => {
+          const reqs = drainDeployQueue();
+          for (const req of reqs) {
+            const design = getDesign(req.designId);
+            if (!design) continue;
+            const descriptor = descriptorFromDesign(design);
+            if (!descriptor) continue;
+            if (req.action === "enemy") {
+              // Spawn ahead of the player so the test unit is visible.
+              const p = player.getPosition();
+              const fwd = scene.activeCamera
+                ? scene.activeCamera.getDirection(BABYLON.Vector3.Forward()).normalize()
+                : new BABYLON.Vector3(0, 0, 1);
+              const pos = new BABYLON.Vector3(p.x + fwd.x * 18, p.y + 1.5, p.z + fwd.z * 18);
+              const unit = enemySystem.spawnCustomEnemy(descriptor, pos);
+              showMessage(unit
+                ? `TEST ENEMY DEPLOYED: ${design.name.toUpperCase()}`
+                : `ENEMY CAP REACHED — ${design.name.toUpperCase()} NOT SPAWNED`, 2500);
+            } else {
+              const ok = companionSystem.addCompanion(`creator_${design.id}`, player.getPosition(), {
+                allowDuplicate: true,
+                customDescriptor: descriptor,
+                customType: design.category === "pet" ? "pet" : "ally",
+                design: design.robotJson,
+              });
+              showMessage(ok
+                ? `${design.name.toUpperCase()} JOINED YOUR SQUAD`
+                : `SQUAD FULL — ${design.name.toUpperCase()} NOT DEPLOYED`, 2500);
+              if (ok) void doSaveProgress();
+            }
+          }
+        };
+        window.setTimeout(consumeCreatorDeploys, 4000);
+        const creatorDeployTimer = window.setInterval(consumeCreatorDeploys, 3000);
+        scene.onDisposeObservable.add(() => window.clearInterval(creatorDeployTimer));
 
         bus.on(GameEvents.PLAYER_LEVEL_UP, () => {
           // Per-level damage scaling is pushed every time the player
@@ -4479,6 +4531,7 @@ export const Game: React.FC = () => {
         <MainMenu
           onStart={handleStart}
           onCustomize={() => setShowCustomizer(true)}
+          onCreatorSuite={() => setShowCreator(true)}
           onLogout={handleLogout}
           saveSummary={saveSummary}
         />
@@ -4486,6 +4539,10 @@ export const Game: React.FC = () => {
 
       {showCustomizer && (
         <CharacterEditor onClose={() => setShowCustomizer(false)} />
+      )}
+
+      {showCreator && (
+        <CreatorSuite onClose={() => setShowCreator(false)} inGame={gamePhase === "playing"} />
       )}
 
       <canvas

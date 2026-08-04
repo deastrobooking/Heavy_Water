@@ -1,6 +1,6 @@
 import * as BABYLON from "@babylonjs/core";
 import { RobotFactory } from "./RobotFactory";
-import { RobotDescriptor } from "./RobotDesigner";
+import { RobotDescriptor, deserializeRobot, serializeRobot, validateStyle } from "./RobotDesigner";
 import { ALLY_PRESETS, PET_PRESETS } from "./RobotPresets";
 import { EventBus, GameEvents } from "./EventBus";
 import { getBlueprint, buildAssembledDescriptor, assemblyQuality } from "./AssemblyBlueprints";
@@ -53,6 +53,9 @@ interface ActiveCompanion {
   baseAttackCooldown: number;
   /** Set only for Lab-assembled units — the recipe that rebuilds them. */
   assembly?: AssemblyRecipe;
+  /** Set only for Creator-Suite units — the serialized descriptor that
+   *  rebuilds them deterministically on load (self-contained, no recipe). */
+  design?: string;
 }
 
 export interface CompanionUpgradeInfo {
@@ -151,7 +154,7 @@ export class CompanionSystem {
     return this.maxCompanions;
   }
 
-  addCompanion(presetName: string, playerPos: BABYLON.Vector3, options?: { allowDuplicate?: boolean; customDescriptor?: RobotDescriptor; customType?: CompanionType; assembly?: AssemblyRecipe }): boolean {
+  addCompanion(presetName: string, playerPos: BABYLON.Vector3, options?: { allowDuplicate?: boolean; customDescriptor?: RobotDescriptor; customType?: CompanionType; assembly?: AssemblyRecipe; design?: string }): boolean {
     if (this.companions.length >= this.maxCompanions) return false;
     if (!options?.allowDuplicate && !options?.customDescriptor && this.collected.has(presetName)) return false;
 
@@ -228,6 +231,7 @@ export class CompanionSystem {
       weaponLevel: 0,
       baseAttackCooldown: behavior.attackCooldown,
       assembly: options?.assembly,
+      design: options?.design,
     };
 
     // Assembled units scale their base stats by part quality (tier-driven).
@@ -565,13 +569,14 @@ export class CompanionSystem {
    * `weaponLevel` all survive death + restart. Without this, hard restarts
    * wiped every helper upgrade the player paid for.
    */
-  serializeForSave(): { presetName: string; type: CompanionType; level: number; weaponLevel: number; assembly?: AssemblyRecipe }[] {
+  serializeForSave(): { presetName: string; type: CompanionType; level: number; weaponLevel: number; assembly?: AssemblyRecipe; design?: string }[] {
     return this.companions.map(c => ({
       presetName: c.presetName,
       type: c.type,
       level: c.level,
       weaponLevel: c.weaponLevel,
       ...(c.assembly ? { assembly: c.assembly } : {}),
+      ...(c.design ? { design: c.design } : {}),
     }));
   }
 
@@ -582,7 +587,7 @@ export class CompanionSystem {
    * cumulative level + weaponLevel investment is replayed in-place.
    */
   applyLoadedCompanions(
-    saved: { presetName: string; type: CompanionType; level: number; weaponLevel: number; assembly?: AssemblyRecipe }[],
+    saved: { presetName: string; type: CompanionType; level: number; weaponLevel: number; assembly?: AssemblyRecipe; design?: string }[],
     playerPos: BABYLON.Vector3,
   ): void {
     // Wipe any current roster first so we never end up with a duplicated set.
@@ -609,11 +614,24 @@ export class CompanionSystem {
         }
         if (!customDescriptor) continue; // unknown blueprint — skip safely
       }
+      // Creator-Suite units are self-contained: the serialized descriptor
+      // itself is the persisted recipe. Re-clamp on load so a hand-edited
+      // save can't produce out-of-range geometry.
+      if (!customDescriptor && entry.design) {
+        try {
+          const d = deserializeRobot(entry.design);
+          d.style = validateStyle(d.style);
+          customDescriptor = d;
+        } catch {
+          continue; // corrupt design payload — skip safely
+        }
+      }
       const ok = this.addCompanion(entry.presetName, playerPos, {
         allowDuplicate: true,
         customType: entry.type,
         customDescriptor,
         assembly: entry.assembly,
+        design: entry.design,
       });
       if (!ok) continue;
       const c = this.companions[this.companions.length - 1];

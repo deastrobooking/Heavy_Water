@@ -4,6 +4,7 @@ import { EventBus, GameEvents } from "./EventBus";
 import { DamageInfo, DamageResult, DamageResistance, IDamageable, DamageType, applyDamage } from "./DamageSystem";
 import { RobotFactory } from "./RobotFactory";
 import { ROBOT_PRESETS } from "./RobotPresets";
+import { RobotDescriptor } from "./RobotDesigner";
 import { HumanoidCharacter } from "./HumanoidCharacter";
 import { HUMANOID_PRESETS } from "./HumanoidPresets";
 import { BossVariant, BossVariantId, BOSS_VARIANTS, getBossVariant } from "./BossVariants";
@@ -1699,6 +1700,33 @@ export class EnemySystem {
     muzzle.material = trimMat;
 
     return hitbox;
+  }
+
+  /** Spawn a hostile test unit from a player-made Creator Suite design.
+   *  Visuals come from the custom RobotDescriptor; stats/AI reuse the
+   *  "heavy" config template scaled by the descriptor's size so the unit
+   *  behaves like a normal ground elite. Counts against maxEnemies. */
+  spawnCustomEnemy(descriptor: RobotDescriptor, position: BABYLON.Vector3): EnemyUnit | null {
+    if (this.enemies.length >= this.maxEnemies) return null;
+    const root = this.robotFactory.createRobot(descriptor, position);
+    const s = descriptor.style;
+    // Hitbox sized from the descriptor: legs + torso + head, capped to sane
+    // elite proportions so an oversized design can't become unhittable.
+    const bodyH = Math.max(1.6, Math.min(7.0, (s.legLength + s.torsoHeight + s.headSize) * s.scale));
+    const bodyR = Math.max(0.5, Math.min(1.9, s.torsoWidth * 0.55 * s.scale));
+    const hitbox = BABYLON.MeshBuilder.CreateCapsule(`enemyHit_custom_${Date.now()}`, {
+      height: bodyH, radius: bodyR,
+    }, this.scene);
+    hitbox.isVisible = false;
+    hitbox.position.copyFrom(position);
+    root.parent = hitbox;
+    root.position = BABYLON.Vector3.Zero();
+    root.position.y = -bodyH * 0.5;
+    const waveMultiplier = 1 + (this.waveNumber - 1) * 0.2;
+    const enemy = new EnemyUnit(hitbox, "heavy", waveMultiplier);
+    this.enemies.push(enemy);
+    this.bus.emit(GameEvents.ENEMY_SPAWNED, { type: "heavy", position });
+    return enemy;
   }
 
   spawnEnemy(playerPosition: BABYLON.Vector3): void {

@@ -165,6 +165,14 @@ export interface ProgressSnapshot {
    *  Up to 3; separate from companions/ allies. Each entry is a captured
    *  creature id + its active-pet level (1-50). */
   activePets?: Array<{ creatureId: string; level: number }>;
+  /** Player-made Creator Suite designs (robots / pets / characters /
+   *  enemies). Mirrored from the local design store so designs follow the
+   *  cloud save across devices. */
+  creatorDesigns?: Array<{
+    id: string; name: string; category: string;
+    createdAt: number; updatedAt: number;
+    robotJson?: string; character?: unknown;
+  }>;
 }
 
 export async function loadProgress(): Promise<ProgressSnapshot | null> {

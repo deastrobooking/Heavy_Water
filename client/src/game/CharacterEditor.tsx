@@ -82,6 +82,14 @@ export function refreshEnemyStyleOverrides(): EnemyStyleOverrides {
   }
 }
 
+/** Persist a character through the same path the editor's SAVE uses —
+ *  exported so the Creator Suite can apply a character design to the
+ *  player without duplicating the storage key / cache-refresh logic. */
+export function saveCharacterToStorage(c: SavedCharacter): void {
+  localStorage.setItem(CHARACTER_STORAGE_KEY, JSON.stringify(c));
+  refreshEnemyStyleOverrides();
+}
+
 export function loadSavedCharacter(): SavedCharacter | null {
   try {
     const raw = localStorage.getItem(CHARACTER_STORAGE_KEY);

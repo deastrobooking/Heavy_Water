@@ -29,6 +29,7 @@ export interface StartPayload {
 interface MainMenuProps {
   onStart: (payload: StartPayload) => void;
   onCustomize?: () => void;
+  onCreatorSuite?: () => void;
   onLogout?: () => void;
   saveSummary?: SaveSummary | null;
 }
@@ -50,7 +51,7 @@ const formatSavedAt = (ts: number): string => {
   return `${Math.floor(ms / 86_400_000)} d ago`;
 };
 
-export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize, onLogout, saveSummary }) => {
+export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize, onCreatorSuite, onLogout, saveSummary }) => {
   const [showGuide, setShowGuide] = useState(false);
   const [showVersus, setShowVersus] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -73,10 +74,11 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart, onCustomize, onLogo
     () => ([
       { id: "start", label: "START MISSION", activate: () => onStart({ mode: "campaign" }) },
       ...(onCustomize ? [{ id: "customize", label: "CUSTOMIZE", activate: onCustomize }] : []),
+      ...(onCreatorSuite ? [{ id: "creator", label: "CREATOR SUITE", activate: onCreatorSuite }] : []),
       { id: "versus", label: "VERSUS", activate: () => setShowVersus(true) },
       { id: "guide", label: "GUIDE", activate: () => setShowGuide(true) },
     ]),
-    [onStart, onCustomize],
+    [onStart, onCustomize, onCreatorSuite],
   );
 
   useEffect(() => {
