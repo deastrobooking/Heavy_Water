@@ -99,7 +99,9 @@ interface GameUIProps {
   labCapacityMax?: number;
   labUpgradeCost?: { gears: number; cores: number; circuits: number } | null;
   labCanUpgrade?: boolean;
+  labPartCounts?: Record<string, number>;
   onLabBuild?: (presetName: string) => void;
+  onLabAssemble?: (blueprintId: string, partIds: string[]) => void;
   onLabUpgrade?: () => void;
   onLabClose?: () => void;
   gardenOpen?: boolean;
@@ -219,7 +221,9 @@ export const GameUI: React.FC<GameUIProps> = ({
   labCapacityMax = 3,
   labUpgradeCost = null,
   labCanUpgrade = false,
+  labPartCounts = {},
   onLabBuild,
+  onLabAssemble,
   onLabUpgrade,
   onLabClose,
   gardenOpen = false,
@@ -948,7 +952,9 @@ export const GameUI: React.FC<GameUIProps> = ({
         capacityMax={labCapacityMax}
         upgradeCost={labUpgradeCost}
         canUpgrade={labCanUpgrade}
+        partCounts={labPartCounts}
         onBuild={(p) => onLabBuild?.(p)}
+        onAssemble={(bp, parts) => onLabAssemble?.(bp, parts)}
         onUpgradeLab={() => onLabUpgrade?.()}
         onClose={() => onLabClose?.()}
       />

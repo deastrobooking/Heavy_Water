@@ -3,6 +3,7 @@ import { EventBus, GameEvents } from "./EventBus";
 import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
 import { CRAFTING_MATERIALS } from "./CraftingSystem";
 import { JEWEL_DEFS, type JewelTier } from "./JewelSystem";
+import { MODULAR_PART_DEFINITIONS, getPartInfo, rollEnemyModularPart } from "./ModularParts";
 
 export type PickupType =
   | "gear"
@@ -13,7 +14,8 @@ export type PickupType =
   | "nano_fiber"
   | "bio_essence"
   | "health_kit"
-  | "jewel";
+  | "jewel"
+  | "modular_part";
 
 export interface PickupSpawnRequest {
   type: PickupType;
@@ -22,6 +24,9 @@ export interface PickupSpawnRequest {
   /** Only meaningful when `type === "jewel"`. Selects which Power-Jewel
    *  item id is granted on collect (and which colour / mesh is rendered). */
   jewelTier?: JewelTier;
+  /** Only meaningful when `type === "modular_part"`. The exact assembly
+   *  part item id (see ModularParts.ts) granted on collect. */
+  partId?: string;
 }
 
 interface ActivePickup {
@@ -33,6 +38,8 @@ interface ActivePickup {
   weaponId?: string;
   /** Tier of the dropped jewel (only set when `type === "jewel"`). */
   jewelTier?: JewelTier;
+  /** Assembly part item id (only set when `type === "modular_part"`). */
+  partId?: string;
   bobOffset: number;
   bobBase: number;
   age: number;
@@ -56,6 +63,16 @@ const PICKUP_COLORS: Record<PickupType, BABYLON.Color3> = {
   // Default jewel colour — overridden per-instance by jewelTier in
   // createPickupMesh() so each tier glows its own hue.
   jewel: new BABYLON.Color3(1.0, 0.4, 0.85),
+  // Default part colour — overridden per-instance by the part's tier in
+  // createPickupMesh() so Prime parts glow amber, Refined violet.
+  modular_part: new BABYLON.Color3(0.55, 0.75, 1.0),
+};
+
+/** Per-tier glow for modular assembly parts (1 = Standard … 3 = Prime). */
+const PART_TIER_COLORS: Record<number, BABYLON.Color3> = {
+  1: new BABYLON.Color3(0.55, 0.75, 1.0),
+  2: new BABYLON.Color3(0.75, 0.4, 1.0),
+  3: new BABYLON.Color3(1.0, 0.75, 0.2),
 };
 
 const PICKUP_LABELS: Record<PickupType, string> = {
@@ -68,6 +85,7 @@ const PICKUP_LABELS: Record<PickupType, string> = {
   bio_essence: "BIO ESSENCE",
   health_kit: "HEALTH",
   jewel: "POWER JEWEL",
+  modular_part: "ASSEMBLY PART",
 };
 
 /** Roll a Power-Jewel drop. Returns null when the drop misses entirely.
@@ -304,6 +322,10 @@ export class PickupSystem {
       }
     }
     if (jewel) drops.push({ type: "jewel", amount: 1, jewelTier: jewel });
+    // Modular assembly parts (Lab ASSEMBLY tab). Tougher enemies drop more
+    // often and skew toward higher tiers — see ModularParts.ts tables.
+    const part = rollEnemyModularPart(data.type);
+    if (part) drops.push({ type: "modular_part", amount: part.amount, partId: part.partId });
     this.spawn(data.position, drops, 0.8);
   }
 
@@ -325,6 +347,10 @@ export class PickupSystem {
     if (req.type === "jewel" && req.jewelTier) {
       const hex = JEWEL_DEFS[req.jewelTier].color;
       color = BABYLON.Color3.FromHexString(hex);
+    }
+    if (req.type === "modular_part" && req.partId) {
+      const info = getPartInfo(req.partId);
+      if (info) color = PART_TIER_COLORS[info.tier] || color;
     }
 
     let mesh: BABYLON.Mesh;
@@ -363,6 +389,11 @@ export class PickupSystem {
           mesh = BABYLON.MeshBuilder.CreatePolyhedron(`pickup_${id}`, { type: polyType, size }, this.scene);
         }
         break;
+      case "modular_part":
+        // Chunky octahedron so assembly parts read as "mechanical component"
+        // from a distance; tier is signalled by the glow colour above.
+        mesh = BABYLON.MeshBuilder.CreatePolyhedron(`pickup_${id}`, { type: 0, size: 0.32 }, this.scene);
+        break;
       default:
         mesh = BABYLON.MeshBuilder.CreateSphere(`pickup_${id}`, { diameter: 0.4 }, this.scene);
     }
@@ -396,6 +427,7 @@ export class PickupSystem {
       amount: req.amount,
       weaponId: req.weaponId,
       jewelTier: req.jewelTier,
+      partId: req.partId,
       bobOffset: Math.random() * Math.PI * 2,
       bobBase,
       age: 0,
@@ -518,6 +550,9 @@ export class PickupSystem {
       case "health_kit":
         healthHeal = p.amount;
         break;
+      case "modular_part":
+        if (p.partId && MODULAR_PART_DEFINITIONS[p.partId]) itemId = p.partId;
+        break;
       case "jewel":
         if (p.jewelTier) itemId = JEWEL_DEFS[p.jewelTier].itemId;
         // Jewels never stack as a "5 jewels in one mesh" thing — every
@@ -528,7 +563,7 @@ export class PickupSystem {
     }
 
     if (itemId) {
-      const def = ITEM_DEFINITIONS[itemId] || CRAFTING_MATERIALS[itemId];
+      const def = ITEM_DEFINITIONS[itemId] || CRAFTING_MATERIALS[itemId] || MODULAR_PART_DEFINITIONS[itemId];
       if (def) {
         const remaining = this.inventory.addItem(def, payloadAmount);
         if (remaining > 0 && p.type === "jewel") {

@@ -6,4 +6,5 @@
 - [Captain tint compounding](captain-tint-compounding.md) — captain armor must reuse the 4 shared humanoid materials; the boss-variant tint loop multiplies per-mesh, so it compounds/over-saturates by design — don't dedupe without visual evidence.
 - [Sky dome depth & level boundaries](sky-dome-depth.md) — sky shader must stay far-plane-pinned or distant geometry vanishes; BoundarySystem clamps player AND mounted vehicle.
 - [Modal & input gating contract](modal-input-gating.md) — every modal joins the one isAnyModalOpen predicate; close system-owned modals through the system; stuck-key releases on blur/disconnect/modal open.
+- [Assembled-unit & item-family persistence](assembled-unit-persistence.md) — custom companions persist as recipes rebuilt deterministically; new item families must join every ItemDefinition lookup fallback chain.
 - [Player mecha armor source](player-mecha-armor.md) — player's Mega Man look = modular mm_ parts (hasArmor:false skips captain kit); edit those for player-only changes; helmet accents must clear the opaque dome.

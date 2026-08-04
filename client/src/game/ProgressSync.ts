@@ -11,6 +11,9 @@ export interface CompanionSaveEntry {
   type: "ally" | "pet";
   level: number;
   weaponLevel: number;
+  /** Present only for Lab-assembled units — the modular-part recipe used to
+   *  rebuild the custom descriptor on load (see AssemblyBlueprints.ts). */
+  assembly?: { blueprintId: string; partIds: string[] };
 }
 
 /**

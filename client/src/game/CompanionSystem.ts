@@ -3,8 +3,17 @@ import { RobotFactory } from "./RobotFactory";
 import { RobotDescriptor } from "./RobotDesigner";
 import { ALLY_PRESETS, PET_PRESETS } from "./RobotPresets";
 import { EventBus, GameEvents } from "./EventBus";
+import { getBlueprint, buildAssembledDescriptor, assemblyQuality } from "./AssemblyBlueprints";
 
 export type CompanionType = "ally" | "pet";
+
+/** Recipe metadata for a Lab-assembled companion. Persisted alongside the
+ *  companion so its custom descriptor can be rebuilt deterministically on
+ *  load (preset-based restore can't handle custom descriptors). */
+export interface AssemblyRecipe {
+  blueprintId: string;
+  partIds: string[];
+}
 
 export interface CompanionBehavior {
   followDistance: number;
@@ -42,6 +51,8 @@ interface ActiveCompanion {
   // projectile speed/size visual.
   weaponLevel: number;
   baseAttackCooldown: number;
+  /** Set only for Lab-assembled units — the recipe that rebuilds them. */
+  assembly?: AssemblyRecipe;
 }
 
 export interface CompanionUpgradeInfo {
@@ -140,7 +151,7 @@ export class CompanionSystem {
     return this.maxCompanions;
   }
 
-  addCompanion(presetName: string, playerPos: BABYLON.Vector3, options?: { allowDuplicate?: boolean; customDescriptor?: RobotDescriptor; customType?: CompanionType }): boolean {
+  addCompanion(presetName: string, playerPos: BABYLON.Vector3, options?: { allowDuplicate?: boolean; customDescriptor?: RobotDescriptor; customType?: CompanionType; assembly?: AssemblyRecipe }): boolean {
     if (this.companions.length >= this.maxCompanions) return false;
     if (!options?.allowDuplicate && !options?.customDescriptor && this.collected.has(presetName)) return false;
 
@@ -216,7 +227,21 @@ export class CompanionSystem {
       baseMaxHealth: baseMaxHp,
       weaponLevel: 0,
       baseAttackCooldown: behavior.attackCooldown,
+      assembly: options?.assembly,
     };
+
+    // Assembled units scale their base stats by part quality (tier-driven).
+    // Applied to the BASE stats so the level-up replay math stays correct.
+    if (options?.assembly) {
+      const mult = assemblyQuality(options.assembly.partIds).statMult;
+      companion.baseDamage *= mult;
+      companion.baseHeal *= mult;
+      companion.baseMaxHealth = Math.floor(companion.baseMaxHealth * mult);
+      companion.maxHealth = companion.baseMaxHealth;
+      companion.health = companion.maxHealth;
+      companion.behavior.attackDamage = companion.baseDamage;
+      companion.behavior.healAmount = companion.baseHeal;
+    }
 
     this.companions.push(companion);
     this.collected.add(presetName);
@@ -540,12 +565,13 @@ export class CompanionSystem {
    * `weaponLevel` all survive death + restart. Without this, hard restarts
    * wiped every helper upgrade the player paid for.
    */
-  serializeForSave(): { presetName: string; type: CompanionType; level: number; weaponLevel: number }[] {
+  serializeForSave(): { presetName: string; type: CompanionType; level: number; weaponLevel: number; assembly?: AssemblyRecipe }[] {
     return this.companions.map(c => ({
       presetName: c.presetName,
       type: c.type,
       level: c.level,
       weaponLevel: c.weaponLevel,
+      ...(c.assembly ? { assembly: c.assembly } : {}),
     }));
   }
 
@@ -556,7 +582,7 @@ export class CompanionSystem {
    * cumulative level + weaponLevel investment is replayed in-place.
    */
   applyLoadedCompanions(
-    saved: { presetName: string; type: CompanionType; level: number; weaponLevel: number }[],
+    saved: { presetName: string; type: CompanionType; level: number; weaponLevel: number; assembly?: AssemblyRecipe }[],
     playerPos: BABYLON.Vector3,
   ): void {
     // Wipe any current roster first so we never end up with a duplicated set.
@@ -568,9 +594,26 @@ export class CompanionSystem {
     this.collected.clear();
 
     for (const entry of saved) {
+      // Lab-assembled units carry their recipe; rebuild the exact custom
+      // descriptor from blueprint + parts (preset lookup would fail).
+      let customDescriptor: RobotDescriptor | undefined;
+      if (entry.assembly) {
+        const bp = getBlueprint(entry.assembly.blueprintId);
+        if (bp) {
+          // Recompute the display name deterministically from the recipe
+          // (quality prefix + blueprint name) — the saved presetName is an
+          // internal unique id, not the user-facing name.
+          const q = assemblyQuality(entry.assembly.partIds);
+          const prefix = q.label === "STANDARD" ? "" : q.label.charAt(0) + q.label.slice(1).toLowerCase() + " ";
+          customDescriptor = buildAssembledDescriptor(bp, entry.assembly.partIds, `${prefix}${bp.name}`) ?? undefined;
+        }
+        if (!customDescriptor) continue; // unknown blueprint — skip safely
+      }
       const ok = this.addCompanion(entry.presetName, playerPos, {
         allowDuplicate: true,
         customType: entry.type,
+        customDescriptor,
+        assembly: entry.assembly,
       });
       if (!ok) continue;
       const c = this.companions[this.companions.length - 1];

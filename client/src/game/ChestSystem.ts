@@ -1,6 +1,7 @@
 import * as BABYLON from "@babylonjs/core";
 import { WeaponType } from "./WeaponsSystem";
-import { EventBus } from "./EventBus";
+import { EventBus, GameEvents } from "./EventBus";
+import { rollChestModularPart } from "./ModularParts";
 
 export type LootType = "credits" | "health" | "armor" | "ammo" | "weapon_upgrade";
 
@@ -124,6 +125,18 @@ export class ChestSystem {
       color: new BABYLON.Color3(1.0, 0.85, 0.3),
     });
     this.onLootCollected?.(chest.loot);
+
+    // Bonus roll: chests are rare, so they're a generous source of modular
+    // assembly parts for the Lab's ASSEMBLY tab. The part drops as a normal
+    // world pickup beside the chest so it flows through PickupSystem.
+    const part = rollChestModularPart();
+    if (part) {
+      EventBus.getInstance().emit(GameEvents.PICKUP_SPAWNED, {
+        position: chest.mesh.position.add(new BABYLON.Vector3(0, 0.6, 0)),
+        requests: [{ type: "modular_part", amount: part.amount, partId: part.partId }],
+        spread: 0.6,
+      });
+    }
 
     setTimeout(() => {
       chest.glowLight.dispose();

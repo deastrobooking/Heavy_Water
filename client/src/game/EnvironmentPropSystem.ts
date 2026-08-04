@@ -8,6 +8,7 @@ import {
   DamageType,
 } from "./DamageSystem";
 import { PickupSpawnRequest, PickupType } from "./PickupSystem";
+import { rollPropModularPart } from "./ModularParts";
 
 export type PropKind =
   | "crate"
@@ -614,9 +615,15 @@ export class EnvironmentPropSystem {
   /** Internal: a prop just died — drop loot via the bus + dispose meshes. */
   destroyProp(prop: ActiveProp): void {
     const dropPos = prop.position.add(new BABYLON.Vector3(0, 0.4, 0));
+    // Rare bonus roll: destroyed props can shed a modular assembly part
+    // for the Lab's ASSEMBLY tab (see ModularParts.ts).
+    const bonusPart = rollPropModularPart();
+    const requests = bonusPart
+      ? [...prop.config.drops, { type: "modular_part" as const, amount: bonusPart.amount, partId: bonusPart.partId }]
+      : prop.config.drops;
     this.bus.emit(GameEvents.PICKUP_SPAWNED, {
       position: dropPos,
-      requests: prop.config.drops,
+      requests,
       spread: prop.config.spread,
     });
     // Big chunky impact on death

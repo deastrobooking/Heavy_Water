@@ -46,6 +46,8 @@ import { MusicPlayerUI } from "./MusicPlayerUI";
 import { WeaponUpgradeInfo } from "./WeaponsSystem";
 import { CompanionUpgradeInfo } from "./CompanionSystem";
 import { LabBlueprint } from "./LabUI";
+import { MODULAR_PART_DEFINITIONS } from "./ModularParts";
+import { getBlueprint, validateAssembly, buildAssembledDescriptor, resolveItemOutput, assemblyQuality } from "./AssemblyBlueprints";
 import { LevelSerializer } from "./LevelSerializer";
 import { MultiplayerSystem } from "./MultiplayerSystem";
 import { VersusArena } from "./VersusArena";
@@ -285,6 +287,9 @@ export const Game: React.FC = () => {
   // or a paid-for helper-weapon upgrade triggers an immediate forced save —
   // even if the 2s save throttle would normally skip it.
   const forceSaveRef = useRef<(() => void) | null>(null);
+  // Live handle to syncResourcesNow so keydown handlers (defined inside the
+  // one-time engine effect) can trigger a fresh resource/part refresh.
+  const syncResourcesNowRef = useRef<(() => void) | null>(null);
   // Forward-refs so EventBus listeners wired inside the single mount-time
   // `initializeGame` (which closes over earlier scope) can call helpers
   // that are defined LATER in React-scope (handleFastTravel) or built
@@ -340,6 +345,8 @@ export const Game: React.FC = () => {
   const specialsUnlockInFlightRef = useRef<Set<string>>(new Set());
   const [resourceCounts, setResourceCounts] = useState({ gears: 0, scrap: 0, cores: 0, circuits: 0, nanofiber: 0, bioEssence: 0 });
   const [partCounts, setPartCounts] = useState<Record<string, number>>({});
+  // Modular assembly parts (Lab ASSEMBLY tab) — item id → owned count.
+  const [modularPartCounts, setModularPartCounts] = useState<Record<string, number>>({});
   const [labOpen, setLabOpen] = useState(false);
   const [labStructure, setLabStructure] = useState<BaseStructure | null>(null);
   const [gardenOpen, setGardenOpen] = useState(false);
@@ -2048,7 +2055,10 @@ export const Game: React.FC = () => {
                   // ITEM_DEFINITIONS. Without the fallback they were silently
                   // dropped on load — which is why cores/nano/circuits "reset"
                   // every time the player died and the page reloaded.
-                  const def = ITEM_DEFINITIONS[itemId] || CRAFTING_MATERIALS[itemId];
+                  // Modular assembly parts (Lab ASSEMBLY tab) live in
+                  // MODULAR_PART_DEFINITIONS — include them or collected
+                  // parts silently vanish on every reload.
+                  const def = ITEM_DEFINITIONS[itemId] || CRAFTING_MATERIALS[itemId] || MODULAR_PART_DEFINITIONS[itemId];
                   if (def && qty > 0) inventory.addItem(def, qty);
                 }
               }
@@ -2849,6 +2859,16 @@ export const Game: React.FC = () => {
               laser: inventory.getItemCount("weapon_part_laser"),
               grenade: inventory.getItemCount("weapon_part_grenade"),
             });
+            // Modular assembly parts must refresh on the same cadence so the
+            // Lab's ASSEMBLY tab always sees freshly-collected parts.
+            {
+              const mpc: Record<string, number> = {};
+              for (const id of Object.keys(MODULAR_PART_DEFINITIONS)) {
+                const n = inventory.getItemCount(id);
+                if (n > 0) mpc[id] = n;
+              }
+              setModularPartCounts(mpc);
+            }
             setWeaponUpgradeInfo(weapons.getAllUpgradeInfo());
             setCompanionUpgradeInfo(companionSystem.getAllUpgradeInfo(() => gears, () => cores));
             // Helper-bot weapon-tier rows must follow companion roster + resource changes.
@@ -3400,6 +3420,12 @@ export const Game: React.FC = () => {
       nanofiber: inv.getItemCount("nano_fiber"),
       bioEssence: inv.getItemCount("bio_essence"),
     });
+    const mpc: Record<string, number> = {};
+    for (const id of Object.keys(MODULAR_PART_DEFINITIONS)) {
+      const n = inv.getItemCount(id);
+      if (n > 0) mpc[id] = n;
+    }
+    setModularPartCounts(mpc);
     setPartCounts({
       pistol: inv.getItemCount("weapon_part_pistol"),
       rifle: inv.getItemCount("weapon_part_rifle"),
@@ -3431,6 +3457,8 @@ export const Game: React.FC = () => {
       refreshActivePetsRef.current();
     }
   }, []);
+
+  useEffect(() => { syncResourcesNowRef.current = syncResourcesNow; }, [syncResourcesNow]);
 
   const handleUpgradeWeapon = useCallback((type: string) => {
     if (!weaponsRef.current) return;
@@ -3710,6 +3738,71 @@ export const Game: React.FC = () => {
     syncResourcesNow();
   }, [labBlueprints, showMessage, syncResourcesNow]);
 
+  // ASSEMBLY tab — combine modular parts into an item, robot, or pet.
+  // The result is deterministic from blueprintId + partIds, which is also
+  // what gets persisted for assembled companions (see CompanionSystem).
+  const handleLabAssemble = useCallback((blueprintId: string, partIds: string[]) => {
+    const inv = inventoryRef.current;
+    const player = playerRef.current;
+    const comp = companionRef.current;
+    if (!inv || !player || !comp || !baseRef.current) return;
+    const bp = getBlueprint(blueprintId);
+    if (!bp) return;
+    const check = validateAssembly(bp, partIds);
+    if (!check.ok) { showMessage(check.reason?.toUpperCase() || "INVALID ASSEMBLY", 1800); return; }
+
+    // Verify stock (counting duplicates across slots) BEFORE consuming.
+    const need: Record<string, number> = {};
+    for (const id of partIds) need[id] = (need[id] ?? 0) + 1;
+    for (const [id, n] of Object.entries(need)) {
+      if (inv.getItemCount(id) < n) { showMessage("MISSING PARTS", 1500); return; }
+    }
+
+    if (bp.category === "item") {
+      for (const [id, n] of Object.entries(need)) inv.removeItem(id, n);
+      const outputs = resolveItemOutput(bp, partIds);
+      const names: string[] = [];
+      for (const out of outputs) {
+        const def = ITEM_DEFINITIONS[out.itemId];
+        if (def) { inv.addItem(def, out.quantity); names.push(`${out.quantity}× ${def.name.toUpperCase()}`); }
+      }
+      showMessage(`ASSEMBLED: ${names.join(", ")}`, 2500);
+      forceSaveRef.current?.();
+      syncResourcesNow();
+      return;
+    }
+
+    // Robot / pet — needs roster room.
+    const cap = baseRef.current.getLabCompanionCap();
+    if (comp.getCompanionCount() >= cap) { showMessage("LAB AT CAPACITY — UPGRADE LAB", 1800); return; }
+    const q = assemblyQuality(partIds);
+    const unitName = `${q.label === "STANDARD" ? "" : q.label.charAt(0) + q.label.slice(1).toLowerCase() + " "}${bp.name}`;
+    const uniqueId = `assembled_${bp.id}_${Date.now()}`;
+    const descriptor = buildAssembledDescriptor(bp, partIds, unitName);
+    if (!descriptor) { showMessage("ASSEMBLY FAILED", 1500); return; }
+    for (const [id, n] of Object.entries(need)) inv.removeItem(id, n);
+    const pos = player.getPosition();
+    const ok = comp.addCompanion(uniqueId, pos, {
+      allowDuplicate: true,
+      customDescriptor: descriptor,
+      customType: bp.category === "pet" ? "pet" : "ally",
+      assembly: { blueprintId: bp.id, partIds },
+    });
+    if (ok) {
+      showMessage(`ASSEMBLED ${unitName.toUpperCase()} — JOINED YOUR ROSTER`, 2500);
+      EventBus.getInstance().emit("effect:sparkle", { position: pos });
+      forceSaveRef.current?.();
+    } else {
+      // Refund on failure so parts are never silently lost.
+      for (const [id, n] of Object.entries(need)) {
+        const def = MODULAR_PART_DEFINITIONS[id];
+        if (def) inv.addItem(def, n);
+      }
+      showMessage("ASSEMBLY FAILED", 1500);
+    }
+    syncResourcesNow();
+  }, [showMessage, syncResourcesNow]);
+
   const handleLabUpgrade = useCallback(() => {
     if (!baseRef.current) return;
     const lab = baseRef.current.getStructures().find(s => s.kind === "lab");
@@ -3895,6 +3988,9 @@ export const Game: React.FC = () => {
         if (lab) {
           setLabStructure(lab);
           setLabOpen(true);
+          // Safety net: refresh resource + assembly-part counts the moment
+          // the Lab opens so the ASSEMBLY tab never shows stale ownership.
+          syncResourcesNowRef.current?.();
           if (document.pointerLockElement) document.exitPointerLock();
         } else if (garden) {
           setGardenStructure(garden);
@@ -4477,7 +4573,9 @@ export const Game: React.FC = () => {
           labCapacityMax={Math.max(3, baseRef.current?.getLabCompanionCap() ?? 3)}
           labUpgradeCost={labUpgradeCost}
           labCanUpgrade={labCanUpgrade}
+          labPartCounts={modularPartCounts}
           onLabBuild={handleLabBuild}
+          onLabAssemble={handleLabAssemble}
           onLabUpgrade={handleLabUpgrade}
           onLabClose={() => setLabOpen(false)}
           gardenOpen={gardenOpen}
