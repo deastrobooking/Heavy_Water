@@ -60,6 +60,9 @@ export interface TravelDestinationInfo {
   lockReason?: string;
   /** Optional in-level destination, used for named open-world warp points. */
   warpPoint?: TravelWarpPoint;
+  /** Second line shown beneath the flavour description — e.g. mission
+   *  progress for villain-campaign destinations. */
+  subtitle?: string;
 }
 
 interface UpgradeMenuProps {
@@ -671,6 +674,9 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
                           {d.locked && <div className="text-red-400 text-[10px] font-bold">LOCKED</div>}
                         </div>
                         <div className="text-zinc-400 text-[11px] mt-1">{d.description}</div>
+                        {d.subtitle && (
+                          <div className="text-cyan-400 text-[10px] mt-0.5 font-semibold tracking-wide">{d.subtitle}</div>
+                        )}
                       </div>
                       <div className="ml-3 text-right min-w-[140px]">
                         {isCurrent ? (

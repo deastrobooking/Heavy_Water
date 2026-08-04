@@ -29,6 +29,97 @@ export function normalizeVillainProgress(raw?: {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Mission table
+// ---------------------------------------------------------------------------
+
+export type MoonModifier = "reinforced_knights" | "dual_champion";
+
+export interface MoonMissionDef {
+  /** Short display label used in the TRAVEL subtitle and UI messages. */
+  label: string;
+  /** Knight count per wave. Length determines total wave count. */
+  waves: number[];
+  /**
+   * Base health multiplier applied to every knight before wave-index scaling.
+   * Stacks multiplicatively with the per-wave index bonus (+0.25 per wave).
+   */
+  knightHpBase: number;
+  /** Health multiplier for the primary champion. */
+  championHpMult: number;
+  creditReward: number;
+  xpReward: number;
+  modifiers: MoonModifier[];
+}
+
+/** Five escalating missions. Mission 4 loops with HP/reward scaling. */
+export const MOON_MISSIONS: MoonMissionDef[] = [
+  {
+    label: "The Vanguard",
+    waves: [4, 6, 8],
+    knightHpBase: 1.0,
+    championHpMult: 8.0,
+    creditReward: 2500,
+    xpReward: 4000,
+    modifiers: [],
+  },
+  {
+    label: "The Advance",
+    waves: [5, 7, 10],
+    knightHpBase: 1.1,
+    championHpMult: 10.0,
+    creditReward: 3000,
+    xpReward: 5000,
+    modifiers: [],
+  },
+  {
+    label: "The Siege",
+    waves: [6, 8, 10, 6],
+    knightHpBase: 1.2,
+    championHpMult: 13.0,
+    creditReward: 3500,
+    xpReward: 6500,
+    modifiers: ["reinforced_knights"],
+  },
+  {
+    label: "The Fortress",
+    waves: [7, 9, 12, 8],
+    knightHpBase: 1.3,
+    championHpMult: 16.0,
+    creditReward: 4000,
+    xpReward: 8000,
+    modifiers: ["dual_champion"],
+  },
+  {
+    label: "The Final Storm",
+    waves: [8, 10, 14, 10, 6],
+    knightHpBase: 1.4,
+    championHpMult: 20.0,
+    creditReward: 5000,
+    xpReward: 10000,
+    modifiers: ["reinforced_knights", "dual_champion"],
+  },
+];
+
+/**
+ * Derive the active mission definition and loop-scaling factor from a raw
+ * `missionsCompleted` count.  The last mission (index 4) repeats indefinitely
+ * with +20% HP/reward per additional loop, capped at 3×.
+ */
+export function resolveMission(missionsCompleted: number): {
+  def: MoonMissionDef;
+  missionIndex: number;
+  loopCount: number;
+  loopScale: number;
+} {
+  const missionIndex = Math.min(missionsCompleted, MOON_MISSIONS.length - 1);
+  const loopCount = Math.max(0, missionsCompleted - (MOON_MISSIONS.length - 1));
+  const loopScale = Math.min(3.0, 1 + loopCount * 0.2);
+  return { def: MOON_MISSIONS[missionIndex], missionIndex, loopCount, loopScale };
+}
+
+// ---------------------------------------------------------------------------
+
 /**
  * MoonWorldSystem — Level 12 "Luna Bastion" (VILLAIN CAMPAIGN)
  * ============================================================
@@ -49,10 +140,13 @@ export function normalizeVillainProgress(raw?: {
  *     the nearest hero knight with plasma bolts.
  *
  * Mission loop:
- *   - 3 waves of hero-faction knights (captain chassis wearing the hero's
- *     blue/gold PlayerDefault look + storm variant tint), then the HERO
- *     CHAMPION (high-HP hero knight). Kill it → credits + XP rewards and
- *     a progress callback so villain progress persists separately.
+ *   - Per-mission wave definitions drive knight counts and HP. After all
+ *     waves clear, the HERO CHAMPION spawns (dual_champion missions spawn
+ *     a reinforcement when the primary drops below 50% HP). Kill all
+ *     champions → credits + XP rewards scaled to mission + loop count.
+ *   - missionsCompleted advances through the 5-mission table; the last
+ *     mission loops indefinitely with 20%-per-loop HP and reward scaling
+ *     (capped at 3×).
  */
 export class MoonWorldSystem {
   private scene: BABYLON.Scene;
@@ -77,9 +171,19 @@ export class MoonWorldSystem {
   // ---- mission state
   private progress: VillainProgress;
   private onProgress: (p: VillainProgress) => void;
-  private waveIndex = 0; // 0 = not started, 1..WAVES.length = active wave
+  /** Resolved once in the constructor for the duration of this visit. */
+  private activeMission: MoonMissionDef;
+  private activeLoopScale: number;
+
+  private waveIndex = 0; // 0 = not started, 1..waves.length = active, waves.length+1 = champion phase
   private waveUnits: EnemyUnit[] = [];
-  private champion: EnemyUnit | null = null;
+  /** Live champion units. Normally one; dual_champion adds a reinforcement
+   *  when the primary falls below 50 % HP (or on primary death if that
+   *  threshold check is missed). */
+  private champions: EnemyUnit[] = [];
+  /** True once the dual_champion reinforcement has been triggered for this
+   *  mission visit — prevents a second spawn on a missed threshold tick. */
+  private reinforcementSpawned = false;
   private missionDone = false;
   private nextWaveDelay = 3;
   private lastTickMs = performance.now();
@@ -92,8 +196,6 @@ export class MoonWorldSystem {
   /** Must match LevelSystem LEVEL_DEFS[12].spawnPoint. */
   private static readonly CENTER = new BABYLON.Vector3(0, 0, 3000);
   private static readonly ARENA_R = 110;
-  /** Knights per wave — hero-faction pressure ramps across the mission. */
-  private static readonly WAVES = [4, 6, 8];
 
   constructor(
     scene: BABYLON.Scene,
@@ -114,6 +216,11 @@ export class MoonWorldSystem {
     this.handles = handles;
     this.progress = { ...savedProgress };
     this.onProgress = onProgress;
+
+    // Resolve the mission for this visit once — doesn't change mid-run.
+    const { def, loopScale } = resolveMission(this.progress.missionsCompleted);
+    this.activeMission = def;
+    this.activeLoopScale = loopScale;
 
     this.root = new BABYLON.TransformNode("moonWorldRoot", scene);
 
@@ -138,11 +245,17 @@ export class MoonWorldSystem {
 
     this.observer = scene.onBeforeRenderObservable.add(() => this.tick());
 
+    const missionNum = Math.min(this.progress.missionsCompleted + 1, MOON_MISSIONS.length);
+    const loopSuffix = this.activeLoopScale > 1.0
+      ? ` (×${this.activeLoopScale.toFixed(1)} scaling)`
+      : "";
     this.bus.emit(
       GameEvents.UI_MESSAGE,
-      "LUNA BASTION — You wear the Captain's armor now. Crush the hero knights.",
+      `LUNA BASTION — Mission ${missionNum}: ${this.activeMission.label}${loopSuffix}. Crush the hero knights.`,
     );
-    console.log("[MoonWorldSystem] Luna Bastion mounted");
+    console.log(
+      `[MoonWorldSystem] Luna Bastion mounted — mission "${this.activeMission.label}" loopScale=${this.activeLoopScale}`,
+    );
   }
 
   dispose(): void {
@@ -162,7 +275,7 @@ export class MoonWorldSystem {
     this.sky.setSpaceMode(false);
     this.restoreOuterWorld();
     this.waveUnits = [];
-    this.champion = null;
+    this.champions = [];
     this.earth = null;
     this.drone = null;
     for (const t of this.beamTimers) clearTimeout(t);
@@ -439,13 +552,20 @@ export class MoonWorldSystem {
   private startWave(index: number): void {
     this.waveIndex = index;
     this.waveUnits = [];
+    const mission = this.activeMission;
     const c = MoonWorldSystem.CENTER;
-    const count = MoonWorldSystem.WAVES[index - 1];
+    const count = mission.waves[index - 1];
+
+    // reinforced_knights: +0.3 to the base HP multiplier for every wave.
+    const reinforceBonus = mission.modifiers.includes("reinforced_knights") ? 0.3 : 0;
+    // Per-wave scaling on top of the mission base and reinforce bonus.
+    const waveHpMult = (mission.knightHpBase + reinforceBonus) * (1.0 + index * 0.25);
+
     for (let i = 0; i < count; i++) {
       const ang = (i / count) * Math.PI * 2 + Math.random() * 0.4;
       const r = MoonWorldSystem.ARENA_R - 15 - Math.random() * 20;
       const pos = new BABYLON.Vector3(c.x + Math.cos(ang) * r, 1.5, c.z + Math.sin(ang) * r);
-      const u = this.spawnHeroKnight(pos, 1.0 + index * 0.25);
+      const u = this.spawnHeroKnight(pos, waveHpMult);
       if (u) this.waveUnits.push(u);
     }
     if (index > this.progress.bestWave) {
@@ -454,26 +574,54 @@ export class MoonWorldSystem {
     }
     this.bus.emit(
       GameEvents.UI_MESSAGE,
-      `HERO KNIGHTS — WAVE ${index}/${MoonWorldSystem.WAVES.length}. Cut them down.`,
+      `HERO KNIGHTS — WAVE ${index}/${mission.waves.length}. Cut them down.`,
     );
   }
 
-  private spawnChampion(): void {
+  /** Spawn the primary champion. On dual_champion missions a reinforcement
+   *  arrives as a "reinforcement call" when the primary falls below 50 % HP
+   *  (checked in tick; falls back to spawning on primary death if the
+   *  threshold tick is missed). */
+  private spawnPrimaryChampion(): void {
     const c = MoonWorldSystem.CENTER;
     const pos = new BABYLON.Vector3(c.x, 1.5, c.z + MoonWorldSystem.ARENA_R - 25);
-    this.champion = this.spawnHeroKnight(pos, 8.0);
-    if (!this.champion) {
-      // Spawn failed (e.g. enemy cap) — fall back to the pre-champion
-      // state so the tick loop retries after the standard breather
-      // instead of locking the mission in an unrecoverable phase.
-      this.waveIndex = MoonWorldSystem.WAVES.length;
+    const hpMult = this.activeMission.championHpMult * this.activeLoopScale;
+    const primary = this.spawnHeroKnight(pos, hpMult);
+    if (!primary) {
+      // Spawn failed (e.g. enemy cap) — fall back to pre-champion state so
+      // the tick loop retries after the standard breather.
+      this.waveIndex = this.activeMission.waves.length;
       this.nextWaveDelay = 3;
       return;
     }
+    this.champions = [primary];
+    this.reinforcementSpawned = false;
     this.bus.emit(
       GameEvents.UI_MESSAGE,
       "THE HERO CHAMPION descends from the bastion. Slay them.",
     );
+  }
+
+  /**
+   * Spawn the dual_champion reinforcement offset from the primary so they
+   * don't clump. Called when the primary drops below 50 % HP (tick-driven)
+   * or falls back to primary death if the threshold tick is missed.
+   */
+  private spawnReinforcement(): void {
+    if (this.reinforcementSpawned) return;
+    this.reinforcementSpawned = true;
+    const c = MoonWorldSystem.CENTER;
+    // Offset +12 on X so the two champions don't overlap.
+    const pos = new BABYLON.Vector3(c.x + 12, 1.5, c.z + MoonWorldSystem.ARENA_R - 35);
+    const hpMult = this.activeMission.championHpMult * this.activeLoopScale * 0.8; // reinforcement is slightly softer
+    const unit = this.spawnHeroKnight(pos, hpMult);
+    if (unit) {
+      this.champions.push(unit);
+      this.bus.emit(
+        GameEvents.UI_MESSAGE,
+        "A SECOND CHAMPION answers the call! Destroy them both.",
+      );
+    }
   }
 
   private completeMission(): void {
@@ -482,15 +630,32 @@ export class MoonWorldSystem {
     this.progress.championDefeated = true;
     this.emitProgress();
 
-    // Villain spoils — scaled to endgame-zone rewards.
-    const credits = 2500;
-    const xp = 4000;
+    // Villain spoils — scaled by loopScale for replay incentive.
+    const credits = Math.round(this.activeMission.creditReward * this.activeLoopScale);
+    const xp = Math.round(this.activeMission.xpReward * this.activeLoopScale);
     try { this.player.addCredits(credits); } catch {}
     try { this.player.addExperience(xp); } catch {}
+
+    const missionNum = this.progress.missionsCompleted; // already incremented
+    const loopSuffix = this.activeLoopScale > 1.0
+      ? ` (×${this.activeLoopScale.toFixed(1)} scaling)`
+      : "";
     this.bus.emit(
       GameEvents.UI_MESSAGE,
-      `THE CHAMPION FALLS — LUNA BASTION IS YOURS. +${credits}cr +${xp}xp`,
+      `THE CHAMPION FALLS — LUNA BASTION IS YOURS. +${credits}cr +${xp}xp${loopSuffix}`,
     );
+
+    // Post-completion prompt telling the player what awaits on the next visit.
+    const nextResolved = resolveMission(this.progress.missionsCompleted);
+    const nextLabel = nextResolved.loopCount > 0
+      ? `${MOON_MISSIONS[MOON_MISSIONS.length - 1].label} (loop ${nextResolved.loopCount + 1})`
+      : `Mission ${missionNum + 1}: ${nextResolved.def.label}`;
+    setTimeout(() => {
+      this.bus.emit(
+        GameEvents.UI_MESSAGE,
+        `MISSION ${missionNum} COMPLETE — Warp back to Luna Bastion for ${nextLabel}.`,
+      );
+    }, 4000);
   }
 
   private emitProgress(): void {
@@ -513,16 +678,19 @@ export class MoonWorldSystem {
 
     if (this.missionDone) return;
 
-    // Small breather between waves (and before wave 1).
+    const mission = this.activeMission;
     const waveAlive = this.waveUnits.some(u => u.isAlive);
-    if (this.waveIndex === 0 || (!waveAlive && this.champion === null && this.waveIndex < MoonWorldSystem.WAVES.length + 1)) {
-      if (this.waveIndex > 0 && this.waveIndex >= MoonWorldSystem.WAVES.length) {
-        // All waves cleared → champion phase.
+    const inChampPhase = this.waveIndex === mission.waves.length + 1;
+
+    // ---- Wave transition / champion spawn phase ----------------------------
+    if (this.waveIndex === 0 || (!waveAlive && this.champions.length === 0 && !inChampPhase)) {
+      if (this.waveIndex > 0 && this.waveIndex >= mission.waves.length) {
+        // All waves cleared → wait, then spawn champion.
         this.nextWaveDelay -= dt;
         if (this.nextWaveDelay <= 0) {
           this.nextWaveDelay = 3;
-          this.waveIndex = MoonWorldSystem.WAVES.length + 1;
-          this.spawnChampion();
+          this.waveIndex = mission.waves.length + 1;
+          this.spawnPrimaryChampion();
         }
         return;
       }
@@ -534,10 +702,30 @@ export class MoonWorldSystem {
       return;
     }
 
-    // Champion phase → mission completion.
-    if (this.champion && !this.champion.isAlive) {
-      this.champion = null;
-      this.completeMission();
+    // ---- Champion phase ----------------------------------------------------
+    if (inChampPhase && this.champions.length > 0) {
+      const primary = this.champions[0];
+
+      // dual_champion reinforcement call: trigger when primary drops below 50 %
+      // HP. Falls back to triggering on primary death if threshold is missed.
+      if (
+        mission.modifiers.includes("dual_champion") &&
+        !this.reinforcementSpawned
+      ) {
+        const primaryLow =
+          primary.isAlive &&
+          primary.health <= primary.maxHealth * 0.5;
+        const primaryDead = !primary.isAlive;
+        if (primaryLow || primaryDead) {
+          this.spawnReinforcement();
+        }
+      }
+
+      // Mission complete when every champion is dead.
+      if (this.champions.every(c => !c.isAlive)) {
+        this.champions = [];
+        this.completeMission();
+      }
     }
   }
 }

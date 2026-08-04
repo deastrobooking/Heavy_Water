@@ -69,7 +69,7 @@ import { SaginawLabSystem } from "./SaginawLabSystem";
 import { ZugIslandSystem } from "./ZugIslandSystem";
 import { AnnArborSystem } from "./AnnArborSystem";
 import { MichiganTerrainSystem } from "./MichiganTerrainSystem";
-import { MoonWorldSystem, normalizeVillainProgress, type VillainProgress } from "./MoonWorldSystem";
+import { MoonWorldSystem, normalizeVillainProgress, resolveMission, MOON_MISSIONS, type VillainProgress } from "./MoonWorldSystem";
 import { InvasionDirectorSystem } from "./InvasionDirectorSystem";
 import { setPlayerIsFlyingProvider as setEnemyPlayerIsFlyingProvider } from "./EnemySystem";
 import { RESCUE_DEFS } from "./RescueSystem";
@@ -369,6 +369,13 @@ export const Game: React.FC = () => {
   // Persistent "ever caught" species ids for the dex completion UI. Only
   // grows; survives DEPLOY which removes a creature from the live roster.
   const [dexCaughtIds, setDexCaughtIds] = useState<string[]>([]);
+  // Shallow React state copy of villainProgressRef — kept in sync so the
+  // TRAVEL tab useMemo can react to completed missions without the ref
+  // staleness problem. The ref is still the authoritative live value used
+  // by MoonWorldSystem itself.
+  const [villainProgressUI, setVillainProgressUI] = useState<VillainProgress>(
+    normalizeVillainProgress(null),
+  );
   const [planMode, setPlanMode] = useState(false);
   const [prefabHotbar, setPrefabHotbar] = useState<PrefabSummary[]>([]);
   const [selectedPrefabIndex, setSelectedPrefabIndex] = useState(0);
@@ -1626,6 +1633,7 @@ export const Game: React.FC = () => {
               villainProgressRef.current,
               (p) => {
                 villainProgressRef.current = p;
+                setVillainProgressUI({ ...p });
                 if (forceSaveRef.current) forceSaveRef.current();
               },
             );
@@ -2267,6 +2275,7 @@ export const Game: React.FC = () => {
               // on its next forced save. normalize() handles pre-villain
               // saves (missing slice → zeros/false defaults).
               villainProgressRef.current = normalizeVillainProgress(snap.villainProgress);
+              setVillainProgressUI({ ...villainProgressRef.current });
               // Restore world-level progression. For L2, applyLoadedState
               // re-emits LEVEL_STARTED, which our listener uses to swap
               // banner/objective, tint the sky, seed the second fortress,
@@ -4523,6 +4532,18 @@ export const Game: React.FC = () => {
         lockReason: blocksDetroitFromAshur
           ? "Ashur keeps Detroit gates closed. Travel through the wilds or another outpost."
           : undefined,
+        // Build the mission-progress subtitle for the villain campaign row.
+        subtitle: lvl === 12 ? (() => {
+          const mc = villainProgressUI.missionsCompleted;
+          const { def: nextDef, loopCount } = resolveMission(mc);
+          if (mc === 0) {
+            return `Mission 1 of ${MOON_MISSIONS.length}: ${nextDef.label} — not yet started`;
+          }
+          if (loopCount > 0) {
+            return `All ${MOON_MISSIONS.length} missions complete — loop ${loopCount + 1}: ${MOON_MISSIONS[MOON_MISSIONS.length - 1].label}`;
+          }
+          return `${mc} of ${MOON_MISSIONS.length} missions complete — next: ${nextDef.label}`;
+        })() : undefined,
       };
     });
     const miWarpRows = MichiganTerrainSystem.getWarpPoints().map((wp) => ({
@@ -4533,7 +4554,7 @@ export const Game: React.FC = () => {
       warpPoint: { x: wp.x, z: wp.z } satisfies TravelWarpPoint,
     }));
     return [...levelRows, ...miWarpRows];
-  }, [currentWorldLevel]);
+  }, [currentWorldLevel, villainProgressUI]);
 
   // Per-weapon Power-Jewel rows for the WEAPONS tab. Re-derives whenever
   // any inventory count changes (which the WEAPONS tab already triggers
