@@ -111,7 +111,7 @@ export class MultiplayerSystem {
         this.roomCode = msg.roomCode;
         this.isHost = true;
         this.startPositionSync();
-        this.emit("room_joined", { roomCode: msg.roomCode, isHost: true });
+        this.emit("room_joined", { roomCode: msg.roomCode, isHost: true, mode: msg.mode });
         break;
 
       case "room_joined":
@@ -123,7 +123,7 @@ export class MultiplayerSystem {
           }
         }
         this.startPositionSync();
-        this.emit("room_joined", { roomCode: msg.roomCode, isHost: msg.isHost });
+        this.emit("room_joined", { roomCode: msg.roomCode, isHost: msg.isHost, mode: msg.mode });
         break;
 
       case "room_left":
@@ -169,6 +169,25 @@ export class MultiplayerSystem {
 
       case "enemy_damage":
         this.emit("enemy_damage", msg);
+        break;
+
+      // ---- Versus arena (server-validated PvP) ----
+      case "pvp_hit":
+        // Server already clamped/rate-limited/range-checked the hit and
+        // sends it to the victim only.
+        this.emit("pvp_hit", msg);
+        break;
+
+      case "arena_score":
+        this.emit("arena_score", msg);
+        break;
+
+      case "arena_match_over":
+        this.emit("arena_match_over", msg);
+        break;
+
+      case "arena_reset":
+        this.emit("arena_reset", msg);
         break;
 
       case "host_changed":
@@ -322,6 +341,12 @@ export class MultiplayerSystem {
     if (!remote) return;
 
     remote.targetPosition.set(msg.position.x, msg.position.y, msg.position.z);
+    // Teleport/respawn snap: if the new target is far from where we're
+    // rendering the player, lerping would drag them across the whole map
+    // (classic rubber-band). Past 20 m we snap instantly instead.
+    if (BABYLON.Vector3.DistanceSquared(remote.mesh.position, remote.targetPosition) > 400) {
+      remote.mesh.position.copyFrom(remote.targetPosition);
+    }
     remote.targetRotation.set(msg.rotation.x, msg.rotation.y, msg.rotation.z);
     remote.state = msg.state || remote.state;
     remote.health = typeof msg.health === "number" ? msg.health : remote.health;
@@ -422,6 +447,20 @@ export class MultiplayerSystem {
     this.send({ type: "enemy_damage", enemyId, damage, damageType });
   }
 
+  /** Versus: report a hit on a rival. The SERVER validates (clamp, rate
+   *  limit, same-room, distance) and forwards it to the victim only. */
+  sendPvpHit(targetId: string, damage: number): void {
+    if (!this.connected || !this.roomCode) return;
+    this.send({ type: "pvp_hit", targetId, damage });
+  }
+
+  /** Versus: the victim reports its own death. Kill credit is granted
+   *  server-side only if the killer landed a server-accepted hit recently. */
+  sendPvpDeath(): void {
+    if (!this.connected || !this.roomCode) return;
+    this.send({ type: "pvp_death" });
+  }
+
   createRoom(mode: "coop" | "versus" = "coop"): void {
     this.send({ type: "create_room", mode });
   }
@@ -440,7 +479,17 @@ export class MultiplayerSystem {
 
   update(deltaTime: number): void {
     const lerpFactor = Math.min(1, deltaTime * 10);
+    const now = Date.now();
     this.remotePlayers.forEach((remote) => {
+      // Peers heartbeat at least once per second; 5 s of silence means the
+      // connection is gone (the server will kick them at 60 s). Hide the
+      // ghost immediately instead of leaving a frozen statue to shoot at.
+      const stale = now - remote.lastUpdate > 5000;
+      if (stale) {
+        if (remote.mesh.isEnabled()) remote.mesh.setEnabled(false);
+        return;
+      }
+      if (!remote.mesh.isEnabled() && remote.health > 0) remote.mesh.setEnabled(true);
       BABYLON.Vector3.LerpToRef(remote.mesh.position, remote.targetPosition, lerpFactor, remote.mesh.position);
       remote.mesh.rotation.y = BABYLON.Scalar.Lerp(remote.mesh.rotation.y, remote.targetRotation.y, lerpFactor);
     });

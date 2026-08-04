@@ -25,6 +25,8 @@ TypeScript union for client messages lives at the top of
 | `action` | `{ action: string, data: any }` | Generic action mirror (weapon fire, melee swing, FX trigger). Fans out as `player_action`. |
 | `chat` | `{ message: string }` (capped at 200 chars server-side) | Fans out as `chat_message`. |
 | `enemy_damage` | `{ enemyId: string, damage: number, damageType: string }` | Fans out as `enemy_damage` so all clients agree on enemy HP. |
+| `pvp_hit` | `{ targetId: string, damage: number }` | Versus only. Server validates (clamp ≤90, ≥150 ms per attacker→target pair, same versus room, ≤160 u range from last-known positions) then forwards `pvp_hit` **to the victim only**. |
+| `pvp_death` | — | Versus only. Victim reports its own death. Server credits the kill only if the claimed killer landed a server-accepted hit within 10 s; broadcasts `arena_score` / `arena_match_over`. |
 | `ping` | — | Server replies `pong { time }`. |
 
 ## Server → client
@@ -42,13 +44,17 @@ TypeScript union for client messages lives at the top of
 | `player_action` | `{ playerId, action, data }` | Forwarded `action` |
 | `chat_message` | `{ playerId, username, message }` | Forwarded chat |
 | `enemy_damage` | `{ playerId, enemyId, damage, damageType }` | Forwarded enemy damage from another player |
+| `pvp_hit` | `{ attackerId, attacker, damage }` | Server-validated PvP hit — sent to the victim only |
+| `arena_score` | `{ killTarget, matchOver, scoreboard: Array<{ playerId, username, kills, deaths }> }` | Versus scoreboard — on join/leave/death and after resets |
+| `arena_match_over` | `{ winnerId, winnerName, killTarget, scoreboard }` | A player reached the kill target |
+| `arena_reset` | `{ killTarget }` | 8 s after match over — scores zeroed, next match begins |
 | `pong` | `{ time: number }` | Response to `ping` |
 | `error` | `{ message: string }` | Anything went wrong (room full, not in a room, etc.) |
 
 ## Room kinds
 
 - **`coop`** — open-world campaign + wave defense. Default.
-- **`versus`** — PvP arena on a deterministic 320×320 walled map. Both
+- **`versus`** — PvP arena on a deterministic 640×640 walled map. Both
   clients build the same layout from a shared per-room procedural seed
   (computed client-side from `roomCode`, not sent over the wire).
 
@@ -61,9 +67,12 @@ TypeScript union for client messages lives at the top of
   room is rejected with `error`.
 - When the host disconnects, the server promotes the next player and
   broadcasts `host_changed`. The room only deletes when empty.
-- The server is intentionally trusting — it does not validate position
-  or damage payloads. Acceptable for friend-group play; fix before any
-  public deploy.
+- Versus PvP damage and kill credit are server-validated (`pvp_hit` /
+  `pvp_death`). Position and coop `enemy_damage` remain client-trusted —
+  residual risks and the hardening path are documented in
+  [`systems/multiplayer.md`](../systems/multiplayer.md#known-cheat-surfaces-residual-risk).
+- Stale players are kicked after 60 s of silence; dead sockets and
+  empty/2 h-idle rooms are swept every 30 s.
 
 ## Adding a message type
 

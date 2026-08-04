@@ -345,6 +345,10 @@ export const Game: React.FC = () => {
   const specialsUnlockInFlightRef = useRef<Set<string>>(new Set());
   const [resourceCounts, setResourceCounts] = useState({ gears: 0, scrap: 0, cores: 0, circuits: 0, nanofiber: 0, bioEssence: 0 });
   const [partCounts, setPartCounts] = useState<Record<string, number>>({});
+  // Versus arena match state (server-authoritative scoreboard).
+  const [versusScoreboard, setVersusScoreboard] = useState<Array<{ playerId: string; username: string; kills: number; deaths: number }>>([]);
+  const [versusKillTarget, setVersusKillTarget] = useState(10);
+  const [versusWinner, setVersusWinner] = useState<{ name: string; isMe: boolean } | null>(null);
   // Modular assembly parts (Lab ASSEMBLY tab) — item id → owned count.
   const [modularPartCounts, setModularPartCounts] = useState<Record<string, number>>({});
   const [labOpen, setLabOpen] = useState(false);
@@ -935,29 +939,39 @@ export const Game: React.FC = () => {
           setMultiplayerConnected(false);
           setInRoom(false);
           setRoomCode(null);
+          setVersusScoreboard([]);
+          setVersusWinner(null);
         });
         multiplayer.on("room_joined", (data: any) => {
           setInRoom(true);
           setRoomCode(data.roomCode);
           setIsHost(data.isHost);
           setShowLobby(false);
+          // Switching versus→coop skips room_left for the mover — clear any
+          // stale arena HUD whenever the joined room isn't a versus room.
+          if (data.mode !== "versus") {
+            setVersusScoreboard([]);
+            setVersusWinner(null);
+          }
           showMessage(`Joined room ${data.roomCode}`, 2000);
         });
         multiplayer.on("room_left", () => {
           setInRoom(false);
           setRoomCode(null);
           setIsHost(false);
+          setVersusScoreboard([]);
+          setVersusWinner(null);
         });
         multiplayer.on("room_list", (data: any) => setLobbyRooms(data.rooms));
         multiplayer.on("player_joined", (data: any) => showMessage(`${data.player.username} joined!`, 2000));
         multiplayer.on("player_left", (data: any) => showMessage(`${data.username} left`, 1500));
         multiplayer.on("chat_message", () => setChatMessages(multiplayer.getChatMessages().slice(-20)));
         multiplayer.on("error", (data: any) => showMessage(data.message, 2000));
-        multiplayer.on("player_action", (data: any) => {
+        // Versus PvP damage now arrives as a dedicated, SERVER-VALIDATED
+        // `pvp_hit` message (clamped, rate-limited, range-checked, sent to
+        // the victim only) instead of the old client-trusted broadcast.
+        multiplayer.on("pvp_hit", (hit: any) => {
           if (!versusModeRef.current.active) return;
-          if (data?.action !== "pvp_hit") return;
-          const hit = data.data;
-          if (!hit || hit.targetId !== multiplayer.getPlayerId()) return;
           const raw = typeof hit.damage === "number" ? hit.damage : 0;
           if (raw <= 0 || !playerRef.current) return;
           const reduced = armorSystem.calculateDamageReduction(Math.min(90, raw), DamageType.Kinetic);
@@ -969,6 +983,19 @@ export const Game: React.FC = () => {
             const attacker = typeof hit.attacker === "string" ? hit.attacker : "RIVAL";
             showMessage(`-${Math.floor(result.damageAmount)} FROM ${attacker.toUpperCase()}`, 700);
           }
+        });
+        multiplayer.on("arena_score", (data: any) => {
+          setVersusScoreboard(Array.isArray(data.scoreboard) ? data.scoreboard : []);
+          if (typeof data.killTarget === "number") setVersusKillTarget(data.killTarget);
+        });
+        multiplayer.on("arena_match_over", (data: any) => {
+          setVersusScoreboard(Array.isArray(data.scoreboard) ? data.scoreboard : []);
+          const isMe = data.winnerId === multiplayer.getPlayerId();
+          setVersusWinner({ name: String(data.winnerName ?? "?"), isMe });
+        });
+        multiplayer.on("arena_reset", () => {
+          setVersusWinner(null);
+          showMessage("NEW MATCH — FIGHT!", 2200);
         });
         multiplayer.on("request_position", () => {
           const pos = player.getPosition();
@@ -2289,6 +2316,11 @@ export const Game: React.FC = () => {
 
         bus.on(GameEvents.PLAYER_DIED, () => {
           deathHandledRef.current = true;
+          // Versus: report our own death so the server can award kill
+          // credit (only to a rival whose hit the server itself accepted).
+          if (versusModeRef.current.active) {
+            try { multiplayerRef.current?.sendPvpDeath(); } catch {}
+          }
           if (vehicleSystem.getActive()) {
             vehicleSystem.exit();
             player.setMounted(null);
@@ -2447,16 +2479,9 @@ export const Game: React.FC = () => {
             if (now - last < 180) return;
             pvpHitCooldownRef.current.set(targetId, now);
             const pvpDamage = Math.max(6, Math.min(90, Math.round(dmg * 0.38)));
-            multiplayerRef.current.sendAction("pvp_hit", {
-              targetId,
-              damage: pvpDamage,
-              attacker: currentUser?.username ?? "Rival",
-              position: {
-                x: mesh.getAbsolutePosition().x,
-                y: mesh.getAbsolutePosition().y,
-                z: mesh.getAbsolutePosition().z,
-              },
-            });
+            // Server-validated path: the server clamps damage, rate-limits
+            // this attacker→target pair, and range-checks both positions.
+            multiplayerRef.current.sendPvpHit(targetId, pvpDamage);
             showMessage(`HIT ${String(remoteMeta.username ?? "RIVAL").toUpperCase()}`, 450);
             return;
           }
@@ -4490,6 +4515,42 @@ export const Game: React.FC = () => {
           e.target.value = "";
         }}
       />
+
+      {/* Versus arena scoreboard — server-authoritative kills/deaths. */}
+      {gamePhase === "playing" && versusScoreboard.length > 0 && (
+        <div className="absolute top-16 right-3 z-40 pointer-events-none select-none">
+          <div className="bg-black/70 border border-fuchsia-500/60 rounded-lg px-3 py-2 min-w-[210px]"
+               style={{ boxShadow: "0 0 18px rgba(255,72,214,0.35)" }}>
+            <div className="text-fuchsia-300 text-[10px] tracking-[0.3em] text-center mb-1"
+                 style={{ fontFamily: "'Press Start 2P', monospace" }}>
+              FIRST TO {versusKillTarget} KOs
+            </div>
+            {versusScoreboard.map((row) => {
+              const isMe = row.playerId === multiplayerRef.current?.getPlayerId();
+              return (
+                <div key={row.playerId}
+                     className={`flex justify-between gap-3 text-xs font-mono ${isMe ? "text-cyan-300" : "text-gray-200"}`}>
+                  <span className="truncate max-w-[120px]">{isMe ? "▶ " : ""}{row.username}</span>
+                  <span>{row.kills} / {row.deaths}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {gamePhase === "playing" && versusWinner && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">
+          <div className="bg-black/80 border-2 border-fuchsia-400 rounded-xl px-10 py-6 text-center"
+               style={{ boxShadow: "0 0 40px rgba(255,72,214,0.5)" }}>
+            <div className="text-fuchsia-300 text-sm tracking-[0.4em] mb-2"
+                 style={{ fontFamily: "'Press Start 2P', monospace" }}>MATCH OVER</div>
+            <div className="text-white text-3xl font-bold mb-1">
+              {versusWinner.isMe ? "VICTORY!" : `${versusWinner.name.toUpperCase()} WINS`}
+            </div>
+            <div className="text-gray-400 text-xs">Next match starting shortly…</div>
+          </div>
+        </div>
+      )}
 
       {gamePhase === "playing" && (
         <GameUI

@@ -19,6 +19,11 @@ interface PlayerState {
  *  still authoritative on the client. */
 export type RoomMode = "coop" | "versus";
 
+interface ArenaScore {
+  kills: number;
+  deaths: number;
+}
+
 interface Room {
   code: string;
   hostId: string;
@@ -26,7 +31,12 @@ interface Room {
   maxPlayers: number;
   wave: number;
   createdAt: number;
+  lastActivity: number;
   mode: RoomMode;
+  /** Versus-only match state (playerId → score). Kept for the whole room
+   *  lifetime; reset when a match ends. */
+  scores: Map<string, ArenaScore>;
+  matchOver: boolean;
 }
 
 interface ConnectedPlayer {
@@ -36,6 +46,9 @@ interface ConnectedPlayer {
   roomCode: string | null;
   state: PlayerState;
   lastUpdate: number;
+  /** Anti-spoof bookkeeping for versus PvP (server-validated hits). */
+  lastHitSentAt: Map<string, number>;      // targetId → last accepted pvp_hit ms
+  lastHitBy: { attackerId: string; at: number } | null; // most recent hit taken
 }
 
 type ClientMessage =
@@ -48,7 +61,17 @@ type ClientMessage =
   | { type: "action"; action: string; data: any }
   | { type: "chat"; message: string }
   | { type: "enemy_damage"; enemyId: string; damage: number; damageType: string }
+  | { type: "pvp_hit"; targetId: string; damage: number }
+  | { type: "pvp_death"; killerId?: string }
   | { type: "ping" };
+
+// ---- Versus arena rules (server-authoritative) ---------------------------
+const ARENA_KILL_TARGET = 10;      // first to N KOs wins the match
+const ARENA_HIT_MIN_MS = 150;      // per attacker→target accept rate
+const ARENA_HIT_MAX_DAMAGE = 90;   // matches the client's own clamp
+const ARENA_HIT_MAX_DIST = 160;    // generous (rockets/lasers) sanity range
+const ARENA_KILL_CREDIT_MS = 10000; // a death credits the last hitter within 10s
+const ARENA_RESET_DELAY_MS = 8000; // scoreboard freeze before the next match
 
 const rooms = new Map<string, Room>();
 const players = new Map<string, ConnectedPlayer>();
@@ -94,6 +117,31 @@ function getRoomList(): { code: string; players: number; maxPlayers: number; hos
   return list;
 }
 
+function arenaScoreboard(room: Room): Array<{ playerId: string; username: string; kills: number; deaths: number }> {
+  const board: Array<{ playerId: string; username: string; kills: number; deaths: number }> = [];
+  room.players.forEach((p, id) => {
+    const s = room.scores.get(id) ?? { kills: 0, deaths: 0 };
+    board.push({ playerId: id, username: p.username, kills: s.kills, deaths: s.deaths });
+  });
+  board.sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
+  return board;
+}
+
+function broadcastArenaScore(room: Room): void {
+  if (room.mode !== "versus") return;
+  broadcastToRoom(room.code, {
+    type: "arena_score",
+    killTarget: ARENA_KILL_TARGET,
+    matchOver: room.matchOver,
+    scoreboard: arenaScoreboard(room),
+  });
+}
+
+function dist3(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): number {
+  const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
 function removePlayerFromRoom(playerId: string): void {
   const player = players.get(playerId);
   if (!player || !player.roomCode) return;
@@ -102,7 +150,13 @@ function removePlayerFromRoom(playerId: string): void {
   if (!room) return;
 
   room.players.delete(playerId);
+  room.scores.delete(playerId);
   player.roomCode = null;
+  // Reset PvP attribution so hits/kill-credit can never leak across
+  // room boundaries, and prune the leaver from every peer's rate-limit map.
+  player.lastHitBy = null;
+  player.lastHitSentAt.clear();
+  room.players.forEach((p) => { p.lastHitSentAt.delete(playerId); });
 
   broadcastToRoom(room.code, {
     type: "player_left",
@@ -121,6 +175,7 @@ function removePlayerFromRoom(playerId: string): void {
       broadcastToRoom(room.code, { type: "host_changed", newHostId: newHost });
     }
   }
+  if (room.players.size > 0) broadcastArenaScore(room);
 }
 
 export function setupMultiplayer(httpServer: Server): void {
@@ -175,6 +230,8 @@ export function setupMultiplayer(httpServer: Server): void {
                 isFlying: false,
               },
               lastUpdate: Date.now(),
+              lastHitSentAt: new Map(),
+              lastHitBy: null,
             };
             players.set(playerId, player);
             sendTo(ws, { type: "auth_ok", playerId });
@@ -202,7 +259,10 @@ export function setupMultiplayer(httpServer: Server): void {
               maxPlayers: mode === "versus" ? 24 : 16,
               wave: 0,
               createdAt: Date.now(),
+              lastActivity: Date.now(),
               mode,
+              scores: new Map([[playerId, { kills: 0, deaths: 0 }]]),
+              matchOver: false,
             };
             rooms.set(code, room);
             player.roomCode = code;
@@ -222,6 +282,8 @@ export function setupMultiplayer(httpServer: Server): void {
             if (room.players.size >= room.maxPlayers) return sendTo(ws, { type: "error", message: "Room is full" });
 
             room.players.set(playerId, player);
+            if (!room.scores.has(playerId)) room.scores.set(playerId, { kills: 0, deaths: 0 });
+            room.lastActivity = Date.now();
             player.roomCode = msg.roomCode;
 
             const existingPlayers: PlayerState[] = [];
@@ -238,6 +300,9 @@ export function setupMultiplayer(httpServer: Server): void {
             }, playerId);
 
             log(`${player.username} joined room ${msg.roomCode}`);
+            // Versus rooms: everyone (including the joiner) gets a fresh
+            // scoreboard so the HUD is correct from second zero.
+            broadcastArenaScore(room);
             break;
           }
 
@@ -264,6 +329,8 @@ export function setupMultiplayer(httpServer: Server): void {
             player.state.weaponId = msg.weaponId;
             player.state.isFlying = msg.isFlying;
             player.lastUpdate = Date.now();
+            const posRoom = rooms.get(player.roomCode);
+            if (posRoom) posRoom.lastActivity = Date.now();
 
             broadcastToRoom(player.roomCode, {
               type: "player_update",
@@ -318,6 +385,96 @@ export function setupMultiplayer(httpServer: Server): void {
             break;
           }
 
+          case "pvp_hit": {
+            // Server-validated PvP damage. The server does NOT trust the
+            // attacker blindly: it clamps damage, rate-limits per pair,
+            // requires a shared versus room, and sanity-checks the distance
+            // between both players' last-known positions before forwarding
+            // the hit to the victim ONLY.
+            if (!playerId) return;
+            const attacker = players.get(playerId);
+            if (!attacker || !attacker.roomCode) return;
+            const room = rooms.get(attacker.roomCode);
+            if (!room || room.mode !== "versus" || room.matchOver) return;
+            const target = players.get(String(msg.targetId ?? ""));
+            if (!target || target.roomCode !== attacker.roomCode || target.id === attacker.id) return;
+
+            const now = Date.now();
+            const lastAt = attacker.lastHitSentAt.get(target.id) ?? 0;
+            if (now - lastAt < ARENA_HIT_MIN_MS) return; // spam / macro guard
+            const damage = Math.max(1, Math.min(ARENA_HIT_MAX_DAMAGE, Math.round(Number(msg.damage) || 0)));
+            if (damage <= 0) return;
+            if (dist3(attacker.state.position, target.state.position) > ARENA_HIT_MAX_DIST) return;
+
+            attacker.lastHitSentAt.set(target.id, now);
+            target.lastHitBy = { attackerId: attacker.id, at: now };
+            sendTo(target.ws, {
+              type: "pvp_hit",
+              attackerId: attacker.id,
+              attacker: attacker.username,
+              damage,
+            });
+            room.lastActivity = now;
+            break;
+          }
+
+          case "pvp_death": {
+            // The VICTIM reports its own death (its client owns its health).
+            // Kill credit is only granted if the claimed killer actually
+            // landed a server-accepted hit on this victim recently — a
+            // client cannot inflate a rival's (or its own) kill count.
+            if (!playerId) return;
+            const victim = players.get(playerId);
+            if (!victim || !victim.roomCode) return;
+            const room = rooms.get(victim.roomCode);
+            if (!room || room.mode !== "versus" || room.matchOver) return;
+
+            const now = Date.now();
+            const vs = room.scores.get(victim.id) ?? { kills: 0, deaths: 0 };
+            vs.deaths += 1;
+            room.scores.set(victim.id, vs);
+
+            const hit = victim.lastHitBy;
+            victim.lastHitBy = null;
+            let winner: ConnectedPlayer | null = null;
+            if (hit && now - hit.at <= ARENA_KILL_CREDIT_MS && room.players.has(hit.attackerId)) {
+              const ks = room.scores.get(hit.attackerId) ?? { kills: 0, deaths: 0 };
+              ks.kills += 1;
+              room.scores.set(hit.attackerId, ks);
+              if (ks.kills >= ARENA_KILL_TARGET) winner = room.players.get(hit.attackerId) ?? null;
+            }
+
+            if (winner) {
+              room.matchOver = true;
+              broadcastToRoom(room.code, {
+                type: "arena_match_over",
+                winnerId: winner.id,
+                winnerName: winner.username,
+                killTarget: ARENA_KILL_TARGET,
+                scoreboard: arenaScoreboard(room),
+              });
+              log(`Arena ${room.code}: ${winner.username} won the match`);
+              const code = room.code;
+              setTimeout(() => {
+                const r = rooms.get(code);
+                if (!r) return;
+                r.scores = new Map();
+                r.players.forEach((p, id) => {
+                  r.scores.set(id, { kills: 0, deaths: 0 });
+                  // New match = clean attribution slate.
+                  p.lastHitBy = null;
+                });
+                r.matchOver = false;
+                broadcastToRoom(code, { type: "arena_reset", killTarget: ARENA_KILL_TARGET });
+                broadcastArenaScore(r);
+              }, ARENA_RESET_DELAY_MS);
+            } else {
+              broadcastArenaScore(room);
+            }
+            room.lastActivity = now;
+            break;
+          }
+
           case "ping": {
             sendTo(ws, { type: "pong", time: Date.now() });
             break;
@@ -354,13 +511,29 @@ export function setupMultiplayer(httpServer: Server): void {
     const now = Date.now();
     const staleTimeout = 60000;
     players.forEach((player, id) => {
-      if (now - player.lastUpdate > staleTimeout) {
+      // A player is stale if it went silent for 60s OR its socket is
+      // already dead (closing/closed without a close event reaching us —
+      // e.g. a hard network drop). Both would otherwise leave a ghost
+      // in the room roster.
+      const socketDead = player.ws.readyState === WebSocket.CLOSING || player.ws.readyState === WebSocket.CLOSED;
+      if (socketDead || now - player.lastUpdate > staleTimeout) {
         log(`Removing stale player: ${player.username}`);
         removePlayerFromRoom(id);
         players.delete(id);
         if (player.ws.readyState === WebSocket.OPEN) {
           player.ws.close();
         }
+      }
+    });
+    // Room hygiene: rooms should always die when their last player leaves,
+    // but sweep defensively for empty or long-idle rooms so a bookkeeping
+    // bug can never leak them forever.
+    const roomIdleTimeout = 2 * 60 * 60 * 1000; // 2h with zero traffic
+    rooms.forEach((room, code) => {
+      if (room.players.size === 0 || now - room.lastActivity > roomIdleTimeout) {
+        room.players.forEach((p) => { p.roomCode = null; });
+        rooms.delete(code);
+        log(`Room ${code} swept (${room.players.size === 0 ? "empty" : "idle"})`);
       }
     });
   }, 30000);
