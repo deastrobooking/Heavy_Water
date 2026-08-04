@@ -65,7 +65,15 @@ export class GamepadInput {
   private lastTime = performance.now();
   private listeners: ConnectionListener[] = [];
   private onConnect = (e: GamepadEvent) => this.notify(true, e.gamepad.id);
-  private onDisconnect = (e: GamepadEvent) => this.notify(false, e.gamepad.id);
+  private onDisconnect = (e: GamepadEvent) => {
+    // Release every held synthetic key/mouse immediately rather than
+    // waiting for the next RAF poll to notice the pad is gone. If the tab
+    // is backgrounded when the pad disconnects, RAF is throttled/paused and
+    // any held keys would stay stuck until the tab regains focus.
+    this.isActive = false;
+    this.releaseAll();
+    this.notify(false, e.gamepad.id);
+  };
   private isActive = false;
   // When the player is driving a vehicle, LT/RT should drive the throttle
   // and reverse instead of firing the weapon / beam slash. The host wires
@@ -429,6 +437,18 @@ export class GamepadInput {
       }
       this.prevButtons.set(padIndex, []);
     });
+    // Release any pending combo override synthetic keys (Quote / Semicolon)
+    // that were latched on a Y/X press while LT was held. Without this the
+    // combo key-up never fires if releaseAll() runs before the face button
+    // is physically released (menu open, disconnect, dispose).
+    for (const key of Object.keys(this.comboOverride)) {
+      const idx = Number(key);
+      const ov = this.comboOverride[idx];
+      if (ov) {
+        this.dispatchKeyUp(ov.code, ov.key);
+        this.comboOverride[idx] = null;
+      }
+    }
   }
 
   dispose(): void {

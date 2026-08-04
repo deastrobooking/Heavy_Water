@@ -243,11 +243,18 @@ export class EnemyBaseSystem {
     }
     const origs = t.emissives.map(m => m.emissiveColor.clone());
     for (const m of t.emissives) m.emissiveColor = new BABYLON.Color3(1, 0.1, 0.1);
-    setTimeout(() => {
+    const flashHandle = setTimeout(() => {
+      this.pendingTimeouts.delete(flashHandle);
+      // Only restore if the turret is still alive — a dead/despawned turret
+      // may have had its materials torn down. The handle is also cancelled in
+      // dispose() so it can't fire after a level swap.
+      if (!t.isAlive) return;
       for (let i = 0; i < t.emissives.length; i++) {
-        if (t.emissives[i]) t.emissives[i].emissiveColor = origs[i];
+        const m = t.emissives[i];
+        if (m) m.emissiveColor = origs[i];
       }
     }, 160);
+    this.pendingTimeouts.add(flashHandle);
 
     if (t.health <= 0) this.killTurret(t);
   }
@@ -336,11 +343,17 @@ export class EnemyBaseSystem {
     }
     const origs = base.vault.emissives.map(m => m.emissiveColor.clone());
     for (const m of base.vault.emissives) m.emissiveColor = new BABYLON.Color3(1, 0.15, 0.15);
-    setTimeout(() => {
+    const flashHandle = setTimeout(() => {
+      this.pendingTimeouts.delete(flashHandle);
+      // Only restore if the vault is still alive; the handle is also cancelled
+      // in dispose() so it can't fire after a level swap.
+      if (!base.vault.alive) return;
       for (let i = 0; i < base.vault.emissives.length; i++) {
-        if (base.vault.emissives[i]) base.vault.emissives[i].emissiveColor = origs[i];
+        const m = base.vault.emissives[i];
+        if (m) m.emissiveColor = origs[i];
       }
     }, 160);
+    this.pendingTimeouts.add(flashHandle);
 
     if (base.vault.hp <= 0) this.crackVault(base);
   }

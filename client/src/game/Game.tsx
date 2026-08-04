@@ -202,6 +202,19 @@ export const Game: React.FC = () => {
   const shopOpenRef = useRef(false);
   const labOpenRef = useRef(false);
   const gardenOpenRef = useRef(false);
+  const capsuleOpenRef = useRef(false);
+  const showLobbyRef = useRef(false);
+  // Unified modal predicate — every place that gates gameplay input on
+  // "some pause-style UI is open" must consult this ONE function so no
+  // modal (capsule, shop, lobby, ...) is ever forgotten in a gate.
+  const isAnyModalOpen = useCallback(() =>
+    upgradeMenuOpenRef.current
+      || shopOpenRef.current
+      || labOpenRef.current
+      || gardenOpenRef.current
+      || capsuleOpenRef.current
+      || showLobbyRef.current
+      || (gardenRef.current?.isGardenOpenCheck() ?? false), []);
   const gamepadRef = useRef<GamepadInput | null>(null);
   const chestSystemRef = useRef<ChestSystem | null>(null);
   const combatSystemRef = useRef<CombatSystem | null>(null);
@@ -838,14 +851,7 @@ export const Game: React.FC = () => {
         // legendary creature. Looted state is per-level + persistent.
         const mountainRing = new MountainRingSystem(scene, inventory, bioSystem);
         mountainRingRef.current = mountainRing;
-        mountainRing.setInputBlockedProvider(() => {
-          if (labOpenRef.current) return true;
-          if (gardenOpenRef.current) return true;
-          if (upgradeMenuOpenRef.current) return true;
-          if (shopRef.current?.isOpen()) return true;
-          if (gardenRef.current?.isGardenOpenCheck()) return true;
-          return false;
-        });
+        mountainRing.setInputBlockedProvider(() => isAnyModalOpen());
 
         weapons.setInventory(inventory);
 
@@ -1292,10 +1298,7 @@ export const Game: React.FC = () => {
               engine.getCamera(),
               inventory,
               () => player.getPosition(),
-              () => labOpenRef.current
-                || gardenOpenRef.current
-                || upgradeMenuOpenRef.current
-                || (gardenRef.current?.isGardenOpenCheck() ?? false),
+              () => isAnyModalOpen(),
               baseSystem,
               {
                 // Mirrors the SpaceLevelSystem handles bag — sanctuary hides
@@ -1341,10 +1344,7 @@ export const Game: React.FC = () => {
               scene,
               engine.getCamera(),
               () => player.getPosition(),
-              () => labOpenRef.current
-                || gardenOpenRef.current
-                || upgradeMenuOpenRef.current
-                || (gardenRef.current?.isGardenOpenCheck() ?? false),
+              () => isAnyModalOpen(),
               {
                 city: cityGenerator,
                 worldVisibles: [
@@ -1649,10 +1649,7 @@ export const Game: React.FC = () => {
         // own KeyE / interaction. Without this gate, pressing E inside any of
         // those would also advance NPC dialogue in the background.
         friendlyNPCs.setInputBlockedProvider(() => {
-          if (labOpenRef.current) return true;
-          if (gardenOpenRef.current) return true;
-          if (upgradeMenuOpenRef.current) return true;
-          if (gardenRef.current?.isGardenOpenCheck()) return true;
+          if (isAnyModalOpen()) return true;
           // Defer to RescueSystem while a story bubble is mid-flight so the
           // E press that advances the rescue line can't also pop / advance
           // an adjacent friendly-NPC dialogue. (Cages and NPCs don't share
@@ -1672,14 +1669,7 @@ export const Game: React.FC = () => {
         // has already freed in a prior run (restored from ProgressSync).
         const rescueSystem = new RescueSystem(scene, engine.getCamera());
         rescueSystem.setPlayerPositionProvider(() => player.getPosition());
-        rescueSystem.setInputBlockedProvider(() => {
-          if (labOpenRef.current) return true;
-          if (gardenOpenRef.current) return true;
-          if (upgradeMenuOpenRef.current) return true;
-          if (gardenRef.current?.isGardenOpenCheck()) return true;
-          if (shopRef.current?.isOpen()) return true;
-          return false;
-        });
+        rescueSystem.setInputBlockedProvider(() => isAnyModalOpen());
         rescueSystemRef.current = rescueSystem;
         // Seed the initial roster for the level we're on right now.
         // LevelSystem doesn't fire LEVEL_STARTED at construction, AND its
@@ -1708,9 +1698,7 @@ export const Game: React.FC = () => {
         // the shop, garden, NPC dialogue, and upgrade bay all share
         // the same controller treatment.
         gamepad.setMenuOpenProvider(() =>
-          upgradeMenuOpenRef.current
-            || shopOpenRef.current
-            || gardenOpenRef.current
+          isAnyModalOpen()
             || (friendlyNPCsRef.current?.isDialogueOpen() ?? false),
         );
         gamepadRef.current = gamepad;
@@ -3331,6 +3319,14 @@ export const Game: React.FC = () => {
     showMessage(result.message, 2000);
   }, [showMessage]);
 
+  const handleCapsuleClose = useCallback(() => {
+    capsuleRef.current?.close();
+  }, []);
+
+  const handleShopClose = useCallback(() => {
+    if (shopRef.current?.isOpen()) shopRef.current.closeShop();
+  }, []);
+
   const handleShopBuy = useCallback((key: string) => {
     const shop = shopRef.current;
     if (!shop) return;
@@ -3815,14 +3811,39 @@ export const Game: React.FC = () => {
 
   useEffect(() => {
     if (gamePhase !== "playing") return;
+    // Close every pause-style modal in one shot. Capsule + shop are owned
+    // by their Babylon systems, so we close through them (they call back
+    // into setCapsuleOpen/setShopOpen); the rest are plain React state.
+    const closeAllModals = () => {
+      setUpgradeMenuOpen(false);
+      setLabOpen(false);
+      setGardenOpen(false);
+      setShowLobby(false);
+      capsuleRef.current?.close();
+      if (shopRef.current?.isOpen()) shopRef.current.closeShop();
+    };
     const onKey = (e: KeyboardEvent) => {
+      if (e.code === "Escape") {
+        if (isAnyModalOpen()) closeAllModals();
+        return;
+      }
       if (e.code === "Tab") {
         e.preventDefault();
-        setUpgradeMenuOpen(v => !v);
-        if (labOpen) setLabOpen(false);
-        if (gardenOpen) setGardenOpen(false);
+        // Modal-aware: if ANY modal is open, Tab closes it instead of
+        // stacking the upgrade menu on top of it.
+        if (isAnyModalOpen()) {
+          closeAllModals();
+          return;
+        }
+        setUpgradeMenuOpen(true);
         if (document.pointerLockElement) document.exitPointerLock();
-      } else if (e.code === "KeyH") {
+        return;
+      }
+      // While any modal is open, swallow every gameplay key so the player
+      // can't shoot / melee / capture / turbo through an open menu. Modal
+      // navigation (arrows/Enter) is handled by dedicated UI listeners.
+      if (isAnyModalOpen()) return;
+      if (e.code === "KeyH") {
         if (bioRef.current) {
           const ok = bioRef.current.attemptCaptureNearest();
           if (!ok) showMessage("NO CREATURE IN RANGE", 1200);
@@ -3990,10 +4011,6 @@ export const Game: React.FC = () => {
         if (weaponsRef.current) {
           weaponsRef.current.cycleWeapon(1);
         }
-      } else if (e.code === "Escape") {
-        if (upgradeMenuOpen) setUpgradeMenuOpen(false);
-        if (labOpen) setLabOpen(false);
-        if (gardenOpen) setGardenOpen(false);
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -4017,6 +4034,7 @@ export const Game: React.FC = () => {
     // while the beam button is held (or freshly pressed) fires the cannon.
     const onMouseDown = (e: MouseEvent) => {
       if (e.button !== 0) return;
+      if (isAnyModalOpen()) return; // no firing through open menus
       const now = performance.now();
       weaponPressTimeRef.current = now;
       weaponHeldRef.current = true;
@@ -4038,7 +4056,7 @@ export const Game: React.FC = () => {
       window.removeEventListener("mousedown", onMouseDown);
       window.removeEventListener("mouseup", onMouseUp);
     };
-  }, [gamePhase, upgradeMenuOpen, labOpen, gardenOpen, showMessage]);
+  }, [gamePhase, showMessage, isAnyModalOpen]);
 
   // Keep modal-open refs in sync with their React state so non-React systems
   // (e.g. FriendlyNPCSystem) can poll the live values without re-binding.
@@ -4046,6 +4064,17 @@ export const Game: React.FC = () => {
   useEffect(() => { shopOpenRef.current = shopOpen; }, [shopOpen]);
   useEffect(() => { labOpenRef.current = labOpen; }, [labOpen]);
   useEffect(() => { gardenOpenRef.current = gardenOpen; }, [gardenOpen]);
+  useEffect(() => { capsuleOpenRef.current = capsuleOpen; }, [capsuleOpen]);
+  useEffect(() => { showLobbyRef.current = showLobby; }, [showLobby]);
+
+  // Whenever ANY modal opens, drop every held movement/ability key so the
+  // player doesn't keep running/boosting behind the menu (their keyup may
+  // never be seen once UI listeners take over).
+  useEffect(() => {
+    if (upgradeMenuOpen || shopOpen || labOpen || gardenOpen || capsuleOpen || showLobby) {
+      playerRef.current?.releaseAllKeys();
+    }
+  }, [upgradeMenuOpen, shopOpen, labOpen, gardenOpen, capsuleOpen, showLobby]);
 
   useEffect(() => {
     if (gamePhase !== "playing") return;
@@ -4070,7 +4099,12 @@ export const Game: React.FC = () => {
       if (down && !vehicleRef.current?.getActive()) return;
       vehicleRef.current?.setInput({ [k]: down } as any);
     };
-    const onDown = (e: KeyboardEvent) => setKey(e.code, true);
+    const onDown = (e: KeyboardEvent) => {
+      // No vehicle inputs while a menu is open (keyups still forward so
+      // held flags always clear when a modal opens mid-drive).
+      if (isAnyModalOpen()) return;
+      setKey(e.code, true);
+    };
     const onUp = (e: KeyboardEvent) => setKey(e.code, false);
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);
@@ -4078,7 +4112,7 @@ export const Game: React.FC = () => {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
     };
-  }, [gamePhase]);
+  }, [gamePhase, isAnyModalOpen]);
 
   const labLevel = labStructure ? (baseRef.current?.getStructures().find(s => s.id === labStructure.id)?.level ?? labStructure.level) : 0;
   const labRawCost = labStructure ? baseRef.current?.getUpgradeCost(labStructure.id) ?? null : null;
@@ -4392,9 +4426,11 @@ export const Game: React.FC = () => {
           capsuleOpen={capsuleOpen}
           capsuleUpgrades={capsuleUpgrades}
           onCapsuleUpgrade={handleCapsuleUpgrade}
+          onCapsuleClose={handleCapsuleClose}
           shopOpen={shopOpen}
           activeShop={activeShop}
           onShopBuy={handleShopBuy}
+          onShopClose={handleShopClose}
           buildMode={buildMode}
           inVehicle={inVehicle}
           hotbarBlocks={hotbarBlocks}

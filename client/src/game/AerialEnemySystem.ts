@@ -862,9 +862,24 @@ export class AerialEnemySystem {
     if (this.fortressRegroupTimer > 0) this.fortressRegroupTimer -= dt;
     if (this.skiesClearedTimer > 0) this.skiesClearedTimer -= dt;
 
+    // Single counted pass over the roster — replaces four per-frame filter()
+    // allocations (live fortresses / live aerial / live fighters / live
+    // battleships) with one loop and no garbage.
+    let liveFortresses = 0;
+    let liveAerial = 0;
+    let liveFighters = 0;
+    let liveBattleships = 0;
+    for (let u = 0; u < this.units.length; u++) {
+      const unit = this.units[u];
+      if (!unit.isAlive) continue;
+      liveAerial++;
+      if (unit.kind === "fortress") liveFortresses++;
+      else if (unit.kind === "fighter") liveFighters++;
+      else if (unit.kind === "battleship") liveBattleships++;
+    }
+
     // Detect the "last fortress just died" transition: when we previously had
     // any fortresses alive and now have zero, start the 5-minute lockout.
-    const liveFortresses = this.units.filter(u => u.kind === "fortress" && u.isAlive).length;
     if (liveFortresses > 0) {
       this.fortressesEverAlive = true;
     } else if (this.fortressesEverAlive && this.fortressRegroupTimer <= 0) {
@@ -877,7 +892,6 @@ export class AerialEnemySystem {
     // Detect the "skies are clear" transition: every aerial unit (fighter,
     // battleship, fortress) is dead. Trigger the global aerial lockout so
     // the player gets a real 5-minute breather before the next wave shows.
-    const liveAerial = this.units.filter(u => u.isAlive).length;
     if (liveAerial > 0) {
       this.aerialEverAlive = true;
     } else if (this.aerialEverAlive && this.skiesClearedTimer <= 0) {
@@ -892,8 +906,8 @@ export class AerialEnemySystem {
     // entirely so existing units still tick + clean up below.
     if (this.spawnCooldown <= 0 && this.skiesClearedTimer <= 0 && this.spawningEnabled) {
       this.spawnCooldown = 6 + Math.random() * 4;
-      const fighters = this.units.filter(u => u.kind === "fighter" && u.isAlive).length;
-      const battleships = this.units.filter(u => u.kind === "battleship" && u.isAlive).length;
+      const fighters = liveFighters;
+      const battleships = liveBattleships;
       const fortresses = liveFortresses;
 
       // Fortresses only respawn after the regroup lockout expires.

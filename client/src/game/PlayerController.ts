@@ -543,6 +543,31 @@ export class PlayerController implements IDamageable {
 
     window.addEventListener("keydown", this.keyDownHandler);
     window.addEventListener("keyup", this.keyUpHandler);
+
+    // Centralized stuck-key defense: when the window loses focus, the tab
+    // is hidden, or pointer lock is dropped, real keyup events can be
+    // swallowed by the OS/browser, leaving movement keys latched (player
+    // runs forever). Clear ALL held keys on any of those transitions.
+    this.focusLossHandler = () => this.releaseAllKeys();
+    this.visibilityHandler = () => {
+      if (document.visibilityState === "hidden") this.releaseAllKeys();
+    };
+    this.pointerLockHandler = () => {
+      if (!document.pointerLockElement) this.releaseAllKeys();
+    };
+    window.addEventListener("blur", this.focusLossHandler);
+    document.addEventListener("visibilitychange", this.visibilityHandler);
+    document.addEventListener("pointerlockchange", this.pointerLockHandler);
+  }
+
+  private focusLossHandler: (() => void) | null = null;
+  private visibilityHandler: (() => void) | null = null;
+  private pointerLockHandler: (() => void) | null = null;
+
+  /** Clear every held-key flag (used on blur / tab-hide / pointer-lock
+   *  exit / modal open so no movement or ability key stays latched). */
+  releaseAllKeys(): void {
+    for (const code of Object.keys(this.keys)) this.keys[code] = false;
   }
 
   dispose(): void {
@@ -553,6 +578,18 @@ export class PlayerController implements IDamageable {
     if (this.keyUpHandler) {
       window.removeEventListener("keyup", this.keyUpHandler);
       this.keyUpHandler = null;
+    }
+    if (this.focusLossHandler) {
+      window.removeEventListener("blur", this.focusLossHandler);
+      this.focusLossHandler = null;
+    }
+    if (this.visibilityHandler) {
+      document.removeEventListener("visibilitychange", this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
+    if (this.pointerLockHandler) {
+      document.removeEventListener("pointerlockchange", this.pointerLockHandler);
+      this.pointerLockHandler = null;
     }
     if (this.flightEntryTimer) {
       clearTimeout(this.flightEntryTimer);

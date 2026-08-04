@@ -254,6 +254,19 @@ export class BioCreatureSystem {
     c.hitbox.rotation.y += dt * 8;
   }
 
+  /** Dispose an orb's mesh, its material, and its (optional) beam so no
+   *  StandardMaterial/LinesMesh leaks when the orb is cancelled or lands. */
+  private disposeOrb(o: CaptureOrb): void {
+    if (o.mesh && !o.mesh.isDisposed()) {
+      const mat = o.mesh.material;
+      try { o.mesh.dispose(); } catch {}
+      if (mat) try { mat.dispose(); } catch {}
+    }
+    if (o.beam && !o.beam.isDisposed()) {
+      try { o.beam.dispose(); } catch {}
+    }
+  }
+
   private tick(dt: number): void {
     for (const c of this.creatures) {
       if (c.captured) continue;
@@ -263,7 +276,13 @@ export class BioCreatureSystem {
       if (c.wanderTimer <= 0) {
         const angle = Math.random() * Math.PI * 2;
         const r = 4 + Math.random() * 8;
-        c.wanderTarget = c.homePoint.add(new BABYLON.Vector3(Math.cos(angle) * r, 0, Math.sin(angle) * r));
+        // Mutate the existing wanderTarget vector instead of allocating a
+        // fresh Vector3 every reset.
+        c.wanderTarget.set(
+          c.homePoint.x + Math.cos(angle) * r,
+          c.homePoint.y,
+          c.homePoint.z + Math.sin(angle) * r,
+        );
         c.wanderTimer = 3 + Math.random() * 3;
       }
       const dx = c.wanderTarget.x - c.position.x;
@@ -285,6 +304,14 @@ export class BioCreatureSystem {
 
     for (let i = this.orbs.length - 1; i >= 0; i--) {
       const o = this.orbs[i];
+      // Cancel an orb whose target has despawned or is no longer a live
+      // (uncaptured) creature — dereferencing o.target.position after the
+      // creature is removed would touch a stale object.
+      if (o.target.captured || this.creatures.indexOf(o.target) < 0) {
+        this.disposeOrb(o);
+        this.orbs.splice(i, 1);
+        continue;
+      }
       o.age += dt;
       const t = Math.min(1, o.age / o.totalDuration);
       const arcY = Math.sin(t * Math.PI) * 2;
@@ -313,7 +340,7 @@ export class BioCreatureSystem {
           color: new BABYLON.Color3(0.5, 1.0, 0.6),
         });
         this.bus.emit("effect:cameraShake", { intensity: 0.18, duration: 0.2 });
-        o.mesh.dispose();
+        this.disposeOrb(o);
         this.orbs.splice(i, 1);
         this.resolveCapture(o.target);
       }
@@ -323,7 +350,10 @@ export class BioCreatureSystem {
     this.respawnTimer -= dt;
     if (this.respawnTimer <= 0) {
       this.respawnTimer = RESPAWN_INTERVAL;
-      const alive = this.creatures.filter(c => !c.captured).length;
+      let alive = 0;
+      for (let ci = 0; ci < this.creatures.length; ci++) {
+        if (!this.creatures[ci].captured) alive++;
+      }
       if (alive < TARGET_WILD_POP) {
         const radius = 280;
         const angle = Math.random() * Math.PI * 2;
@@ -556,8 +586,11 @@ export class BioCreatureSystem {
       this.scene.onBeforeRenderObservable.remove(this.observer);
       this.observer = null;
     }
-    for (const o of this.orbs) o.mesh.dispose();
+    for (const o of this.orbs) this.disposeOrb(o);
     for (const c of this.creatures) {
+      if (c.root && !c.root.isDisposed()) {
+        try { c.root.dispose(); } catch {}
+      }
       if (c.hitbox && !c.hitbox.isDisposed()) c.hitbox.dispose();
     }
     this.orbs = [];

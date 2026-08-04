@@ -393,6 +393,12 @@ export class ArmorCapsuleSystem {
     }
   }
 
+  /** Public close hook so React UI (close button / unified ESC / gamepad B)
+   *  can close the capsule through the system, keeping isUIOpen in sync. */
+  close(): void {
+    if (this.isUIOpen) this.closeUI();
+  }
+
   private closeUI(): void {
     this.isUIOpen = false;
     if (this.onUIToggle) {

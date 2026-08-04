@@ -53,6 +53,8 @@ interface GameUIProps {
   maxArmorEnergy?: number;
   hasFlightArmor?: boolean;
   capsuleOpen?: boolean;
+  onCapsuleClose?: () => void;
+  onShopClose?: () => void;
   capsuleUpgrades?: ArmorUpgrade[];
   onCapsuleUpgrade?: (upgradeId: string) => void;
   shopOpen?: boolean;
@@ -172,6 +174,8 @@ export const GameUI: React.FC<GameUIProps> = ({
   maxArmorEnergy = 200,
   hasFlightArmor = false,
   capsuleOpen = false,
+  onCapsuleClose,
+  onShopClose,
   capsuleUpgrades = [],
   onCapsuleUpgrade,
   shopOpen = false,
@@ -278,7 +282,7 @@ export const GameUI: React.FC<GameUIProps> = ({
   React.useEffect(() => {
     if (!shopOpen || !activeShop) return;
     const nav = (action: "up" | "down" | "left" | "right" | "activate" | "close") => {
-      if (action === "close") return; // shop close is owned by ShopSystem (E in world); B doesn't force-close here
+      if (action === "close") { onShopClose?.(); return; } // gamepad B / ESC leave the shop like [E]
       if (action === "up" || action === "down") {
         setShopSelectedIdx(prev => {
           const max = Math.max(0, shopItemCount - 1);
@@ -306,6 +310,7 @@ export const GameUI: React.FC<GameUIProps> = ({
       if (e.code === "ArrowUp")        { e.preventDefault(); nav("up"); }
       else if (e.code === "ArrowDown") { e.preventDefault(); nav("down"); }
       else if (e.code === "Enter")     { e.preventDefault(); nav("activate"); }
+      else if (e.code === "Escape")    { nav("close"); }
     };
     window.addEventListener("gamepad-menu", padHandler);
     window.addEventListener("keydown", keyHandler);
@@ -313,7 +318,20 @@ export const GameUI: React.FC<GameUIProps> = ({
       window.removeEventListener("gamepad-menu", padHandler);
       window.removeEventListener("keydown", keyHandler);
     };
-  }, [shopOpen, activeShop, shopItemCount, shopCurIdx, stats.credits, onShopBuy]);
+  }, [shopOpen, activeShop, shopItemCount, shopCurIdx, stats.credits, onShopBuy, onShopClose]);
+
+  // Capsule close: gamepad B (via the shared "gamepad-menu" close action).
+  // ESC is handled by both ArmorCapsuleSystem's own listener and the game's
+  // unified Escape handler; this covers the controller path + close button.
+  React.useEffect(() => {
+    if (!capsuleOpen) return;
+    const padHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { action?: string } | null;
+      if (detail?.action === "close") onCapsuleClose?.();
+    };
+    window.addEventListener("gamepad-menu", padHandler);
+    return () => window.removeEventListener("gamepad-menu", padHandler);
+  }, [capsuleOpen, onCapsuleClose]);
   React.useEffect(() => {
     if (!shopOpen) return;
     const el = shopRowRefs.current.get(shopCurIdx);
@@ -955,8 +973,20 @@ export const GameUI: React.FC<GameUIProps> = ({
       />
 
       {capsuleOpen && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-auto">
-          <div className="bg-black/95 border-2 border-cyan-400 rounded-xl p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto">
+        <div
+          className="fixed inset-0 flex items-center justify-center z-50 pointer-events-auto"
+          onClick={() => onCapsuleClose?.()}
+        >
+          <div
+            className="bg-black/95 border-2 border-cyan-400 rounded-xl p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="absolute top-3 right-3 text-cyan-400 hover:text-white text-sm px-2 py-1 border border-cyan-700 rounded"
+              onClick={() => onCapsuleClose?.()}
+            >
+              ✕
+            </button>
             <div className="text-cyan-400 text-lg font-bold mb-4 text-center">ARMOR CAPSULE LAB</div>
             <div className="text-gray-400 text-xs mb-4 text-center">Select an upgrade to apply</div>
             <div className="space-y-3">
@@ -996,14 +1026,20 @@ export const GameUI: React.FC<GameUIProps> = ({
                 </div>
               ))}
             </div>
-            <div className="text-gray-500 text-xs mt-4 text-center">Press ESC to close</div>
+            <div className="text-gray-500 text-xs mt-4 text-center">Press ESC or [B] to close</div>
           </div>
         </div>
       )}
 
       {shopOpen && activeShop && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-auto">
-          <div className="bg-black/95 border-2 border-emerald-400 rounded-xl p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto">
+        <div
+          className="fixed inset-0 flex items-center justify-center z-50 pointer-events-auto"
+          onClick={() => onShopClose?.()}
+        >
+          <div
+            className="bg-black/95 border-2 border-emerald-400 rounded-xl p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="text-emerald-400 text-lg font-bold mb-2 text-center">{activeShop.name}</div>
             <div className="text-gray-400 text-xs mb-1 text-center">Credits: {stats.credits}</div>
             <div className="text-gray-500 text-[10px] mb-3 text-center">[↑/↓] or D-Pad · [Enter] / [A] to buy · [E] to leave</div>

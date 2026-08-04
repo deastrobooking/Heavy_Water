@@ -81,6 +81,37 @@ export class SkySystem {
    *  Used by LevelSystem to shift the world (e.g. red sky for Level 2). */
   private levelTint: BABYLON.Color3 = new BABYLON.Color3(1, 1, 1);
 
+  /** Throttle for the sky/light uniform recompute. Time-of-day drifts slowly
+   *  (a full day is >= 10 real seconds) so re-lerping the palette and pushing
+   *  uniforms every frame is wasteful — ~10Hz is visually identical. The
+   *  camera-follow position update stays per-frame in update(). */
+
+  // Reusable scratch objects so update()/applyTimeOfDay() don't allocate a
+  // fresh Color3/Vector3 every frame. All are mutated in place via
+  // copyFrom / set / LerpToRef before being pushed to uniforms.
+  private scratchZenith = new BABYLON.Color3();
+  private scratchHorizon = new BABYLON.Color3();
+  private scratchSunDisc = new BABYLON.Color3();
+  private scratchSunLight = new BABYLON.Color3();
+  private scratchAmbient = new BABYLON.Color3();
+  private scratchAmbientGround = new BABYLON.Color3();
+  private scratchFog = new BABYLON.Color3();
+  private scratchSunDir = new BABYLON.Vector3();
+  private scratchLightDir = new BABYLON.Vector3();
+  private scratchClear = new BABYLON.Color4(0, 0, 0, 1);
+  // Intermediate palette reused every call by getPaletteInto / applyLevelTint.
+  private scratchPalette: SkyPalette = {
+    zenith: new BABYLON.Color3(),
+    horizon: new BABYLON.Color3(),
+    sunDisc: new BABYLON.Color3(),
+    sunLight: new BABYLON.Color3(),
+    ambient: new BABYLON.Color3(),
+    ambientGround: new BABYLON.Color3(),
+    fog: new BABYLON.Color3(),
+    sunIntensity: 0,
+    ambientIntensity: 0,
+  };
+
   constructor(
     scene: BABYLON.Scene,
     sunLight: BABYLON.DirectionalLight | null,
@@ -201,6 +232,9 @@ export class SkySystem {
   }
 
   private getPalette(): { palette: SkyPalette; phase: string; nightFactor: number } {
+    // Fills this.scratchPalette in place (no allocation). The returned object
+    // is the shared scratch instance — callers must consume it before the
+    // next getPalette() call. getPhase() only reads phase, so that's safe.
     const t = this.timeOfDay % 24;
     let from: SkyPalette;
     let to: SkyPalette;
@@ -237,31 +271,32 @@ export class SkySystem {
       blend = (t - 19) / 2;
       phase = "evening";
     }
-    const palette: SkyPalette = {
-      zenith: BABYLON.Color3.Lerp(from.zenith, to.zenith, blend),
-      horizon: BABYLON.Color3.Lerp(from.horizon, to.horizon, blend),
-      sunDisc: BABYLON.Color3.Lerp(from.sunDisc, to.sunDisc, blend),
-      sunLight: BABYLON.Color3.Lerp(from.sunLight, to.sunLight, blend),
-      ambient: BABYLON.Color3.Lerp(from.ambient, to.ambient, blend),
-      ambientGround: BABYLON.Color3.Lerp(from.ambientGround, to.ambientGround, blend),
-      fog: BABYLON.Color3.Lerp(from.fog, to.fog, blend),
-      sunIntensity: from.sunIntensity + (to.sunIntensity - from.sunIntensity) * blend,
-      ambientIntensity: from.ambientIntensity + (to.ambientIntensity - from.ambientIntensity) * blend,
-    };
+    const p = this.scratchPalette;
+    BABYLON.Color3.LerpToRef(from.zenith, to.zenith, blend, p.zenith);
+    BABYLON.Color3.LerpToRef(from.horizon, to.horizon, blend, p.horizon);
+    BABYLON.Color3.LerpToRef(from.sunDisc, to.sunDisc, blend, p.sunDisc);
+    BABYLON.Color3.LerpToRef(from.sunLight, to.sunLight, blend, p.sunLight);
+    BABYLON.Color3.LerpToRef(from.ambient, to.ambient, blend, p.ambient);
+    BABYLON.Color3.LerpToRef(from.ambientGround, to.ambientGround, blend, p.ambientGround);
+    BABYLON.Color3.LerpToRef(from.fog, to.fog, blend, p.fog);
+    p.sunIntensity = from.sunIntensity + (to.sunIntensity - from.sunIntensity) * blend;
+    p.ambientIntensity = from.ambientIntensity + (to.ambientIntensity - from.ambientIntensity) * blend;
     const nightFactor = (t < 5 || t >= 21) ? 1.0 : (t < 6 ? 1.0 - (t - 5) : (t > 20 ? (t - 20) : 0));
-    return { palette, phase, nightFactor };
+    return { palette: p, phase, nightFactor };
   }
 
-  private getSunDirection(): BABYLON.Vector3 {
+  private getSunDirectionInto(out: BABYLON.Vector3): BABYLON.Vector3 {
     const angle = ((this.timeOfDay - 6) / 24) * Math.PI * 2;
     const x = Math.cos(angle);
     const y = Math.sin(angle);
-    return new BABYLON.Vector3(x * 0.4, -Math.max(y, -0.95), 0.5).normalize();
+    out.set(x * 0.4, -Math.max(y, -0.95), 0.5);
+    return out.normalize();
   }
 
-  private getLightDirection(skyDir: BABYLON.Vector3): BABYLON.Vector3 {
+  private getLightDirectionInto(skyDir: BABYLON.Vector3, out: BABYLON.Vector3): BABYLON.Vector3 {
     const y = Math.min(skyDir.y, -0.05);
-    return new BABYLON.Vector3(skyDir.x, y, skyDir.z).normalize();
+    out.set(skyDir.x, y, skyDir.z);
+    return out.normalize();
   }
 
   private getSunAltitude(): number {
@@ -280,14 +315,20 @@ export class SkySystem {
       return;
     }
 
-    const { palette: rawPalette, nightFactor } = this.getPalette();
-    const palette = this.applyLevelTint(rawPalette);
-    const sunDir = this.getSunDirection();
+    const { palette, nightFactor } = this.getPalette();
+    this.applyLevelTintInPlace(palette);
+    const sunDir = this.getSunDirectionInto(this.scratchSunDir);
     const overcast = this.weather === "clear" ? 0 : this.weather === "overcast" ? 0.7 : 1.0;
 
-    this.skyMat.setColor3("zenithColor", palette.zenith);
-    this.skyMat.setColor3("horizonColor", palette.horizon);
-    this.skyMat.setColor3("sunColor", palette.sunDisc);
+    // Copy palette colours into dedicated scratch so the shared scratchPalette
+    // instance is free to be mutated again next call without the material
+    // holding a live reference to it.
+    this.scratchZenith.copyFrom(palette.zenith);
+    this.scratchHorizon.copyFrom(palette.horizon);
+    this.scratchSunDisc.copyFrom(palette.sunDisc);
+    this.skyMat.setColor3("zenithColor", this.scratchZenith);
+    this.skyMat.setColor3("horizonColor", this.scratchHorizon);
+    this.skyMat.setColor3("sunColor", this.scratchSunDisc);
     this.skyMat.setVector3("sunDir", sunDir);
     this.skyMat.setFloat("sunSize", 220);
     this.skyMat.setFloat("starFactor", nightFactor * (1.0 - overcast));
@@ -295,24 +336,34 @@ export class SkySystem {
     this.skyMat.setFloat("time", performance.now() / 1000);
 
     if (this.sunLight) {
-      this.sunLight.direction = this.getLightDirection(sunDir);
-      this.sunLight.diffuse = palette.sunLight;
+      this.getLightDirectionInto(sunDir, this.scratchLightDir);
+      this.sunLight.direction.copyFrom(this.scratchLightDir);
+      this.scratchSunLight.copyFrom(palette.sunLight);
+      this.sunLight.diffuse = this.scratchSunLight;
       const altitude = this.getSunAltitude();
       const horizonFade = BABYLON.Scalar.Clamp(altitude * 4 + 0.1, 0, 1);
       this.sunLight.intensity = palette.sunIntensity * (1.0 - overcast * 0.45) * horizonFade;
     }
     if (this.ambientLight) {
-      this.ambientLight.diffuse = palette.ambient;
-      this.ambientLight.groundColor = palette.ambientGround;
+      this.scratchAmbient.copyFrom(palette.ambient);
+      this.scratchAmbientGround.copyFrom(palette.ambientGround);
+      this.ambientLight.diffuse = this.scratchAmbient;
+      this.ambientLight.groundColor = this.scratchAmbientGround;
       this.ambientLight.intensity = palette.ambientIntensity + overcast * 0.1;
     }
 
-    const fog = palette.fog.scale(1.0 - overcast * 0.3).add(
-      new BABYLON.Color3(0.4, 0.4, 0.45).scale(overcast * 0.3),
+    // fog = palette.fog * (1 - overcast*0.3) + (0.4,0.4,0.45) * (overcast*0.3)
+    const fogScale = 1.0 - overcast * 0.3;
+    const mixScale = overcast * 0.3;
+    this.scratchFog.set(
+      palette.fog.r * fogScale + 0.4 * mixScale,
+      palette.fog.g * fogScale + 0.4 * mixScale,
+      palette.fog.b * fogScale + 0.45 * mixScale,
     );
-    this.scene.fogColor = fog;
+    this.scene.fogColor = this.scratchFog;
     this.scene.fogDensity = 0.0015 + overcast * 0.0025;
-    this.scene.clearColor = new BABYLON.Color4(palette.horizon.r, palette.horizon.g, palette.horizon.b, 1);
+    this.scratchClear.set(palette.horizon.r, palette.horizon.g, palette.horizon.b, 1);
+    this.scene.clearColor = this.scratchClear;
   }
 
   update(dtSeconds: number): void {
@@ -320,64 +371,82 @@ export class SkySystem {
       this.timeOfDay = (this.timeOfDay + (24 / this.secondsPerDay) * dtSeconds) % 24;
       if (this.timeOfDay < 0) this.timeOfDay += 24;
     }
+    // Per-frame: the sky dome must track the camera every frame so it never
+    // appears to lag behind fast movement. This is cheap (one copyFrom).
     if (this.skyMesh && this.camera) {
       this.skyMesh.position.copyFrom(this.camera.position);
     }
+    // Per-frame on purpose: sun direction / light / fog must stay
+    // frame-continuous (a 10Hz throttle produced visible stepping at fast
+    // day speeds — secondsPerDay can go as low as 10s). The former per-frame
+    // allocation cost is gone: applyTimeOfDay now writes exclusively into
+    // reusable scratch objects, so this is cheap math + uniform sets.
     this.applyTimeOfDay();
   }
 
-  /** Apply a per-level multiplicative RGB tint over an existing palette. */
-  private applyLevelTint(p: SkyPalette): SkyPalette {
+  /** Apply a per-level multiplicative RGB tint over the palette IN PLACE
+   *  (mutates the passed scratch palette; no allocation). */
+  private applyLevelTintInPlace(p: SkyPalette): void {
     const t = this.levelTint;
-    if (t.r === 1 && t.g === 1 && t.b === 1) return p;
-    const mul = (c: BABYLON.Color3) => new BABYLON.Color3(
-      Math.min(1, c.r * t.r),
-      Math.min(1, c.g * t.g),
-      Math.min(1, c.b * t.b),
-    );
-    return {
-      zenith: mul(p.zenith),
-      horizon: mul(p.horizon),
-      sunDisc: mul(p.sunDisc),
-      sunLight: mul(p.sunLight),
-      ambient: mul(p.ambient),
-      ambientGround: mul(p.ambientGround),
-      fog: mul(p.fog),
-      sunIntensity: p.sunIntensity,
-      ambientIntensity: p.ambientIntensity,
+    if (t.r === 1 && t.g === 1 && t.b === 1) return;
+    const mul = (c: BABYLON.Color3) => {
+      c.set(
+        Math.min(1, c.r * t.r),
+        Math.min(1, c.g * t.g),
+        Math.min(1, c.b * t.b),
+      );
     };
+    mul(p.zenith);
+    mul(p.horizon);
+    mul(p.sunDisc);
+    mul(p.sunLight);
+    mul(p.ambient);
+    mul(p.ambientGround);
+    mul(p.fog);
   }
 
   /** Hardcoded "deep space" sky — used by SpaceLevelSystem for Level 5.
    *  Renders a starfield against near-black with subtle blue cosmic light. */
   private applySpaceMode(): void {
     if (!this.skyMat) return;
-    const zenith = new BABYLON.Color3(0.005, 0.008, 0.025);
-    const horizon = new BABYLON.Color3(0.015, 0.020, 0.045);
-    this.skyMat.setColor3("zenithColor", zenith);
-    this.skyMat.setColor3("horizonColor", horizon);
+    // Reuse the same scratch objects as the day/night path — space mode's
+    // uniforms are constant, but we still avoid per-call allocation for the
+    // (throttled) repeated invocations while the orbital level is active.
+    this.scratchZenith.set(0.005, 0.008, 0.025);
+    this.scratchHorizon.set(0.015, 0.020, 0.045);
+    this.skyMat.setColor3("zenithColor", this.scratchZenith);
+    this.skyMat.setColor3("horizonColor", this.scratchHorizon);
     // Hide the sun disc entirely — the Earth sphere owned by SpaceLevelSystem
     // takes its place as the "celestial body" the player orients against.
-    this.skyMat.setColor3("sunColor", new BABYLON.Color3(0, 0, 0));
-    this.skyMat.setVector3("sunDir", new BABYLON.Vector3(0, -1, 0));
+    this.scratchSunDisc.set(0, 0, 0);
+    this.skyMat.setColor3("sunColor", this.scratchSunDisc);
+    this.scratchSunDir.set(0, -1, 0);
+    this.skyMat.setVector3("sunDir", this.scratchSunDir);
     this.skyMat.setFloat("sunSize", 220);
     this.skyMat.setFloat("starFactor", 1.5);
     this.skyMat.setFloat("overcast", 0);
     this.skyMat.setFloat("time", performance.now() / 1000);
 
     if (this.sunLight) {
-      this.sunLight.direction = new BABYLON.Vector3(0.2, -0.3, 0.3).normalize();
-      this.sunLight.diffuse = new BABYLON.Color3(0.6, 0.7, 1.0);
+      this.scratchLightDir.set(0.2, -0.3, 0.3);
+      this.scratchLightDir.normalize();
+      this.sunLight.direction.copyFrom(this.scratchLightDir);
+      this.scratchSunLight.set(0.6, 0.7, 1.0);
+      this.sunLight.diffuse = this.scratchSunLight;
       this.sunLight.intensity = 0.5;
     }
     if (this.ambientLight) {
-      this.ambientLight.diffuse = new BABYLON.Color3(0.35, 0.4, 0.6);
-      this.ambientLight.groundColor = new BABYLON.Color3(0.05, 0.05, 0.15);
+      this.scratchAmbient.set(0.35, 0.4, 0.6);
+      this.scratchAmbientGround.set(0.05, 0.05, 0.15);
+      this.ambientLight.diffuse = this.scratchAmbient;
+      this.ambientLight.groundColor = this.scratchAmbientGround;
       this.ambientLight.intensity = 0.45;
     }
-    this.scene.fogColor = new BABYLON.Color3(0.005, 0.008, 0.025);
+    this.scratchFog.set(0.005, 0.008, 0.025);
+    this.scene.fogColor = this.scratchFog;
     this.scene.fogDensity = 0.0001;
-    this.scene.clearColor = new BABYLON.Color4(0.005, 0.008, 0.025, 1);
+    this.scratchClear.set(0.005, 0.008, 0.025, 1);
+    this.scene.clearColor = this.scratchClear;
   }
 
   /** Toggle deep-space mode — owned by SpaceLevelSystem (Level 5). */

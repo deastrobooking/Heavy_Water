@@ -216,6 +216,14 @@ export class EnemyUnit implements IDamageable {
    *  drones / soldiers / heavies / etc. */
   private captainVariant: BossVariant | null = null;
 
+  /** Pending setTimeout handles owned by this unit (death cleanup, dome ring
+   *  teardown, hit-flash restore). Tracked so a level swap can cancel them
+   *  before they touch disposed meshes/materials. */
+  private pendingTimeouts: Set<ReturnType<typeof setTimeout>> = new Set();
+  /** Flipped true once this unit is being torn down (level swap / cleanup).
+   *  Async callbacks bail out early when set. */
+  private disposed: boolean = false;
+
   constructor(mesh: BABYLON.Mesh, type: EnemyType, waveMultiplier: number = 1, variant?: BossVariant | null) {
     this.mesh = mesh;
     this.type = type;
@@ -761,11 +769,14 @@ export class EnemyUnit implements IDamageable {
     const RED = new BABYLON.Color3(1.0, 0.12, 0.12);
     for (const m of mats) m.emissiveColor = RED;
 
-    setTimeout(() => {
+    const flashHandle = setTimeout(() => {
+      this.pendingTimeouts.delete(flashHandle);
+      if (this.disposed) return;
       for (let i = 0; i < mats.length; i++) {
         if (mats[i]) mats[i].emissiveColor = originals[i];
       }
     }, 160);
+    this.pendingTimeouts.add(flashHandle);
   }
 
   private die(): void {
@@ -817,7 +828,9 @@ export class EnemyUnit implements IDamageable {
       }
     }
 
-    setTimeout(() => {
+    const deathHandle = setTimeout(() => {
+      this.pendingTimeouts.delete(deathHandle);
+      if (this.disposed) return;
       if (this.auraMesh && !this.auraMesh.isDisposed()) {
         this.auraMesh.dispose();
       }
@@ -825,6 +838,34 @@ export class EnemyUnit implements IDamageable {
         this.mesh.dispose();
       }
     }, 2000);
+    this.pendingTimeouts.add(deathHandle);
+  }
+
+  /** Cancel every pending timeout and mark the unit disposed so async
+   *  callbacks (death cleanup, dome ring, hit-flash restore) become no-ops.
+   *  Also synchronously disposes captain projectiles/dome/sabre + aura so a
+   *  level swap doesn't leave visuals or damage tickers behind. */
+  cancelPendingTimeouts(): void {
+    this.disposed = true;
+    this.pendingTimeouts.forEach(h => clearTimeout(h));
+    this.pendingTimeouts.clear();
+    for (const t of this.captainTrackers) {
+      if (!t.mesh.isDisposed()) try { t.mesh.dispose(); } catch {}
+      if (!t.trail.isDisposed()) try { t.trail.dispose(); } catch {}
+    }
+    this.captainTrackers = [];
+    if (this.captainDome && !this.captainDome.mesh.isDisposed()) {
+      try { this.captainDome.mesh.dispose(); } catch {}
+    }
+    this.captainDome = null;
+    if (this.captainSabre && !this.captainSabre.isDisposed()) {
+      try { this.captainSabre.dispose(); } catch {}
+      this.captainSabre = null;
+    }
+    if (this.auraMesh && !this.auraMesh.isDisposed()) {
+      try { this.auraMesh.dispose(); } catch {}
+      this.auraMesh = null;
+    }
   }
 
   heal(amount: number): void {
@@ -1278,10 +1319,12 @@ export class EnemyUnit implements IDamageable {
     rmat.diffuseColor = new BABYLON.Color3(0, 0, 0);
     rmat.disableLighting = true;
     ring.material = rmat;
-    setTimeout(() => {
+    const ringHandle = setTimeout(() => {
+      this.pendingTimeouts.delete(ringHandle);
       if (!ring.isDisposed()) try { ring.dispose(); } catch {}
       try { rmat.dispose(); } catch {}
     }, 700);
+    this.pendingTimeouts.add(ringHandle);
   }
 
   private tickCaptainDome(dt: number): void {
@@ -2029,10 +2072,11 @@ export class EnemySystem {
    *  level the player came from. */
   clearAllEnemies(): void {
     for (const e of this.enemies) {
-      if (e.isAlive) {
-        e.isAlive = false;
-        try { e.mesh.dispose(); } catch {}
-      }
+      e.isAlive = false;
+      // Cancel per-unit pending timeouts + dispose captain effects/aura so
+      // no stale callback touches a mesh/material after the level swap.
+      try { e.cancelPendingTimeouts(); } catch {}
+      try { e.mesh.dispose(); } catch {}
     }
     this.enemies = [];
   }

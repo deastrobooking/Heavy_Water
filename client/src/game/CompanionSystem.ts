@@ -101,11 +101,35 @@ export class CompanionSystem {
   // this via setMaxCompanions (clamped 1–20) when the player upgrades it.
   private maxCompanions: number = 3;
   private projectiles: { mesh: BABYLON.Mesh; velocity: BABYLON.Vector3; lifetime: number; damage: number }[] = [];
+  // Reusable per-update attack-hit buffer. The caller only reads it within
+  // the same synchronous frame (Game.tsx iterates then discards), so we can
+  // safely clear + refill it each update instead of allocating a fresh array.
+  private attackHits: { mesh: BABYLON.AbstractMesh; damage: number }[] = [];
+  // One shared projectile material for the whole system — projectiles set the
+  // emissive color per-shot, but they no longer each own a StandardMaterial.
+  // Never disposed per-projectile; released in dispose().
+  private sharedProjectileMat: BABYLON.StandardMaterial | null = null;
+  // One shared particle texture reused by every heal effect (avoids a fresh
+  // Texture allocation per heal tick).
+  private sharedHealTexture: BABYLON.Texture | null = null;
+  // Active heal particle systems + their pending stop/dispose timer handles,
+  // tracked so a level swap can dispose/cancel them instead of leaking.
+  private healEffects: Set<BABYLON.ParticleSystem> = new Set();
+  private healTimers: Set<ReturnType<typeof setTimeout>> = new Set();
 
   constructor(scene: BABYLON.Scene) {
     this.scene = scene;
     this.factory = new RobotFactory(scene);
     this.bus = EventBus.getInstance();
+  }
+
+  private getProjectileMaterial(): BABYLON.StandardMaterial {
+    if (!this.sharedProjectileMat) {
+      const mat = new BABYLON.StandardMaterial("compProjMat", this.scene);
+      mat.diffuseColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+      this.sharedProjectileMat = mat;
+    }
+    return this.sharedProjectileMat;
   }
 
   setMaxCompanions(n: number): void {
@@ -210,7 +234,8 @@ export class CompanionSystem {
 
   update(dt: number, playerPos: BABYLON.Vector3, enemyMeshes: BABYLON.AbstractMesh[]): { healed: number; attackHits: { mesh: BABYLON.AbstractMesh; damage: number }[] } {
     let totalHealed = 0;
-    const attackHits: { mesh: BABYLON.AbstractMesh; damage: number }[] = [];
+    const attackHits = this.attackHits;
+    attackHits.length = 0;
 
     for (let i = this.companions.length - 1; i >= 0; i--) {
       const comp = this.companions[i];
@@ -242,12 +267,12 @@ export class CompanionSystem {
         comp.attackTimer -= dt;
         if (comp.attackTimer <= 0) {
           let nearestEnemy: BABYLON.AbstractMesh | null = null;
-          let nearestDist = comp.behavior.attackRange;
+          let nearestDistSq = comp.behavior.attackRange * comp.behavior.attackRange;
 
           for (const enemy of enemyMeshes) {
-            const dist = BABYLON.Vector3.Distance(currentPos, enemy.position);
-            if (dist < nearestDist) {
-              nearestDist = dist;
+            const distSq = BABYLON.Vector3.DistanceSquared(currentPos, enemy.position);
+            if (distSq < nearestDistSq) {
+              nearestDistSq = distSq;
               nearestEnemy = enemy;
             }
           }
@@ -292,7 +317,8 @@ export class CompanionSystem {
 
       for (const enemy of enemyMeshes) {
         const enemyR = (enemy.metadata as any)?.hitRadius ?? 1.5;
-        if (BABYLON.Vector3.Distance(proj.mesh.position, enemy.position) < enemyR + 0.6) {
+        const reach = enemyR + 0.6;
+        if (BABYLON.Vector3.DistanceSquared(proj.mesh.position, enemy.position) < reach * reach) {
           attackHits.push({ mesh: enemy, damage: proj.damage });
           proj.mesh.dispose();
           this.projectiles.splice(i, 1);
@@ -315,9 +341,11 @@ export class CompanionSystem {
     const proj = BABYLON.MeshBuilder.CreateSphere("compProj", { diameter, segments: 6 }, this.scene);
     proj.position.copyFrom(from);
 
-    const mat = new BABYLON.StandardMaterial("compProjMat", this.scene);
+    // Shared system-owned material — no per-projectile StandardMaterial
+    // allocation (which previously leaked proportional to fire rate). The
+    // emissive tint is set from the firing companion's color.
+    const mat = this.getProjectileMaterial();
     mat.emissiveColor = color;
-    mat.diffuseColor = new BABYLON.Color3(0.05, 0.05, 0.05);
     proj.material = mat;
 
     const dir = to.subtract(from).normalize();
@@ -346,14 +374,26 @@ export class CompanionSystem {
     particles.direction1 = new BABYLON.Vector3(-0.5, 1, -0.5);
     particles.direction2 = new BABYLON.Vector3(0.5, 2, 0.5);
 
-    const texUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAAXNSR0IArs4c6QAAADhJREFUGFdjZGBg+M9AAGBiIFIBIwMDA8P/////MzIy/mdkYGBgZGRkZMQpQdBAbAVENYOoAABmNAoBjNm8mAAAAABJRU5ErkJggg==";
-    particles.particleTexture = new BABYLON.Texture(texUrl, this.scene);
+    if (!this.sharedHealTexture) {
+      const texUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAAXNSR0IArs4c6QAAADhJREFUGFdjZGBg+M9AAGBiIFIBIwMDA8P/////MzIy/mdkYGBgZGRkZMQpQdBAbAVENYOoAABmNAoBjNm8mAAAAABJRU5ErkJggg==";
+      this.sharedHealTexture = new BABYLON.Texture(texUrl, this.scene);
+    }
+    particles.particleTexture = this.sharedHealTexture;
 
     particles.start();
-    setTimeout(() => {
+    this.healEffects.add(particles);
+    const stopHandle = setTimeout(() => {
+      this.healTimers.delete(stopHandle);
       particles.stop();
-      setTimeout(() => particles.dispose(), 2000);
+      const disposeHandle = setTimeout(() => {
+        this.healTimers.delete(disposeHandle);
+        this.healEffects.delete(particles);
+        // Dispose the particle system but NOT the shared texture.
+        try { particles.dispose(false); } catch {}
+      }, 2000);
+      this.healTimers.add(disposeHandle);
     }, 500);
+    this.healTimers.add(stopHandle);
   }
 
   getCompanions(): { id: string; name: string; type: CompanionType; health: number; maxHealth: number; level: number }[] {
@@ -560,6 +600,22 @@ export class CompanionSystem {
     }
     for (const proj of this.projectiles) {
       proj.mesh.dispose();
+    }
+    // Cancel any pending heal stop/dispose timers and tear down active heal
+    // particle systems so they don't leak across a level swap.
+    this.healTimers.forEach(h => clearTimeout(h));
+    this.healTimers.clear();
+    this.healEffects.forEach(ps => {
+      try { ps.dispose(false); } catch {}
+    });
+    this.healEffects.clear();
+    if (this.sharedProjectileMat) {
+      try { this.sharedProjectileMat.dispose(); } catch {}
+      this.sharedProjectileMat = null;
+    }
+    if (this.sharedHealTexture) {
+      try { this.sharedHealTexture.dispose(); } catch {}
+      this.sharedHealTexture = null;
     }
     this.companions = [];
     this.projectiles = [];
