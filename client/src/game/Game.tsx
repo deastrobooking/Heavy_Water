@@ -69,6 +69,7 @@ import { SaginawLabSystem } from "./SaginawLabSystem";
 import { ZugIslandSystem } from "./ZugIslandSystem";
 import { AnnArborSystem } from "./AnnArborSystem";
 import { MichiganTerrainSystem } from "./MichiganTerrainSystem";
+import { MoonWorldSystem, normalizeVillainProgress, type VillainProgress } from "./MoonWorldSystem";
 import { InvasionDirectorSystem } from "./InvasionDirectorSystem";
 import { setPlayerIsFlyingProvider as setEnemyPlayerIsFlyingProvider } from "./EnemySystem";
 import { RESCUE_DEFS } from "./RescueSystem";
@@ -185,6 +186,10 @@ export const Game: React.FC = () => {
   const zugIslandSystemRef = useRef<ZugIslandSystem | null>(null);
   const annArborSystemRef = useRef<AnnArborSystem | null>(null);
   const michiganTerrainSystemRef = useRef<MichiganTerrainSystem | null>(null);
+  const moonWorldSystemRef = useRef<MoonWorldSystem | null>(null);
+  // Villain-campaign (Luna Bastion) progress — persisted as its own save
+  // slice, separate from the hero campaign's worldLevel.
+  const villainProgressRef = useRef<VillainProgress>(normalizeVillainProgress(null));
   // Long-lived progress mirrors for the Pontiac Lab → Swarms Lair chain.
   // PontiacLabSystem is rebuilt on every L6 entry, so the freed-animal id
   // set must outlive it here in Game.tsx (read on next mount, written on
@@ -1216,9 +1221,10 @@ export const Game: React.FC = () => {
           const isAnnArbor = nextWorldLevel !== null && LevelSystem.isAnnArbor(nextWorldLevel);
           const isSpacelike = nextWorldLevel !== null && LevelSystem.isSpacelike(nextWorldLevel);
           const isMichiganTerrain = nextWorldLevel !== null && LevelSystem.isMichiganTerrain(nextWorldLevel);
+          const isMoon = nextWorldLevel !== null && LevelSystem.isMoon(nextWorldLevel);
           const usesCustomGroundDirector =
             isPeaceful || isSpacelike || isLair || isSaginawLab ||
-            isZugIsland || isAnnArbor || isMichiganTerrain;
+            isZugIsland || isAnnArbor || isMichiganTerrain || isMoon;
 
           if (nextWorldLevel !== null) {
             if (!isSanctuary && sanctuarySystemRef.current) {
@@ -1252,6 +1258,12 @@ export const Game: React.FC = () => {
             if (!isMichiganTerrain && michiganTerrainSystemRef.current) {
               try { michiganTerrainSystemRef.current.dispose(); } catch {}
               michiganTerrainSystemRef.current = null;
+              player.setBuildingColliders(cityGenerator.getWallColliders());
+              player.setFloorPlatforms(cityGenerator.getFloorPlatforms());
+            }
+            if (!isMoon && moonWorldSystemRef.current) {
+              try { moonWorldSystemRef.current.dispose(); } catch {}
+              moonWorldSystemRef.current = null;
               player.setBuildingColliders(cityGenerator.getWallColliders());
               player.setFloorPlatforms(cityGenerator.getFloorPlatforms());
             }
@@ -1587,13 +1599,50 @@ export const Game: React.FC = () => {
             michiganTerrainSystemRef.current.reassertWorldState();
           }
 
+          // Mount/dispose the Luna Bastion villain-campaign world (Level 12).
+          // MoonWorldSystem hides the outer world, flips the sky into space
+          // mode, drops gravity to lunar levels, swaps the player body into
+          // the villain Captain kit, and owns the full mission loop (hero-
+          // knight waves → hero Champion → rewards).
+          if (isMoon && !moonWorldSystemRef.current && skyRef.current) {
+            player.setBuildingColliders([]);
+            player.setFloorPlatforms([]);
+            moonWorldSystemRef.current = new MoonWorldSystem(
+              scene,
+              enemySystem,
+              skyRef.current,
+              player,
+              () => player.getPosition(),
+              {
+                city: cityGenerator,
+                worldVisibles: [
+                  mountainRingRef.current,
+                  alienFoliageRef.current,
+                  earthFoliageRef.current,
+                  propSystemRef.current,
+                ],
+                lodCull,
+              },
+              villainProgressRef.current,
+              (p) => {
+                villainProgressRef.current = p;
+                if (forceSaveRef.current) forceSaveRef.current();
+              },
+            );
+          } else if (!isMoon && moonWorldSystemRef.current) {
+            try { moonWorldSystemRef.current.dispose(); } catch {}
+            moonWorldSystemRef.current = null;
+            player.setBuildingColliders(cityGenerator.getWallColliders());
+            player.setFloorPlatforms(cityGenerator.getFloorPlatforms());
+          }
+
           // Combat-only progression: bump waves + seed the next fortress.
           // Skipped while peaceful (sanctuary), spacelike (orbital combat
           // is owned by AerialEnemySystem, no ground fortresses), or in
           // the Swarms Lair (its own self-contained arena — boss + minions
           // are spawned by SwarmsLairSystem itself, no city fortress to
           // seed).
-          if (!isPeaceful && !isSpacelike && !isLair && !isSaginawLab && !isZugIsland && !isAnnArbor && !isMichiganTerrain && payload?.level >= 2) {
+          if (!isPeaceful && !isSpacelike && !isLair && !isSaginawLab && !isZugIsland && !isAnnArbor && !isMichiganTerrain && !isMoon && payload?.level >= 2) {
             const baseWave = enemySystem.getWaveNumber() + 2;
             const targetWave = payload.level === 3 ? Math.max(baseWave, 9) : Math.max(baseWave, 5);
             enemySystem.jumpToWave(targetWave);
@@ -1995,6 +2044,9 @@ export const Game: React.FC = () => {
             // so player-made robots/pets/characters/enemies follow the
             // cloud save across devices.
             creatorDesigns: designsForSnapshot(),
+            // Villain-campaign progress — its own slice, migration-safe
+            // (older saves simply lack it and default to zeros on load).
+            villainProgress: { ...villainProgressRef.current },
           };
         };
 
@@ -2207,6 +2259,14 @@ export const Game: React.FC = () => {
               }
               invasionDirector.applyLoadedState(snap.worldRebuild);
               invasionDirector.hydrateLegacyProgress(snap.worldLevel, snap.swarmsGeneralDefeated);
+              // Villain-campaign progress MUST hydrate BEFORE the worldLevel
+              // restore below — restoring a level-12 save mounts
+              // MoonWorldSystem synchronously off LEVEL_STARTED, and that
+              // mount reads villainProgressRef. Hydrating after would hand
+              // the moon a zeroed slice that could overwrite real progress
+              // on its next forced save. normalize() handles pre-villain
+              // saves (missing slice → zeros/false defaults).
+              villainProgressRef.current = normalizeVillainProgress(snap.villainProgress);
               // Restore world-level progression. For L2, applyLoadedState
               // re-emits LEVEL_STARTED, which our listener uses to swap
               // banner/objective, tint the sky, seed the second fortress,
@@ -3117,6 +3177,7 @@ export const Game: React.FC = () => {
         if (zugIslandSystemRef.current) { try { zugIslandSystemRef.current.dispose(); } catch {} zugIslandSystemRef.current = null; }
         if (annArborSystemRef.current) { try { annArborSystemRef.current.dispose(); } catch {} annArborSystemRef.current = null; }
         if (michiganTerrainSystemRef.current) { try { michiganTerrainSystemRef.current.dispose(); } catch {} michiganTerrainSystemRef.current = null; }
+        if (moonWorldSystemRef.current) { try { moonWorldSystemRef.current.dispose(); } catch {} moonWorldSystemRef.current = null; }
         if (friendlyNPCsRef.current) { try { friendlyNPCsRef.current.dispose(); } catch {} friendlyNPCsRef.current = null; }
         if (rescueSystemRef.current) { try { rescueSystemRef.current.dispose(); } catch {} rescueSystemRef.current = null; }
         if (multiplayerRef.current) { try { multiplayerRef.current.dispose(); } catch {} }
@@ -3331,6 +3392,7 @@ export const Game: React.FC = () => {
     if (zugIslandSystemRef.current) { try { zugIslandSystemRef.current.dispose(); } catch {} zugIslandSystemRef.current = null; }
     if (annArborSystemRef.current) { try { annArborSystemRef.current.dispose(); } catch {} annArborSystemRef.current = null; }
     if (michiganTerrainSystemRef.current) { try { michiganTerrainSystemRef.current.dispose(); } catch {} michiganTerrainSystemRef.current = null; }
+    if (moonWorldSystemRef.current) { try { moonWorldSystemRef.current.dispose(); } catch {} moonWorldSystemRef.current = null; }
     if (gamepadRef.current) { try { gamepadRef.current.dispose(); } catch {} gamepadRef.current = null; }
     if (aerialEnemyRef.current) { try { aerialEnemyRef.current.dispose(); } catch {} aerialEnemyRef.current = null; }
     if (smashAttackRef.current) { try { smashAttackRef.current.dispose(); } catch {} smashAttackRef.current = null; }
@@ -4351,6 +4413,7 @@ export const Game: React.FC = () => {
       if (zugIslandSystemRef.current) { try { zugIslandSystemRef.current.dispose(); } catch {} zugIslandSystemRef.current = null; }
       if (annArborSystemRef.current) { try { annArborSystemRef.current.dispose(); } catch {} annArborSystemRef.current = null; }
       if (michiganTerrainSystemRef.current) { try { michiganTerrainSystemRef.current.dispose(); } catch {} michiganTerrainSystemRef.current = null; }
+      if (moonWorldSystemRef.current) { try { moonWorldSystemRef.current.dispose(); } catch {} moonWorldSystemRef.current = null; }
       if (aerialEnemyRef.current) aerialEnemyRef.current.dispose();
       if (smashAttackRef.current) { try { smashAttackRef.current.dispose(); } catch {} smashAttackRef.current = null; }
       if (gamepadRef.current) gamepadRef.current.dispose();
@@ -4371,7 +4434,7 @@ export const Game: React.FC = () => {
     const ls = levelSystemRef.current;
     const player = playerRef.current;
     if (!ls || !player) return;
-    if (level < 1 || level > 11) return;
+    if (level < 1 || level > 12) return;
     if (ls.getCurrentLevel() === 4 && level >= 1 && level <= 3) {
       showMessage("ASHUR SANCTUARY DOES NOT OPEN DIRECTLY TO DETROIT", 2200);
       return;
@@ -4449,6 +4512,8 @@ export const Game: React.FC = () => {
         ? "Ann Arbor Apocalypse — mothership crash site with maxed captains and a full ground swarm."
         : lvl === 11
         ? "Michigan Wilds — MIHEIGHTMAP terrain with flooded lowlands, grass foothills, and rocky peaks."
+        : lvl === 12
+        ? "VILLAIN CAMPAIGN — Luna Bastion. Play AS a Captain on the moon: low gravity, sky-drone escort, hero knights, and their Champion."
         : lvl === 1
         ? "Star City Front — first-stage Detroit defense. Rescue the captured ally."
         : lvl === 2

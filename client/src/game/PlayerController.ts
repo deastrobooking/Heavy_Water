@@ -1620,6 +1620,126 @@ export class PlayerController implements IDamageable {
     this.stateMachine.forceState("idle");
   }
 
+  // ---- Luna Bastion (villain campaign) hooks --------------------------------
+
+  /** Lunar movement feel: reduced gravity + floatier jumps. Applied by
+   *  MoonWorldSystem on mount and reverted on dispose. Values are the
+   *  class defaults scaled — kept explicit (not stored-multiplier math)
+   *  so a double-enable or double-disable can never drift the baseline. */
+  setMoonPhysics(enabled: boolean): void {
+    if (enabled) {
+      this.gravity = 0.007;          // ~1/3 gravity — long lunar hangtime
+      this.jumpForce = 0.62;         // higher single jump
+      this.doubleJumpForce = 0.80;
+    } else {
+      this.gravity = 0.02;
+      this.jumpForce = 0.5;
+      this.doubleJumpForce = 0.65;
+    }
+  }
+
+  /** Whether the player is currently wearing the villain Captain body. */
+  private isVillainBody: boolean = false;
+
+  /** Swap the player's rendered body into (or out of) the villain Captain
+   *  kit. Rebuilds the humanoid in place: the invisible physics capsule,
+   *  camera, stats, and equipment systems are untouched — only the visual
+   *  body + its animation attachment change. Idempotent per direction. */
+  setVillainBody(enabled: boolean): void {
+    if (this.isVillainBody === enabled) return;
+    this.isVillainBody = enabled;
+
+    const oldRoot = this.meshRoot;
+    const pos = oldRoot.position.clone();
+    const rot = oldRoot.rotation.clone();
+
+    // Detach the physics capsule so disposing the old visual root can't
+    // cascade into it, then tear the old body down.
+    this.mesh.parent = null;
+    try { this.equippedArmor?.dispose(); } catch {}
+    this.equippedArmor = undefined;
+    try { this.humanoid?.dispose(); } catch {}
+    this.humanoid = undefined;
+
+    let humanoidDef = { ...HUMANOID_PRESETS.PlayerDefault };
+    let armorSetSerialized: ArmorSetSerialized | null = null;
+
+    if (enabled) {
+      // Villain Captain: keep the player's proportions (captain presets
+      // are authored bigger for enemy silhouettes) but wear the full
+      // captain armor kit in a dark crimson/gunmetal palette.
+      humanoidDef = {
+        ...humanoidDef,
+        bodyType: "heavy",
+        hasArmor: true,
+        armorType: "captain",
+        colors: {
+          primary: new BABYLON.Color3(0.42, 0.06, 0.10),   // dark crimson plate
+          secondary: new BABYLON.Color3(0.16, 0.16, 0.20), // gunmetal trim
+          skin: new BABYLON.Color3(0.72, 0.62, 0.58),      // pale synthetic
+          hair: new BABYLON.Color3(0.05, 0.05, 0.06),
+        },
+      };
+    } else {
+      // Restore the saved character exactly like createPlayerMesh does.
+      try {
+        const raw = typeof localStorage !== "undefined"
+          ? localStorage.getItem("detroit3026_character_v1")
+          : null;
+        if (raw) {
+          const saved = JSON.parse(raw);
+          humanoidDef = {
+            ...humanoidDef,
+            height: saved.height ?? humanoidDef.height,
+            headScale: saved.headScale ?? humanoidDef.headScale,
+            shoulderWidth: saved.shoulderWidth ?? humanoidDef.shoulderWidth,
+            chestWidth: saved.shoulderWidth ?? humanoidDef.chestWidth,
+            armLength: saved.armLength ?? humanoidDef.armLength,
+            legLength: saved.legLength ?? humanoidDef.legLength,
+            bodyType: saved.bodyType ?? humanoidDef.bodyType,
+            armorType: saved.armorType ?? humanoidDef.armorType,
+            colors: saved.colors ? {
+              primary: BABYLON.Color3.FromArray(saved.colors.primary),
+              secondary: BABYLON.Color3.FromArray(saved.colors.secondary),
+              skin: BABYLON.Color3.FromArray(saved.colors.skin),
+              hair: BABYLON.Color3.FromArray(saved.colors.hair),
+            } : humanoidDef.colors,
+          };
+          if (saved.armorSet) armorSetSerialized = saved.armorSet as ArmorSetSerialized;
+        }
+      } catch (e) {
+        console.warn("[PlayerController] Could not reload saved character:", e);
+      }
+      if (!armorSetSerialized) armorSetSerialized = DEFAULT_ARMOR_SET;
+      humanoidDef = { ...humanoidDef, hasArmor: false };
+    }
+
+    this.humanoid = new HumanoidCharacter(this.scene, humanoidDef);
+    const root = this.humanoid.getRoot();
+    root.position.copyFrom(pos);
+    root.rotation.copyFrom(rot);
+    this.meshRoot = root;
+    this.mesh.parent = root;
+
+    if (!enabled && armorSetSerialized) {
+      const setCfg = deserializeArmorSet(armorSetSerialized);
+      this.equippedArmor = equipArmorSet(this.scene, this.humanoid.getAnimatableLimbs(), setCfg, {
+        bodyHeight: humanoidDef.height,
+        shoulderWidth: humanoidDef.shoulderWidth,
+        armLength: humanoidDef.armLength,
+        legLength: humanoidDef.legLength,
+      });
+    }
+
+    // Re-point the animation system + camera-mode visibility at the new body.
+    this.animationSystem.attachToParts(this.humanoid.getAnimatableLimbs());
+    this.applyVisualForCameraMode();
+
+    // The old root is fully replaced — dispose it last (children already moved).
+    try { (oldRoot as BABYLON.TransformNode).dispose(); } catch {}
+    console.log(`[PlayerController] Villain body ${enabled ? "equipped" : "removed"}`);
+  }
+
   setTerrainHeightProvider(provider: TerrainHeightProvider | null): void {
     this.terrainHeightProvider = provider;
   }

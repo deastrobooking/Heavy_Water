@@ -8,4 +8,5 @@
 - [Modal & input gating contract](modal-input-gating.md) — every modal joins the one isAnyModalOpen predicate; close system-owned modals through the system; stuck-key releases on blur/disconnect/modal open.
 - [Assembled-unit & item-family persistence](assembled-unit-persistence.md) — custom companions persist as recipes rebuilt deterministically; new item families must join every ItemDefinition lookup fallback chain.
 - [Creator design persistence](creator-designs-persistence.md) — player-authored content mirrored into the save snapshot needs count/byte quotas + untrusted-import sanitizing; deploys go through a polled queue.
+- [Villain moon zone & body swap](villain-moon-zone.md) — body rebuilds must reparent the physics capsule before disposing the humanoid; per-zone save slices hydrate BEFORE worldLevel restore.
 - [Player mecha armor source](player-mecha-armor.md) — player's Mega Man look = modular mm_ parts (hasArmor:false skips captain kit); edit those for player-only changes; helmet accents must clear the opaque dome.

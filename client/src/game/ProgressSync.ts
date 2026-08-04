@@ -91,7 +91,7 @@ export interface ProgressSnapshot {
    *  a side-zone returns the player to the same destination with matching
    *  sky tint, world swap, and spawn placement. Older saves wrote only
    *  `1 | 2`; LevelSystem still clamps safely on load. */
-  worldLevel?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+  worldLevel?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
   /** Hidden-temple ids the player has already raided across all levels.
    *  Each id is namespaced by level (e.g. "L1_temple_ne") so re-entering
    *  an earlier level keeps that level's loot history intact. Optional
@@ -173,6 +173,18 @@ export interface ProgressSnapshot {
     createdAt: number; updatedAt: number;
     robotJson?: string; character?: unknown;
   }>;
+  /** Villain-campaign (Luna Bastion, Level 12) progress. Kept as its own
+   *  slice — separate from the hero campaign's `worldLevel` — so villain
+   *  runs never interfere with hero progression. All fields optional so
+   *  pre-villain saves load with migration-safe defaults (zeros/false). */
+  villainProgress?: {
+    /** Full moon-mission clears (waves + hero Champion). */
+    missionsCompleted?: number;
+    /** True once the hero Champion has been slain at least once. */
+    championDefeated?: boolean;
+    /** Highest wave reached inside the moon mission loop. */
+    bestWave?: number;
+  };
 }
 
 export async function loadProgress(): Promise<ProgressSnapshot | null> {

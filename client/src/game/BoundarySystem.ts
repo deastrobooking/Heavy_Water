@@ -25,6 +25,8 @@ const BOUNDS: Record<number, BoundaryDef> = {
   10: { cx: -3000, cz: 0, radius: 700, baseY: -2, wallHeight: 120 },
   // Michigan Wilds — huge heightmap terrain; keep inside the sampled area.
   11: { cx: 3000, cz: 1500, radius: 2500, baseY: -30, wallHeight: 220 },
+  // Luna Bastion (villain campaign) — flat cratered moon plain far NORTH.
+  12: { cx: 0, cz: 3000, radius: 700, baseY: -2, wallHeight: 120 },
 };
 
 /** How far inside the barrier the player is held (soft margin). */

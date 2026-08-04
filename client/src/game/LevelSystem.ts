@@ -11,7 +11,7 @@ import { BossVariantId } from "./BossVariants";
  *  bio-crops, and runs errands for the nearby Village of Earth. It does not
  *  appear in the L1→L2→L3 progression chain; it's reached from the new TRAVEL
  *  tab on the upgrade menu and acts as the player's home base. */
-export type WorldLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+export type WorldLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
 
 /** Persisted shape used by ProgressSync. */
 export interface LevelSnapshot {
@@ -280,6 +280,29 @@ const LEVEL_DEFS: Record<WorldLevel, LevelDef> = {
     peaceful: true,
     timeOfDay: 14.5,
   },
+  12: {
+    level: 12,
+    displayName: "LUNA BASTION — VILLAIN CAMPAIGN",
+    banner: "VILLAIN CAMPAIGN — LUNA BASTION",
+    objective: "You ARE the Captain now. Storm the heroes' moon bastion, crush their knights, and slay their Champion.",
+    // Endgame-tier villain arena — waves are owned by MoonWorldSystem,
+    // but the multiplier documents intent for anything reading it directly.
+    difficultyMultiplier: 3.0,
+    // Cold silver-blue moonlight; most of the visual swap is owned by
+    // MoonWorldSystem (space sky + grey cratered terrain + Earthrise).
+    skyTint: { r: 0.75, g: 0.80, b: 0.95 },
+    bossVariantId: "storm",
+    // Off-map — the villain mission loop is owned by MoonWorldSystem, not
+    // the ground fortress chain. Game.tsx gates fortress seeding behind
+    // `isMoon` the same way it does for `peaceful` / spacelike.
+    fortressCenter: { x: 0, z: 9999 },
+    // Far NORTH section of the expanded open world — its own dedicated
+    // map pocket, away from every other zone center. Must match
+    // MoonWorldSystem.CENTER so fast-travel lands at arena center.
+    spawnPoint: { x: 0, z: 3000 },
+    completeSubtitle: "The heroes' bastion burns. The moon is yours.",
+    timeOfDay: 23.5,
+  },
   7: {
     level: 7,
     displayName: "SWARMS LAIR",
@@ -489,7 +512,18 @@ export class LevelSystem {
 
   /** All known levels — used by the TRAVEL tab. */
   static getAllLevels(): WorldLevel[] {
-    return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+    return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+  }
+
+  /** `true` for Luna Bastion (Level 12) — the villain-campaign moon world.
+   *  The player fights AS a Captain against hero-faction knights.
+   *  MoonWorldSystem mounts on this level: it hides the outer world, flips
+   *  the sky into space mode, drops gravity to lunar levels, swaps the
+   *  player body into captain armor, and owns the mission loop (waves →
+   *  hero Champion → rewards). Ground-fortress seeding and the stock wave
+   *  spawner are both gated off behind this check in Game.tsx. */
+  static isMoon(level: WorldLevel): boolean {
+    return level === 12;
   }
 
   /** `true` for Ann Arbor Apocalypse (Level 10) — a medium-sized
@@ -567,7 +601,8 @@ export class LevelSystem {
   applyLoadedState(snap: Partial<LevelSnapshot> | null | undefined): void {
     let lvl: WorldLevel = 1;
     const raw = snap && typeof snap.worldLevel === "number" ? snap.worldLevel : 1;
-    if (raw >= 11) lvl = 11;
+    if (raw >= 12) lvl = 12;
+    else if (raw === 11) lvl = 11;
     else if (raw === 10) lvl = 10;
     else if (raw === 9) lvl = 9;
     else if (raw === 8) lvl = 8;
@@ -590,7 +625,7 @@ export class LevelSystem {
     // cleared just because the player saved there; that would let them
     // skip the campaign on re-entry. Only treat the main chain (1→2→3)
     // as cleared-on-load.
-    if (lvl === 4 || lvl === 5 || lvl === 6 || lvl === 7 || lvl === 8 || lvl === 9 || lvl === 10 || lvl === 11) {
+    if (lvl === 4 || lvl === 5 || lvl === 6 || lvl === 7 || lvl === 8 || lvl === 9 || lvl === 10 || lvl === 11 || lvl === 12) {
       this.advanceTo(lvl);
       return;
     }
