@@ -501,6 +501,7 @@ export const Game: React.FC = () => {
       .catch(() => {});
   }, []);
 
+
   const handleLootCollected = useCallback((loot: Loot) => {
     const player = playerRef.current;
     const weapons = weaponsRef.current;
@@ -1642,6 +1643,15 @@ export const Game: React.FC = () => {
             moonWorldSystemRef.current = null;
             player.setBuildingColliders(cityGenerator.getWallColliders());
             player.setFloorPlatforms(cityGenerator.getFloorPlatforms());
+          }
+          // Re-assert moon world state on every LEVEL_STARTED for level 12,
+          // including same-level respawns. Mirrors the AnnArbor /
+          // MichiganTerrain reassertWorldState pattern — re-hides the outer
+          // world, re-pins the space sky after the tint re-application above,
+          // and re-asserts villain body + lunar gravity without touching any
+          // mission progress.
+          if (isMoon && moonWorldSystemRef.current) {
+            try { moonWorldSystemRef.current.reassertWorldState(); } catch {}
           }
 
           // Combat-only progression: bump waves + seed the next fortress.

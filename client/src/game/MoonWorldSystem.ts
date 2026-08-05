@@ -263,6 +263,32 @@ export class MoonWorldSystem {
     finally { try { this.handles.lodCull?.setSuppressed(false); } catch {} }
   }
 
+  /**
+   * Idempotent re-assertion of moon world state — called by Game.tsx after
+   * every LEVEL_STARTED for level 12, including same-level respawns.
+   *
+   * Pattern mirrors AnnArborSystem.reassertWorldState and
+   * MichiganTerrainSystem.reassertWorldState: the outer world may have been
+   * partially or fully un-hidden (e.g. a stale sky-tint re-application or
+   * an edge-case restore during the forceStart path), so we re-run all
+   * visibility, sky-mode, and player-state assertions here without resetting
+   * any mission progress.  Safe to call when already in the correct state.
+   */
+  reassertWorldState(): void {
+    // Re-hide the outer world in case any forceStart path re-showed it.
+    this.hideOuterWorld();
+    try { this.handles.lodCull?.setSuppressed(true); } catch {}
+    // Re-assert space sky — LEVEL_STARTED's setLevelTint / setTimeOfDay
+    // calls happen *before* this reassert fires, so we win the last write.
+    try { this.sky.setSpaceMode(true); } catch {}
+    // Re-assert villain embodiment + lunar gravity (idempotent in
+    // PlayerController — double-setting does not compound the effect).
+    try { this.player.setVillainBody(true); } catch (e) {
+      console.warn("[MoonWorldSystem] reassertWorldState: villain body failed", e);
+    }
+    try { this.player.setMoonPhysics(true); } catch {}
+  }
+
   private _disposeInner(): void {
     if (this.observer) {
       this.scene.onBeforeRenderObservable.remove(this.observer);
