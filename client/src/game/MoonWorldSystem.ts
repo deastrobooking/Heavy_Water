@@ -16,16 +16,27 @@ export interface VillainProgress {
   missionsCompleted: number;
   championDefeated: boolean;
   bestWave: number;
+  /** True after the player's very first mission clear — gates the richer
+   *  first-clear reward table and the Crimson Blade unlock. */
+  firstClearDone: boolean;
+  /** Ids of captain weapon skins unlocked via progression milestones.
+   *  "crimson_blade" → mission 1, "plasma_claw" → 3+, "full_captain_kit" → 5+. */
+  captainWeaponsUnlocked: string[];
 }
 
 /** Normalize a possibly-missing / partial saved slice into safe defaults. */
 export function normalizeVillainProgress(raw?: {
   missionsCompleted?: number; championDefeated?: boolean; bestWave?: number;
+  firstClearDone?: boolean; captainWeaponsUnlocked?: string[];
 } | null): VillainProgress {
   return {
     missionsCompleted: Math.max(0, Math.floor(raw?.missionsCompleted ?? 0)),
     championDefeated: raw?.championDefeated === true,
     bestWave: Math.max(0, Math.floor(raw?.bestWave ?? 0)),
+    firstClearDone: raw?.firstClearDone === true,
+    captainWeaponsUnlocked: Array.isArray(raw?.captainWeaponsUnlocked)
+      ? raw!.captainWeaponsUnlocked.filter(s => typeof s === "string")
+      : [],
   };
 }
 
@@ -119,10 +130,39 @@ export function resolveMission(missionsCompleted: number): {
 }
 
 // ---------------------------------------------------------------------------
+// Loot / reward constants
+// ---------------------------------------------------------------------------
 
+/** Weapon unlock milestones: [missionsCompleted threshold, weaponId]. */
+const CAPTAIN_WEAPON_MILESTONES: Array<[number, string]> = [
+  [1, "crimson_blade"],
+  [3, "plasma_claw"],
+  [5, "full_captain_kit"],
+];
+
+/** Reward items for the first ever mission clear. */
+const FIRST_CLEAR_ITEMS: Array<{ itemId: string; quantity: number }> = [
+  { itemId: "lunar_regolith", quantity: 3 },
+  { itemId: "void_crystal",   quantity: 2 },
+  { itemId: "champion_sigil", quantity: 1 },
+];
+
+/** Compute repeat-clear item drops. Uses Math.random for sigil / core rolls. */
+function computeRepeatItems(missionsCompleted: number): Array<{ itemId: string; quantity: number }> {
+  const drops: Array<{ itemId: string; quantity: number }> = [];
+  drops.push({ itemId: "lunar_regolith", quantity: Math.min(6, 2 + Math.floor(missionsCompleted / 2)) });
+  if (missionsCompleted >= 3) {
+    drops.push({ itemId: "void_crystal", quantity: Math.min(4, 1 + Math.floor(missionsCompleted / 3)) });
+  }
+  if (Math.random() < 0.25) drops.push({ itemId: "champion_sigil", quantity: 1 });
+  if (Math.random() < 0.07) drops.push({ itemId: "captain_core",   quantity: 1 });
+  return drops;
+}
+
+// ---------------------------------------------------------------------------
 /**
  * MoonWorldSystem — Level 12 "Luna Bastion" (VILLAIN CAMPAIGN)
- * ============================================================
+ * ------------------------------------------------------------
  * The player fights AS a Captain. Mounted by Game.tsx on LEVEL_STARTED
  * for level 12 (`LevelSystem.isMoon`); disposed on warp-out.
  *
@@ -192,6 +232,10 @@ export class MoonWorldSystem {
   private mats: BABYLON.Material[] = [];
   /** Pending drone-beam cleanup timers, cleared on dispose. */
   private beamTimers: Array<ReturnType<typeof setTimeout>> = [];
+  /** Captain weapon skin meshes parented to the villain body's right arm.
+   *  Rebuilt by refreshWeaponSkins() whenever unlocks change; disposed
+   *  explicitly (not via root) since they are parented to player limbs. */
+  private weaponSkinMeshes: BABYLON.Mesh[] = [];
 
   /** Must match LevelSystem LEVEL_DEFS[12].spawnPoint. */
   private static readonly CENTER = new BABYLON.Vector3(0, 0, 3000);
@@ -240,6 +284,9 @@ export class MoonWorldSystem {
       console.warn("[MoonWorldSystem] villain body swap failed", e);
     }
     try { this.player.setMoonPhysics(true); } catch {}
+
+    // Apply any already-unlocked captain weapon skins to the fresh villain body.
+    this.refreshWeaponSkins();
 
     this.spawnDrone();
 
@@ -306,6 +353,7 @@ export class MoonWorldSystem {
     this.drone = null;
     for (const t of this.beamTimers) clearTimeout(t);
     this.beamTimers = [];
+    this.clearWeaponSkinMeshes();
     try { this.root.dispose(); } catch {}
     for (const m of this.mats) { try { m.dispose(); } catch {} }
     this.mats = [];
@@ -652,20 +700,59 @@ export class MoonWorldSystem {
 
   private completeMission(): void {
     this.missionDone = true;
+    const isFirstClear = !this.progress.firstClearDone;
+
     this.progress.missionsCompleted += 1;
     this.progress.championDefeated = true;
+    if (isFirstClear) this.progress.firstClearDone = true;
+
+    // ---- Compute reward items ----
+    const items = isFirstClear
+      ? FIRST_CLEAR_ITEMS.map(e => ({ ...e }))
+      : computeRepeatItems(this.progress.missionsCompleted);
+
+    // ---- Credits + XP: first clear gets a fixed floor; repeats use the
+    //      mission table scaled by the loop factor (infinite-replay incentive).
+    const baseCr = Math.round(this.activeMission.creditReward * this.activeLoopScale);
+    const baseXp = Math.round(this.activeMission.xpReward  * this.activeLoopScale);
+    const credits = isFirstClear ? Math.max(3500, baseCr) : baseCr;
+    const xp      = isFirstClear ? Math.max(5000, baseXp)  : baseXp;
+
+    // ---- Captain weapon progression unlocks ----
+    const newUnlocks: string[] = [];
+    for (const [threshold, weaponId] of CAPTAIN_WEAPON_MILESTONES) {
+      if (
+        this.progress.missionsCompleted >= threshold &&
+        !this.progress.captainWeaponsUnlocked.includes(weaponId)
+      ) {
+        this.progress.captainWeaponsUnlocked.push(weaponId);
+        newUnlocks.push(weaponId);
+      }
+    }
+
     this.emitProgress();
 
-    // Villain spoils — scaled by loopScale for replay incentive.
-    const credits = Math.round(this.activeMission.creditReward * this.activeLoopScale);
-    const xp = Math.round(this.activeMission.xpReward * this.activeLoopScale);
+    // Apply newly-unlocked weapon skins to the live villain body immediately.
+    if (newUnlocks.length > 0) this.refreshWeaponSkins();
+
+    // Grant credits + XP.
     try { this.player.addCredits(credits); } catch {}
     try { this.player.addExperience(xp); } catch {}
 
+    // missionNum + loopSuffix used in UI messages below.
     const missionNum = this.progress.missionsCompleted; // already incremented
     const loopSuffix = this.activeLoopScale > 1.0
       ? ` (×${this.activeLoopScale.toFixed(1)} scaling)`
       : "";
+
+    // Emit the full reward payload for Game.tsx to handle inventory + overlay.
+    this.bus.emit(GameEvents.MOON_MISSION_COMPLETE, {
+      isFirstClear,
+      items,
+      credits,
+      xp,
+      newUnlocks,
+    });
     this.bus.emit(
       GameEvents.UI_MESSAGE,
       `THE CHAMPION FALLS — LUNA BASTION IS YOURS. +${credits}cr +${xp}xp${loopSuffix}`,
@@ -682,6 +769,112 @@ export class MoonWorldSystem {
         `MISSION ${missionNum} COMPLETE — Warp back to Luna Bastion for ${nextLabel}.`,
       );
     }, 4000);
+  }
+
+  // --------------------------------------------------- captain weapon skins
+
+  private clearWeaponSkinMeshes(): void {
+    for (const m of this.weaponSkinMeshes) {
+      try { if (!m.isDisposed()) m.dispose(); } catch {}
+    }
+    this.weaponSkinMeshes = [];
+  }
+
+  /**
+   * Build / rebuild captain weapon skin meshes on the villain body's right arm.
+   * Called after setVillainBody(true) and whenever new weapon unlocks land.
+   * Meshes are tracked separately from `root` since they are parented to the
+   * player limb hierarchy rather than the moon world root.
+   *
+   * Skin tiers (additive):
+   *   crimson_blade     — glowing crimson energy blade extending from buster
+   *   plasma_claw       — secondary blue plasma arc alongside the blade
+   *   full_captain_kit  — gold trim ring at the guard
+   */
+  private refreshWeaponSkins(): void {
+    this.clearWeaponSkinMeshes();
+
+    const unlocked = this.progress.captainWeaponsUnlocked;
+    if (unlocked.length === 0) return;
+
+    const rightArm = this.player.getVillainRightArm();
+    if (!rightArm) return;
+
+    const hasCrimson = unlocked.includes("crimson_blade");
+    const hasPlasma  = unlocked.includes("plasma_claw");
+    const hasFull    = unlocked.includes("full_captain_kit");
+
+    if (!hasCrimson) return;
+
+    // ---- Crimson energy blade (primary, always first unlock) ----
+    // Positioned just past the buster muzzle (al≈9, muzzle at -9.81).
+    const blade = BABYLON.MeshBuilder.CreateCylinder(
+      "captainSkinBlade",
+      { diameterTop: 0.18, diameterBottom: 0.55, height: 5.5, tessellation: 10 },
+      this.scene,
+    );
+    blade.position.set(0, -12.8, 0.06);
+    blade.parent = rightArm;
+    blade.isPickable = false;
+    const bladeMat = this.trackMat(new BABYLON.StandardMaterial("captainSkinBladeMat", this.scene));
+    bladeMat.diffuseColor  = new BABYLON.Color3(0.95, 0.06, 0.14);
+    bladeMat.emissiveColor = new BABYLON.Color3(1.0,  0.12, 0.22);
+    bladeMat.alpha = 0.88;
+    blade.material = bladeMat;
+    this.weaponSkinMeshes.push(blade);
+
+    // Hilt guard ring at base of blade.
+    const guard = BABYLON.MeshBuilder.CreateCylinder(
+      "captainSkinGuard",
+      { diameterTop: 0.65, diameterBottom: 0.60, height: 0.3, tessellation: 10 },
+      this.scene,
+    );
+    guard.position.set(0, -10.2, 0.06);
+    guard.parent = rightArm;
+    guard.isPickable = false;
+    const guardMat = this.trackMat(new BABYLON.StandardMaterial("captainSkinGuardMat", this.scene));
+    guardMat.diffuseColor  = new BABYLON.Color3(0.12, 0.12, 0.18);
+    guardMat.emissiveColor = new BABYLON.Color3(0.35, 0.04, 0.08);
+    guard.material = guardMat;
+    this.weaponSkinMeshes.push(guard);
+
+    if (hasPlasma) {
+      // Secondary blue plasma arc alongside the main blade.
+      const arc = BABYLON.MeshBuilder.CreateCylinder(
+        "captainSkinArc",
+        { diameterTop: 0.08, diameterBottom: 0.28, height: 4.0, tessellation: 7 },
+        this.scene,
+      );
+      arc.position.set(0.55, -12.5, 0.06);
+      arc.rotation.z = 0.18;
+      arc.parent = rightArm;
+      arc.isPickable = false;
+      const arcMat = this.trackMat(new BABYLON.StandardMaterial("captainSkinArcMat", this.scene));
+      arcMat.diffuseColor  = new BABYLON.Color3(0.20, 0.55, 1.0);
+      arcMat.emissiveColor = new BABYLON.Color3(0.25, 0.70, 1.4);
+      arcMat.alpha = 0.80;
+      arc.material = arcMat;
+      this.weaponSkinMeshes.push(arc);
+    }
+
+    if (hasFull) {
+      // Gold trim torus around the guard.
+      const trim = BABYLON.MeshBuilder.CreateTorus(
+        "captainSkinGoldTrim",
+        { diameter: 0.80, thickness: 0.055, tessellation: 14 },
+        this.scene,
+      );
+      trim.position.set(0, -10.2, 0.06);
+      trim.parent = rightArm;
+      trim.isPickable = false;
+      const trimMat = this.trackMat(new BABYLON.StandardMaterial("captainSkinTrimMat", this.scene));
+      trimMat.diffuseColor  = new BABYLON.Color3(0.85, 0.70, 0.22);
+      trimMat.emissiveColor = new BABYLON.Color3(0.95, 0.78, 0.12);
+      trim.material = trimMat;
+      this.weaponSkinMeshes.push(trim);
+    }
+
+    console.log("[MoonWorldSystem] Weapon skins applied:", unlocked.join(", "));
   }
 
   private emitProgress(): void {

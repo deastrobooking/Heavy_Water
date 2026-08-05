@@ -175,4 +175,34 @@ export const ITEM_DEFINITIONS: Record<string, ItemDefinition> = {
   power_jewel_rough:    { id: "power_jewel_rough",    name: "Rough Power Jewel",    type: ItemType.Material, rarity: ItemRarity.Epic,      maxStack: 9, value: 600,  description: "Very rare. Mount on a ranged weapon to add +15% damage.",            stats: { damageMul: 0.15 } },
   power_jewel_cut:      { id: "power_jewel_cut",      name: "Cut Power Jewel",      type: ItemType.Material, rarity: ItemRarity.Legendary, maxStack: 9, value: 1500, description: "Very rare. Mount on a ranged weapon to add +30% damage.",            stats: { damageMul: 0.30 } },
   power_jewel_flawless: { id: "power_jewel_flawless", name: "Flawless Power Jewel", type: ItemType.Material, rarity: ItemRarity.Legendary, maxStack: 9, value: 4000, description: "Extraordinarily rare. Mount on a ranged weapon to add +50% damage.", stats: { damageMul: 0.50 } },
+
+  // === Moon-campaign villain loot (Luna Bastion, Level 12) ===
+  // Dropped by MoonWorldSystem on mission completion; only obtainable
+  // via the villain campaign loop. All four must live in ITEM_DEFINITIONS
+  // (not CRAFTING_MATERIALS) so the Game.tsx restore loop, ShopSystem
+  // fallback chain, and any future crafting recipe can find them.
+  lunar_regolith: {
+    id: "lunar_regolith", name: "Lunar Regolith",
+    type: ItemType.Material, rarity: ItemRarity.Common,
+    maxStack: 99, value: 12,
+    description: "Compacted moon-dust scraped from the Luna Bastion arena. Used in advanced villain-tech fabrication.",
+  },
+  void_crystal: {
+    id: "void_crystal", name: "Void Crystal",
+    type: ItemType.Material, rarity: ItemRarity.Rare,
+    maxStack: 50, value: 180,
+    description: "Rare crystalline formation harvested from the lunar deep. Resonates with the Captain's energy systems.",
+  },
+  champion_sigil: {
+    id: "champion_sigil", name: "Champion's Sigil",
+    type: ItemType.Material, rarity: ItemRarity.Epic,
+    maxStack: 20, value: 450,
+    description: "Torn from the Hero Champion's emblem. Proof of repeated victory over the Luna Bastion's finest.",
+  },
+  captain_core: {
+    id: "captain_core", name: "Captain's Core",
+    type: ItemType.Material, rarity: ItemRarity.Legendary,
+    maxStack: 9, value: 1200,
+    description: "Extremely rare power core recovered from a fallen Champion. Radiates the villain Captain's energy signature.",
+  },
 };

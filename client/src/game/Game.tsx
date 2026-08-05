@@ -190,6 +190,18 @@ export const Game: React.FC = () => {
   // Villain-campaign (Luna Bastion) progress — persisted as its own save
   // slice, separate from the hero campaign's worldLevel.
   const villainProgressRef = useRef<VillainProgress>(normalizeVillainProgress(null));
+  // Reward overlay shown after each moon mission clear; auto-dismissed after 7 s.
+  const moonRewardTimeoutRef = useRef<number | null>(null);
+  const [moonRewardOverlay, setMoonRewardOverlay] = useState<{
+    isFirstClear: boolean;
+    items: Array<{ itemId: string; quantity: number }>;
+    credits: number;
+    xp: number;
+    newUnlocks: string[];
+  } | null>(null);
+  // Mirrors villainProgressRef.captainWeaponsUnlocked for React renders
+  // (the arsenal panel shown while on Level 12).
+  const [villainArsenalUnlocked, setVillainArsenalUnlocked] = useState<string[]>([]);
   // Long-lived progress mirrors for the Pontiac Lab → Swarms Lair chain.
   // PontiacLabSystem is rebuilt on every L6 entry, so the freed-animal id
   // set must outlive it here in Game.tsx (read on next mount, written on
@@ -1731,6 +1743,54 @@ export const Game: React.FC = () => {
           tryGrantLegendaryCompanionRef.current?.();
         });
 
+        // MOON_MISSION_COMPLETE → grant villain-loot items to inventory,
+        // update the captain-weapon unlock state, show the reward overlay,
+        // and force-save so nothing is lost if the tab closes.
+        bus.on(GameEvents.MOON_MISSION_COMPLETE, (data: any) => {
+          // 1. Grant inventory items described by the payload.
+          const grantItems: Array<{ itemId: string; quantity: number }> =
+            Array.isArray(data?.items) ? data.items : [];
+          for (const { itemId, quantity } of grantItems) {
+            const def =
+              ITEM_DEFINITIONS[itemId] ||
+              CRAFTING_MATERIALS[itemId] ||
+              MODULAR_PART_DEFINITIONS[itemId];
+            if (def && quantity > 0) inventory.addItem(def, quantity);
+          }
+
+          // 2. Update the React-side arsenal unlock mirror.
+          const newUnlocks: string[] = Array.isArray(data?.newUnlocks)
+            ? data.newUnlocks
+            : [];
+          if (newUnlocks.length > 0) {
+            setVillainArsenalUnlocked(prev => {
+              const next = [...prev];
+              for (const id of newUnlocks) {
+                if (!next.includes(id)) next.push(id);
+              }
+              return next;
+            });
+          }
+
+          // 3. Show the reward overlay; auto-dismiss after 7 s.
+          setMoonRewardOverlay({
+            isFirstClear: !!data?.isFirstClear,
+            items: grantItems,
+            credits: typeof data?.credits === "number" ? data.credits : 0,
+            xp: typeof data?.xp === "number" ? data.xp : 0,
+            newUnlocks,
+          });
+          if (moonRewardTimeoutRef.current !== null) {
+            window.clearTimeout(moonRewardTimeoutRef.current);
+          }
+          moonRewardTimeoutRef.current = window.setTimeout(
+            () => setMoonRewardOverlay(null), 7000,
+          );
+
+          // 4. Force-save so loot + unlocks survive a tab close.
+          if (forceSaveRef.current) forceSaveRef.current();
+        });
+
         const enemyHealthBars = new EnemyHealthBarSystem(scene, engine.getCamera());
         const healthBarEnemyScratch: EnemyLike[] = [];
         enemyHealthBars.setEnemyProvider(() => {
@@ -2286,6 +2346,9 @@ export const Game: React.FC = () => {
               // saves (missing slice → zeros/false defaults).
               villainProgressRef.current = normalizeVillainProgress(snap.villainProgress);
               setVillainProgressUI({ ...villainProgressRef.current });
+              // Mirror the persisted captain-weapon unlocks into React state
+              // so the Villain Arsenal HUD renders correctly on first frame.
+              setVillainArsenalUnlocked(villainProgressRef.current.captainWeaponsUnlocked);
               // Restore world-level progression. For L2, applyLoadedState
               // re-emits LEVEL_STARTED, which our listener uses to swap
               // banner/objective, tint the sky, seed the second fortress,
@@ -3065,7 +3128,7 @@ export const Game: React.FC = () => {
           canvasRef.current?.requestPointerLock();
         };
 
-        // ====================================================================
+        // --------------------------------------------------------------------
         // VERSUS MODE OVERRIDE
         // --------------------------------------------------------------------
         // PvP-only home-screen game mode. Triggered when handleStart was
@@ -3079,7 +3142,7 @@ export const Game: React.FC = () => {
         // dozens of cross-references and skipping any one tends to cause a
         // null-deref deep in the render loop. Hiding meshes + flipping
         // spawn flags is cheap and keeps every invariant intact.
-        // ====================================================================
+        // --------------------------------------------------------------------
         if (versusModeRef.current.active) {
           // 1. Hide the entire open-world city, foliage, mountains, bases,
           //    mining nodes, NPCs, chests, and ambient flying fortresses.
@@ -4863,6 +4926,155 @@ export const Game: React.FC = () => {
           >
             TRY AGAIN
           </button>
+        </div>
+      )}
+
+      {/* ── Villain Arsenal HUD — visible only on Luna Bastion (Level 12) ── */}
+      {gamePhase === "playing" && currentWorldLevel === 12 && (
+        <div
+          style={{
+            position: "fixed", top: "50%", right: 14, transform: "translateY(-50%)",
+            zIndex: 38, display: "flex", flexDirection: "column", gap: 4,
+            pointerEvents: "none",
+          }}
+        >
+          <div style={{
+            background: "rgba(10,0,5,0.82)", border: "1px solid rgba(180,20,40,0.55)",
+            borderRadius: 8, padding: "8px 12px", backdropFilter: "blur(6px)",
+            boxShadow: "0 0 14px rgba(180,20,40,0.25)",
+          }}>
+            <div style={{
+              color: "rgba(220,60,70,0.95)", fontSize: 9, fontWeight: 700,
+              letterSpacing: "0.12em", textTransform: "uppercase",
+              marginBottom: 6, textAlign: "center",
+            }}>
+              Villain Arsenal
+            </div>
+            {([
+              { id: "crimson_blade",    label: "Crimson Blade",  icon: "⚔", unlock: 1 },
+              { id: "plasma_claw",      label: "Plasma Claw",    icon: "🔵", unlock: 3 },
+              { id: "full_captain_kit", label: "Captain's Kit",  icon: "★",  unlock: 5 },
+            ] as Array<{ id: string; label: string; icon: string; unlock: number }>).map(w => {
+              const owned = villainArsenalUnlocked.includes(w.id);
+              return (
+                <div key={w.id} style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: "3px 0",
+                  opacity: owned ? 1 : 0.38,
+                }}>
+                  <span style={{ fontSize: 12, lineHeight: 1 }}>{owned ? w.icon : "🔒"}</span>
+                  <span style={{
+                    fontSize: 10, fontWeight: 600,
+                    color: owned ? "rgba(240,200,200,1)" : "rgba(180,130,130,0.7)",
+                  }}>
+                    {w.label}
+                  </span>
+                  {!owned && (
+                    <span style={{ fontSize: 8, color: "rgba(160,100,100,0.6)", marginLeft: "auto" }}>
+                      M{w.unlock}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Moon Mission Reward Overlay ── */}
+      {moonRewardOverlay && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 60,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          pointerEvents: "none",
+        }}>
+          <div style={{
+            background: "rgba(6,0,3,0.93)",
+            border: "2px solid rgba(180,25,45,0.80)",
+            borderRadius: 14,
+            padding: "22px 28px",
+            minWidth: 280, maxWidth: 360,
+            boxShadow: "0 0 40px rgba(180,25,45,0.35), 0 8px 32px rgba(0,0,0,0.7)",
+            backdropFilter: "blur(10px)",
+          }}>
+            <div style={{
+              color: "rgba(220,55,70,1)", fontSize: 15, fontWeight: 800,
+              textAlign: "center", letterSpacing: "0.08em", textTransform: "uppercase",
+              marginBottom: 4,
+            }}>
+              {moonRewardOverlay.isFirstClear ? "⚔ First Blood — Luna Bastion" : "⚔ Luna Bastion Cleared"}
+            </div>
+            <div style={{
+              color: "rgba(180,80,90,0.7)", fontSize: 10, textAlign: "center",
+              letterSpacing: "0.1em", marginBottom: 14,
+            }}>
+              {moonRewardOverlay.isFirstClear ? "FIRST CLEAR REWARDS" : "VILLAIN SPOILS"}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "rgba(255,200,60,0.9)", fontSize: 12 }}>Credits</span>
+                <span style={{ color: "rgba(255,200,60,1)", fontSize: 12, fontWeight: 700 }}>
+                  +{moonRewardOverlay.credits.toLocaleString()}
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "rgba(80,210,255,0.9)", fontSize: 12 }}>Experience</span>
+                <span style={{ color: "rgba(80,210,255,1)", fontSize: 12, fontWeight: 700 }}>
+                  +{moonRewardOverlay.xp.toLocaleString()}
+                </span>
+              </div>
+
+              {moonRewardOverlay.items.length > 0 && (
+                <div style={{
+                  borderTop: "1px solid rgba(180,25,45,0.30)", marginTop: 6, paddingTop: 8,
+                  display: "flex", flexDirection: "column", gap: 4,
+                }}>
+                  {moonRewardOverlay.items.map(({ itemId, quantity }) => {
+                    const names: Record<string, string> = {
+                      lunar_regolith: "Lunar Regolith",
+                      void_crystal:   "Void Crystal",
+                      champion_sigil: "Champion's Sigil",
+                      captain_core:   "Captain's Core",
+                    };
+                    return (
+                      <div key={itemId} style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: "rgba(210,200,210,0.9)", fontSize: 12 }}>
+                          {names[itemId] ?? itemId}
+                        </span>
+                        <span style={{ color: "rgba(210,200,210,1)", fontSize: 12, fontWeight: 600 }}>
+                          ×{quantity}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {moonRewardOverlay.newUnlocks.length > 0 && (
+                <div style={{
+                  borderTop: "1px solid rgba(180,25,45,0.30)", marginTop: 6, paddingTop: 8,
+                  display: "flex", flexDirection: "column", gap: 3,
+                }}>
+                  {moonRewardOverlay.newUnlocks.map(id => {
+                    const labels: Record<string, string> = {
+                      crimson_blade:    "Crimson Blade",
+                      plasma_claw:      "Plasma Claw",
+                      full_captain_kit: "Full Captain's Kit",
+                    };
+                    return (
+                      <div key={id} style={{
+                        color: "rgba(240,100,110,1)", fontSize: 12, fontWeight: 700,
+                        textAlign: "center", letterSpacing: "0.05em",
+                      }}>
+                        🔓 UNLOCKED: {labels[id] ?? id}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

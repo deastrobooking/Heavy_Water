@@ -184,6 +184,13 @@ export interface ProgressSnapshot {
     championDefeated?: boolean;
     /** Highest wave reached inside the moon mission loop. */
     bestWave?: number;
+    /** True once the player has completed their first mission clear.
+     *  Guards the richer first-clear reward table (materials + first unlock). */
+    firstClearDone?: boolean;
+    /** Ids of captain weapon skins unlocked via mission progression.
+     *  Values: "crimson_blade" (mission 1), "plasma_claw" (mission 3+),
+     *  "full_captain_kit" (mission 5+). Applied visually on villain body. */
+    captainWeaponsUnlocked?: string[];
   };
 }
 

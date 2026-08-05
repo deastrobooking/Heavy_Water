@@ -142,4 +142,9 @@ export const GameEvents = {
   /** Fired by LevelSystem when a new level begins (including the initial
    *  Level 1 emit on world load). */
   LEVEL_STARTED: "level:started",
+  /** Fired by MoonWorldSystem when the hero Champion is slain and a villain
+   *  mission completes. Payload: { isFirstClear, items, credits, xp, newUnlocks }
+   *  where `items` is Array<{itemId,quantity}> for Game.tsx to grant, and
+   *  `newUnlocks` is a string[] of newly-unlocked captain weapon ids. */
+  MOON_MISSION_COMPLETE: "moon:missionComplete",
 };

@@ -1740,6 +1740,14 @@ export class PlayerController implements IDamageable {
     console.log(`[PlayerController] Villain body ${enabled ? "equipped" : "removed"}`);
   }
 
+  /** Returns the right-arm transform of the villain body, used by
+   *  MoonWorldSystem to parent captain weapon skin meshes. Returns null
+   *  when not currently in villain mode or if the humanoid isn't ready. */
+  getVillainRightArm(): BABYLON.TransformNode | null {
+    if (!this.isVillainBody || !this.humanoid) return null;
+    return this.humanoid.getAnimatableLimbs().rightArm ?? null;
+  }
+
   setTerrainHeightProvider(provider: TerrainHeightProvider | null): void {
     this.terrainHeightProvider = provider;
   }
