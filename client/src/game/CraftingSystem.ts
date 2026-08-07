@@ -24,7 +24,7 @@ export const CRAFTING_MATERIALS: Record<string, ItemDefinition> = {
 export interface CraftingRecipe {
   id: string;
   name: string;
-  category: "weapon" | "armor" | "base" | "upgrade" | "consumable" | "drone" | "robot" | "city" | "ship";
+  category: "weapon" | "armor" | "base" | "upgrade" | "consumable" | "drone" | "robot" | "city" | "ship" | "lunar";
   materials: Array<{ materialId: string; quantity: number }>;
   result: { itemId: string; quantity: number };
   craftTime: number;
@@ -173,6 +173,54 @@ const RECIPES: CraftingRecipe[] = [
     id: "battleship_spine", name: "Battleship Spine", category: "ship",
     materials: [{ materialId: "scrap_metal", quantity: 150 }, { materialId: "nano_fiber", quantity: 35 }, { materialId: "circuit_board", quantity: 28 }, { materialId: "energy_core", quantity: 24 }, { materialId: "dark_matter", quantity: 3 }],
     result: { itemId: "battleship_spine", quantity: 1 }, craftTime: 120, requiredLevel: 12,
+  },
+
+  // =========================================================================
+  // LUNAR FORGE recipes — villain-side only, crafted at the Luna Bastion kiosk.
+  // Each recipe drains one of the four moon-drop resources so players always
+  // have a meaningful use for every material they accumulate.
+  //
+  // Drop-rate reference (MoonWorldSystem.ts computeRepeatItems):
+  //   lunar_regolith: 2–6 per clear (very common)
+  //   void_crystal:   1–4 per clear (mission 3+, common)
+  //   champion_sigil: ~25 % drop chance per clear (uncommon)
+  //   captain_core:   ~7 % drop chance per clear (rare)
+  // =========================================================================
+
+  // Sink 1 – lunar_regolith (8x per craft → 1 consumable armor restore)
+  {
+    id: "void_shield_cell", name: "Void Shield Cell", category: "lunar",
+    materials: [{ materialId: "lunar_regolith", quantity: 8 }],
+    result: { itemId: "void_shield_cell", quantity: 1 },
+    craftTime: 2, requiredLevel: 12,
+  },
+  // Sink 2 – void_crystal (3x per craft → 1 damage doubler consumable)
+  {
+    id: "void_blade_charge", name: "Void Blade Charge", category: "lunar",
+    materials: [{ materialId: "void_crystal", quantity: 3 }],
+    result: { itemId: "void_blade_charge", quantity: 1 },
+    craftTime: 3, requiredLevel: 12,
+  },
+  // Sink 3 – champion_sigil + lunar_regolith → combined power amplifier
+  {
+    id: "sigil_power_amp", name: "Sigil Power Amplifier", category: "lunar",
+    materials: [
+      { materialId: "champion_sigil", quantity: 2 },
+      { materialId: "lunar_regolith", quantity: 5 },
+    ],
+    result: { itemId: "sigil_power_amp", quantity: 1 },
+    craftTime: 5, requiredLevel: 12,
+  },
+  // Sink 4 – captain_core (rare) transmuted into dark_matter for ship crafting
+  {
+    id: "captain_core_transmute", name: "Core Transmutation", category: "lunar",
+    materials: [
+      { materialId: "captain_core", quantity: 1 },
+      { materialId: "void_crystal", quantity: 2 },
+      { materialId: "champion_sigil", quantity: 1 },
+    ],
+    result: { itemId: "dark_matter", quantity: 3 },
+    craftTime: 8, requiredLevel: 12,
   },
 ];
 

@@ -147,4 +147,11 @@ export const GameEvents = {
    *  where `items` is Array<{itemId,quantity}> for Game.tsx to grant, and
    *  `newUnlocks` is a string[] of newly-unlocked captain weapon ids. */
   MOON_MISSION_COMPLETE: "moon:missionComplete",
+
+  /** Fired by MoonWorldSystem when the player presses E near the Lunar Forge
+   *  kiosk and no other modal is blocking input. Game.tsx opens the forge UI. */
+  LUNAR_FORGE_OPEN: "moon:forgeOpen",
+
+  /** Fired by Game.tsx (or the forge UI close button) to dismiss the forge. */
+  LUNAR_FORGE_CLOSE: "moon:forgeClose",
 };

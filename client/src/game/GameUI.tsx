@@ -13,6 +13,7 @@ import type { PlayerUpgradeInfo } from "./PlayerController";
 import type { ElementalUpgradeInfo } from "./ElementalSpecialsSystem";
 import { LabUI, LabBlueprint } from "./LabUI";
 import { GardenCaptureUI } from "./GardenCaptureUI";
+import type { CraftingRecipe } from "./CraftingSystem";
 
 const BLOCK_LABELS: Record<string, string> = {
   metal_wall: "Wall", glass: "Glass", platform: "Platform", ramp: "Ramp",
@@ -138,6 +139,12 @@ interface GameUIProps {
   onSendChat?: (message: string) => void;
   onToggleLobby?: () => void;
   onLogout?: () => void;
+  // Lunar Forge — villain crafting kiosk on Level 12 (Luna Bastion).
+  forgeOpen?: boolean;
+  forgeRecipes?: CraftingRecipe[];
+  forgeMaterialCounts?: Record<string, number>;
+  onForgeCraft?: (recipeId: string) => void;
+  onForgeClose?: () => void;
 }
 
 const ELEMENT_COLORS: Record<string, { text: string; border: string; bg: string }> = {
@@ -183,6 +190,11 @@ export const GameUI: React.FC<GameUIProps> = ({
   shopOpen = false,
   activeShop = null,
   onShopBuy,
+  forgeOpen = false,
+  forgeRecipes = [],
+  forgeMaterialCounts = {},
+  onForgeCraft,
+  onForgeClose,
   buildMode = false,
   inVehicle = false,
   planMode = false,
@@ -344,12 +356,31 @@ export const GameUI: React.FC<GameUIProps> = ({
     }
   }, [shopOpen, shopCurIdx]);
 
+  // Forge: close on ESC or gamepad B.
+  React.useEffect(() => {
+    if (!forgeOpen) return;
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.code === "Escape" || e.code === "KeyE") onForgeClose?.();
+    };
+    const padHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { action?: string } | null;
+      if (detail?.action === "close") onForgeClose?.();
+    };
+    window.addEventListener("keydown", keyHandler);
+    window.addEventListener("gamepad-menu", padHandler);
+    return () => {
+      window.removeEventListener("keydown", keyHandler);
+      window.removeEventListener("gamepad-menu", padHandler);
+    };
+  }, [forgeOpen, onForgeClose]);
+
   const anyModalOpen =
     upgradeMenuOpen ||
     labOpen ||
     gardenOpen ||
     capsuleOpen ||
     shopOpen ||
+    forgeOpen ||
     showLobby;
   const shieldRegenLow = stats.maxShield > 0 && stats.shield < stats.maxShield;
   const showCrosshair = !anyModalOpen && !buildMode && !planMode;
@@ -1033,6 +1064,85 @@ export const GameUI: React.FC<GameUIProps> = ({
               ))}
             </div>
             <div className="text-gray-500 text-xs mt-4 text-center">Press ESC or [B] to close</div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= LUNAR FORGE */}
+      {forgeOpen && forgeRecipes.length > 0 && (
+        <div
+          className="fixed inset-0 flex items-center justify-center z-50 pointer-events-auto"
+          onClick={() => onForgeClose?.()}
+        >
+          <div
+            className="bg-black/95 border-2 border-rose-600 rounded-xl p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-rose-400 text-lg font-bold mb-1 text-center">⚙ LUNAR FORGE</div>
+            <div className="text-gray-500 text-[10px] mb-3 text-center">Villain-tech fabrication — Luna Bastion</div>
+
+            {/* Moon resource inventory */}
+            <div className="grid grid-cols-4 gap-2 mb-4">
+              {[
+                { id: "lunar_regolith", label: "Regolith", color: "text-gray-300" },
+                { id: "void_crystal",   label: "Void Xtal", color: "text-purple-300" },
+                { id: "champion_sigil", label: "C. Sigil",  color: "text-amber-300" },
+                { id: "captain_core",  label: "Cpt Core",  color: "text-rose-300" },
+              ].map(({ id, label, color }) => (
+                <div key={id} className="bg-gray-900/60 border border-gray-700 rounded-lg p-2 text-center">
+                  <div className={`text-xs font-bold ${color}`}>{forgeMaterialCounts[id] ?? 0}</div>
+                  <div className="text-gray-500 text-[9px] mt-0.5">{label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Recipes */}
+            <div className="space-y-3">
+              {forgeRecipes.map((recipe) => {
+                const canCraft = recipe.materials.every(
+                  (m) => (forgeMaterialCounts[m.materialId] ?? 0) >= m.quantity,
+                );
+                return (
+                  <div
+                    key={recipe.id}
+                    className={`border rounded-lg p-3 cursor-pointer transition-all ${
+                      canCraft
+                        ? "border-rose-700 hover:border-rose-400 hover:bg-rose-950/30"
+                        : "border-gray-700 opacity-50"
+                    }`}
+                    onClick={() => canCraft && onForgeCraft?.(recipe.id)}
+                  >
+                    <div className="flex justify-between items-start mb-1">
+                      <span className="text-white text-xs font-bold">{recipe.name}</span>
+                      {canCraft ? (
+                        <span className="text-rose-400 text-[10px]">CRAFT ▶</span>
+                      ) : (
+                        <span className="text-gray-600 text-[10px]">NEED MORE</span>
+                      )}
+                    </div>
+                    <div className="text-gray-400 text-[10px] mb-1">
+                      Cost:{" "}
+                      {recipe.materials.map((m, i) => {
+                        const have = forgeMaterialCounts[m.materialId] ?? 0;
+                        return (
+                          <span key={m.materialId}>
+                            {i > 0 ? " + " : ""}
+                            <span className={have >= m.quantity ? "text-gray-300" : "text-red-400"}>
+                              {m.quantity}× {m.materialId.replace(/_/g, " ")}
+                            </span>
+                          </span>
+                        );
+                      })}
+                    </div>
+                    <div className="text-gray-500 text-[10px]">
+                      → {recipe.result.quantity > 1 ? `${recipe.result.quantity}× ` : ""}
+                      <span className="text-rose-300">{recipe.result.itemId.replace(/_/g, " ")}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="text-gray-500 text-xs mt-4 text-center">Press E or ESC to close</div>
           </div>
         </div>
       )}

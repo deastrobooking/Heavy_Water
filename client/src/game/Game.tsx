@@ -21,7 +21,7 @@ import { BeamSabreSystem } from "./BeamSabreSystem";
 import { MeleeArsenalSystem, type ArsenalWeaponId } from "./MeleeArsenalSystem";
 import { MegaBeamCannonSystem } from "./MegaBeamCannonSystem";
 import { ArmorSystem } from "./ArmorSystem";
-import { CraftingSystem } from "./CraftingSystem";
+import { CraftingSystem, CraftingRecipe } from "./CraftingSystem";
 import { InventorySystem, ITEM_DEFINITIONS } from "./InventorySystem";
 import { JewelSystem, JEWEL_DEFS, JEWEL_MOUNTABLE_WEAPONS, type JewelTier } from "./JewelSystem";
 import { CRAFTING_MATERIALS } from "./CraftingSystem";
@@ -235,6 +235,7 @@ export const Game: React.FC = () => {
       || gardenOpenRef.current
       || capsuleOpenRef.current
       || showLobbyRef.current
+      || forgeOpenRef.current
       || (gardenRef.current?.isGardenOpenCheck() ?? false), []);
   const gamepadRef = useRef<GamepadInput | null>(null);
   const chestSystemRef = useRef<ChestSystem | null>(null);
@@ -451,6 +452,13 @@ export const Game: React.FC = () => {
 
   const [shopOpen, setShopOpen] = useState(false);
   const [activeShop, setActiveShop] = useState<ShopDefinition | null>(null);
+
+  // Lunar Forge — villain-side crafting kiosk on Level 12 (Luna Bastion).
+  const [forgeOpen, setForgeOpen] = useState(false);
+  const forgeOpenRef = useRef(false);
+  const [forgeMaterialCounts, setForgeMaterialCounts] = useState<Record<string, number>>({
+    lunar_regolith: 0, void_crystal: 0, champion_sigil: 0, captain_core: 0,
+  });
 
   const [buildMode, setBuildMode] = useState(false);
 
@@ -762,6 +770,9 @@ export const Game: React.FC = () => {
 
         const craftingSystem = new CraftingSystem(inventory);
         craftingSystemRef.current = craftingSystem;
+        // Snapshot the static lunar recipes into React state so GameUI can
+        // show them without touching the ref inside render.
+        setForgeRecipes(craftingSystem.getRecipes("lunar"));
 
         const companionSystem = new CompanionSystem(scene);
         companionRef.current = companionSystem;
@@ -1650,6 +1661,13 @@ export const Game: React.FC = () => {
                 if (forceSaveRef.current) forceSaveRef.current();
               },
             );
+          // Wire the input-blocked predicate so the forge doesn't stack on
+          // top of other modals (shop, upgrade, lab, etc.).
+          if (moonWorldSystemRef.current) {
+            try {
+              moonWorldSystemRef.current.setInputBlockedProvider(() => isAnyModalOpen());
+            } catch {}
+          }
           } else if (!isMoon && moonWorldSystemRef.current) {
             try { moonWorldSystemRef.current.dispose(); } catch {}
             moonWorldSystemRef.current = null;
@@ -1789,6 +1807,16 @@ export const Game: React.FC = () => {
 
           // 4. Force-save so loot + unlocks survive a tab close.
           if (forceSaveRef.current) forceSaveRef.current();
+        });
+
+        // LUNAR_FORGE_OPEN → open the villain crafting forge UI.
+        bus.on(GameEvents.LUNAR_FORGE_OPEN, () => {
+          if (isAnyModalOpen()) return;
+          setForgeOpen(true);
+          playerRef.current?.releaseAllKeys();
+        });
+        bus.on(GameEvents.LUNAR_FORGE_CLOSE, () => {
+          setForgeOpen(false);
         });
 
         const enemyHealthBars = new EnemyHealthBarSystem(scene, engine.getCamera());
@@ -3070,6 +3098,14 @@ export const Game: React.FC = () => {
               nanofiber: inventory.getItemCount("nano_fiber"),
               bioEssence: inventory.getItemCount("bio_essence"),
             });
+            // Moon material counts for the Lunar Forge UI (only change
+            // when inventory does, so pollled on the same 0.5 s cadence).
+            setForgeMaterialCounts({
+              lunar_regolith: inventory.getItemCount("lunar_regolith"),
+              void_crystal: inventory.getItemCount("void_crystal"),
+              champion_sigil: inventory.getItemCount("champion_sigil"),
+              captain_core: inventory.getItemCount("captain_core"),
+            });
             setPartCounts({
               pistol: inventory.getItemCount("weapon_part_pistol"),
               rifle: inventory.getItemCount("weapon_part_rifle"),
@@ -3567,6 +3603,33 @@ export const Game: React.FC = () => {
   const handleShopClose = useCallback(() => {
     if (shopRef.current?.isOpen()) shopRef.current.closeShop();
   }, []);
+
+  const handleForgeClose = useCallback(() => {
+    setForgeOpen(false);
+    EventBus.getInstance().emit(GameEvents.LUNAR_FORGE_CLOSE);
+  }, []);
+
+  const handleForgeCraft = useCallback((recipeId: string) => {
+    const crafting = craftingSystemRef.current;
+    const inv = inventoryRef.current;
+    if (!crafting || !inv) return;
+    const success = crafting.craft(recipeId);
+    if (success) {
+      // Update moon material counts immediately so the UI reflects the spend.
+      setForgeMaterialCounts({
+        lunar_regolith: inv.getItemCount("lunar_regolith"),
+        void_crystal: inv.getItemCount("void_crystal"),
+        champion_sigil: inv.getItemCount("champion_sigil"),
+        captain_core: inv.getItemCount("captain_core"),
+      });
+    }
+  }, []);
+
+  // Static lunar forge recipes — derived once from the CraftingSystem.
+  // These are constant for the session, but we must wait until the crafting
+  // system is instantiated, so we derive them via callback + state rather
+  // than memo-with-deps to avoid stale-closure issues with the ref.
+  const [forgeRecipes, setForgeRecipes] = useState<CraftingRecipe[]>([]);
 
   const handleShopBuy = useCallback((key: string) => {
     const shop = shopRef.current;
@@ -4133,6 +4196,7 @@ export const Game: React.FC = () => {
       setLabOpen(false);
       setGardenOpen(false);
       setShowLobby(false);
+      setForgeOpen(false);
       capsuleRef.current?.close();
       if (shopRef.current?.isOpen()) shopRef.current.closeShop();
     };
@@ -4379,6 +4443,7 @@ export const Game: React.FC = () => {
   // (e.g. FriendlyNPCSystem) can poll the live values without re-binding.
   useEffect(() => { upgradeMenuOpenRef.current = upgradeMenuOpen; }, [upgradeMenuOpen]);
   useEffect(() => { shopOpenRef.current = shopOpen; }, [shopOpen]);
+  useEffect(() => { forgeOpenRef.current = forgeOpen; }, [forgeOpen]);
   useEffect(() => { labOpenRef.current = labOpen; }, [labOpen]);
   useEffect(() => { gardenOpenRef.current = gardenOpen; }, [gardenOpen]);
   useEffect(() => { capsuleOpenRef.current = capsuleOpen; }, [capsuleOpen]);
@@ -4388,10 +4453,10 @@ export const Game: React.FC = () => {
   // player doesn't keep running/boosting behind the menu (their keyup may
   // never be seen once UI listeners take over).
   useEffect(() => {
-    if (upgradeMenuOpen || shopOpen || labOpen || gardenOpen || capsuleOpen || showLobby) {
+    if (upgradeMenuOpen || shopOpen || forgeOpen || labOpen || gardenOpen || capsuleOpen || showLobby) {
       playerRef.current?.releaseAllKeys();
     }
-  }, [upgradeMenuOpen, shopOpen, labOpen, gardenOpen, capsuleOpen, showLobby]);
+  }, [upgradeMenuOpen, shopOpen, forgeOpen, labOpen, gardenOpen, capsuleOpen, showLobby]);
 
   useEffect(() => {
     if (gamePhase !== "playing") return;
@@ -4804,6 +4869,11 @@ export const Game: React.FC = () => {
           activeShop={activeShop}
           onShopBuy={handleShopBuy}
           onShopClose={handleShopClose}
+          forgeOpen={forgeOpen}
+          forgeRecipes={forgeRecipes}
+          forgeMaterialCounts={forgeMaterialCounts}
+          onForgeCraft={handleForgeCraft}
+          onForgeClose={handleForgeClose}
           buildMode={buildMode}
           inVehicle={inVehicle}
           hotbarBlocks={hotbarBlocks}

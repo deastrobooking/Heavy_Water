@@ -237,6 +237,19 @@ export class MoonWorldSystem {
    *  explicitly (not via root) since they are parented to player limbs. */
   private weaponSkinMeshes: BABYLON.Mesh[] = [];
 
+  // ---- Lunar Forge kiosk
+  /** World position of the Lunar Forge kiosk placed south of the arena.
+   *  Updated once in buildForgeKiosk; used for proximity checks. */
+  private forgeKioskPos: BABYLON.Vector3 | null = null;
+  private playerNearForge = false;
+  private forgeHintShown = false;
+  /** External predicate: returns true if any game modal is already open,
+   *  preventing the forge from stacking on top. Wired by Game.tsx after
+   *  construction via setInputBlockedProvider(). */
+  private isInputBlocked: () => boolean = () => false;
+  /** keydown handler ref so dispose() can detach the exact same function. */
+  private forgeKeyHandler: ((e: KeyboardEvent) => void) | null = null;
+
   /** Must match LevelSystem LEVEL_DEFS[12].spawnPoint. */
   private static readonly CENTER = new BABYLON.Vector3(0, 0, 3000);
   private static readonly ARENA_R = 110;
@@ -289,6 +302,8 @@ export class MoonWorldSystem {
     this.refreshWeaponSkins();
 
     this.spawnDrone();
+    this.buildForgeKiosk();
+    this.setupForgeInteraction();
 
     this.observer = scene.onBeforeRenderObservable.add(() => this.tick());
 
@@ -303,6 +318,15 @@ export class MoonWorldSystem {
     console.log(
       `[MoonWorldSystem] Luna Bastion mounted — mission "${this.activeMission.label}" loopScale=${this.activeLoopScale}`,
     );
+  }
+
+  /**
+   * Wire an external predicate so MoonWorldSystem can avoid opening the forge
+   * while any other game modal (upgrade menu, shop, capsule…) is open.
+   * Called by Game.tsx right after construction.
+   */
+  setInputBlockedProvider(fn: () => boolean): void {
+    this.isInputBlocked = fn;
   }
 
   dispose(): void {
@@ -341,6 +365,11 @@ export class MoonWorldSystem {
       this.scene.onBeforeRenderObservable.remove(this.observer);
       this.observer = null;
     }
+    // Remove forge keydown listener.
+    if (this.forgeKeyHandler) {
+      window.removeEventListener("keydown", this.forgeKeyHandler);
+      this.forgeKeyHandler = null;
+    }
     // Revert the villain embodiment BEFORE restoring the world so the
     // player never walks Detroit in moon physics.
     try { this.player.setMoonPhysics(false); } catch {}
@@ -351,6 +380,7 @@ export class MoonWorldSystem {
     this.champions = [];
     this.earth = null;
     this.drone = null;
+    this.forgeKioskPos = null;
     for (const t of this.beamTimers) clearTimeout(t);
     this.beamTimers = [];
     this.clearWeaponSkinMeshes();
@@ -537,6 +567,103 @@ export class MoonWorldSystem {
     light.intensity = 0.55;
     light.diffuse = new BABYLON.Color3(0.85, 0.87, 1.0);
     light.parent = this.root;
+  }
+
+  // --------------------------------------------------------- Lunar Forge kiosk
+
+  /**
+   * Crimson forge terminal placed south-west of the arena entrance — a compact
+   * villain-tech fabrication station where the player can spend moon resources
+   * on consumables and dark-matter transmutation.
+   *
+   * Visual: a squat black octagonal plinth with red emission stripes and a
+   * glowing forge core hovering above the top face.
+   */
+  private buildForgeKiosk(): void {
+    const c = MoonWorldSystem.CENTER;
+    // Position: south of arena entrance, offset so it doesn't block wave spawns.
+    const kx = c.x - 22;
+    const kz = c.z - MoonWorldSystem.ARENA_R - 8;
+    this.forgeKioskPos = new BABYLON.Vector3(kx, 0, kz);
+
+    const baseMat = this.trackMat(new BABYLON.StandardMaterial("forgePlinthMat", this.scene));
+    baseMat.diffuseColor  = new BABYLON.Color3(0.08, 0.04, 0.06);
+    baseMat.emissiveColor = new BABYLON.Color3(0.30, 0.04, 0.08);
+    baseMat.specularColor = new BABYLON.Color3(0.05, 0.02, 0.03);
+
+    const coreMat = this.trackMat(new BABYLON.StandardMaterial("forgeCoreGlow", this.scene));
+    coreMat.diffuseColor  = new BABYLON.Color3(0.9, 0.25, 0.40);
+    coreMat.emissiveColor = new BABYLON.Color3(1.0, 0.20, 0.35);
+    coreMat.specularColor = new BABYLON.Color3(0.5, 0.10, 0.15);
+
+    // Plinth body.
+    const plinth = BABYLON.MeshBuilder.CreateCylinder(
+      "forgePlinth", { diameter: 3.2, height: 2.4, tessellation: 8 }, this.scene,
+    );
+    plinth.position.set(kx, 1.2, kz);
+    plinth.parent = this.root;
+    plinth.isPickable = false;
+    plinth.material = baseMat;
+
+    // Rim accent ring.
+    const rim = BABYLON.MeshBuilder.CreateTorus(
+      "forgeRim", { diameter: 3.4, thickness: 0.15, tessellation: 24 }, this.scene,
+    );
+    rim.position.set(kx, 2.35, kz);
+    rim.parent = this.root;
+    rim.isPickable = false;
+    rim.material = coreMat;
+
+    // Hovering forge core sphere.
+    const core = BABYLON.MeshBuilder.CreateSphere(
+      "forgeCore", { diameter: 0.9, segments: 12 }, this.scene,
+    );
+    core.position.set(kx, 3.3, kz);
+    core.parent = this.root;
+    core.isPickable = false;
+    core.material = coreMat;
+
+    // Point light to sell the forge glow.
+    const glow = new BABYLON.PointLight(
+      "forgeCoreLight", new BABYLON.Vector3(kx, 3.4, kz), this.scene,
+    );
+    glow.diffuse   = new BABYLON.Color3(1.0, 0.25, 0.35);
+    glow.intensity = 0.8;
+    glow.range     = 16;
+    glow.parent    = this.root;
+
+    // Label disc above the core so the player can identify it.
+    const disc = BABYLON.MeshBuilder.CreatePlane(
+      "forgeLabel", { width: 4, height: 1 }, this.scene,
+    );
+    disc.position.set(kx, 5.0, kz);
+    disc.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+    disc.parent = this.root;
+    disc.isPickable = false;
+    const labelMat = this.trackMat(new BABYLON.StandardMaterial("forgeLabelMat", this.scene));
+    labelMat.diffuseColor  = new BABYLON.Color3(0, 0, 0);
+    labelMat.emissiveColor = new BABYLON.Color3(1.0, 0.30, 0.45);
+    labelMat.backFaceCulling = false;
+    disc.material = labelMat;
+
+    console.log("[MoonWorldSystem] Lunar Forge kiosk placed at", kx, kz);
+  }
+
+  /**
+   * Register the E-key handler that opens the Lunar Forge when the player is
+   * within 7 m of the kiosk and no other modal is blocking input.
+   * Also sets up a gamepad-menu close listener so a controller can dismiss
+   * the forge overlay using B/Circle.
+   */
+  private setupForgeInteraction(): void {
+    this.forgeKeyHandler = (e: KeyboardEvent) => {
+      if (e.code !== "KeyE") return;
+      if (!this.playerNearForge) return;
+      if (this.isInputBlocked()) return;
+      e.stopImmediatePropagation();
+      this.bus.emit(GameEvents.LUNAR_FORGE_OPEN);
+    };
+    window.addEventListener("keydown", this.forgeKeyHandler);
   }
 
   // ------------------------------------------------------------ escort drone
@@ -877,6 +1004,28 @@ export class MoonWorldSystem {
     console.log("[MoonWorldSystem] Weapon skins applied:", unlocked.join(", "));
   }
 
+  /**
+   * Check player distance to the forge kiosk each frame. Shows a one-time
+   * approach hint and flips `playerNearForge` so the key handler fires only
+   * while the player is within interaction range.
+   */
+  private updateForgeProximity(): void {
+    if (!this.forgeKioskPos) return;
+    const p = this.playerPos();
+    const dx = p.x - this.forgeKioskPos.x;
+    const dz = p.z - this.forgeKioskPos.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const near = dist < 7;
+    if (near && !this.playerNearForge && !this.forgeHintShown) {
+      this.forgeHintShown = true;
+      this.bus.emit(
+        GameEvents.UI_MESSAGE,
+        "LUNAR FORGE — Press [E] to craft villain upgrades from moon resources.",
+      );
+    }
+    this.playerNearForge = near;
+  }
+
   private emitProgress(): void {
     try { this.onProgress({ ...this.progress }); } catch {}
   }
@@ -889,6 +1038,7 @@ export class MoonWorldSystem {
     this.lastTickMs = now;
 
     this.updateDrone(dt);
+    this.updateForgeProximity();
 
     // Slow Earthrise drift so the sky reads as alive.
     if (this.earth) {

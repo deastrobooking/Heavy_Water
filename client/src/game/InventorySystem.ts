@@ -205,4 +205,28 @@ export const ITEM_DEFINITIONS: Record<string, ItemDefinition> = {
     maxStack: 9, value: 1200,
     description: "Extremely rare power core recovered from a fallen Champion. Radiates the villain Captain's energy signature.",
   },
+
+  // === Lunar Forge crafting outputs (villain-side, Level 12) ===
+  // Produced at the Lunar Forge kiosk in Luna Bastion using moon resources.
+  void_shield_cell: {
+    id: "void_shield_cell", name: "Void Shield Cell",
+    type: ItemType.Consumable, rarity: ItemRarity.Rare,
+    maxStack: 10, value: 220,
+    description: "Forged from lunar regolith by the Captain's tech. Instantly restores 80 armor on use.",
+    stats: { armorAmount: 80 },
+  },
+  void_blade_charge: {
+    id: "void_blade_charge", name: "Void Blade Charge",
+    type: ItemType.Consumable, rarity: ItemRarity.Epic,
+    maxStack: 5, value: 700,
+    description: "Refined void crystal charged into a weapon amplifier. Doubles all damage dealt for 30 seconds.",
+    stats: { damageMultiplier: 2.0, duration: 30 },
+  },
+  sigil_power_amp: {
+    id: "sigil_power_amp", name: "Sigil Power Amplifier",
+    type: ItemType.Consumable, rarity: ItemRarity.Epic,
+    maxStack: 5, value: 1100,
+    description: "The Champion's sigil reforged into a power source. Grants +50% damage and +30 armor for 60 seconds.",
+    stats: { damageMultiplier: 1.5, armorBoost: 30, duration: 60 },
+  },
 };
