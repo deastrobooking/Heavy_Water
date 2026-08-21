@@ -39,7 +39,6 @@ interface ActiveCompanion {
   healTimer: number;
   health: number;
   maxHealth: number;
-  orbitAngle: number;
   bobTimer: number;
   level: number;
   baseDamage: number;
@@ -103,6 +102,34 @@ const DEFAULT_PET_BEHAVIOR: CompanionBehavior = {
   canAttack: false,
   canHeal: true,
 };
+
+const COMPANION_CATCHUP_DISTANCE_SQ = 30 * 30;
+const COMPANION_MIN_SEPARATION = 1.8;
+const COMPANION_MIN_FORMATION_RADIUS = 4.8;
+
+function companionFormationOffset(
+  index: number,
+  total: number,
+  followDistance: number,
+): { x: number; z: number } {
+  const radius = Math.max(COMPANION_MIN_FORMATION_RADIUS, followDistance);
+  if (total <= 3) {
+    const offsets: ReadonlyArray<readonly [number, number]> = [
+      [-0.62, -0.82],
+      [0.62, -0.82],
+      [0, -1.18],
+    ];
+    const offset = offsets[index] ?? offsets[offsets.length - 1];
+    return { x: offset[0] * radius, z: offset[1] * radius };
+  }
+
+  const ring = Math.floor(index / 6);
+  const ringStart = ring * 6;
+  const ringCount = Math.min(6, total - ringStart);
+  const angle = -Math.PI / 2 + ((index - ringStart) / Math.max(1, ringCount)) * Math.PI * 2;
+  const ringRadius = radius + ring * 2.4;
+  return { x: Math.cos(angle) * ringRadius, z: Math.sin(angle) * ringRadius };
+}
 
 export class CompanionSystem {
   private scene: BABYLON.Scene;
@@ -221,7 +248,6 @@ export class CompanionSystem {
       healTimer: 0,
       health: baseMaxHp,
       maxHealth: baseMaxHp,
-      orbitAngle: this.companions.length * (Math.PI * 2 / this.maxCompanions),
       bobTimer: Math.random() * Math.PI * 2,
       level: 1,
       baseDamage: behavior.attackDamage,
@@ -265,6 +291,7 @@ export class CompanionSystem {
     let totalHealed = 0;
     const attackHits = this.attackHits;
     attackHits.length = 0;
+    const frameDt = Math.max(0, Math.min(0.1, dt));
 
     for (let i = this.companions.length - 1; i >= 0; i--) {
       const comp = this.companions[i];
@@ -276,21 +303,52 @@ export class CompanionSystem {
         continue;
       }
 
-      comp.orbitAngle += dt * 0.5;
-      comp.bobTimer += dt * 2;
+      comp.bobTimer += frameDt * 2;
 
-      const targetX = playerPos.x + Math.cos(comp.orbitAngle) * comp.behavior.followDistance;
-      const targetZ = playerPos.z + Math.sin(comp.orbitAngle) * comp.behavior.followDistance;
+      const formation = companionFormationOffset(i, this.companions.length, comp.behavior.followDistance);
+      let targetX = playerPos.x + formation.x;
+      let targetZ = playerPos.z + formation.z;
       const targetY = playerPos.y + (comp.type === "pet" ? 0.5 + Math.sin(comp.bobTimer) * 0.3 : 0);
 
       const currentPos = comp.hitbox.position;
+
+      // Keep neighboring helpers from stacking on the same pixel without
+      // replacing their stable formation targets with independent orbits.
+      for (let j = 0; j < this.companions.length; j++) {
+        if (j === i) continue;
+        const other = this.companions[j].hitbox.position;
+        let sx = currentPos.x - other.x;
+        let sz = currentPos.z - other.z;
+        let distSq = sx * sx + sz * sz;
+        if (distSq >= COMPANION_MIN_SEPARATION * COMPANION_MIN_SEPARATION) continue;
+        if (distSq < 0.0001) {
+          const angle = (i + 1) * 1.93 + j;
+          sx = Math.cos(angle) * 0.01;
+          sz = Math.sin(angle) * 0.01;
+          distSq = sx * sx + sz * sz;
+        }
+        const dist = Math.sqrt(distSq);
+        const push = (COMPANION_MIN_SEPARATION - dist) * 0.5;
+        targetX += (sx / dist) * push;
+        targetZ += (sz / dist) * push;
+      }
+
       const dx = targetX - currentPos.x;
       const dz = targetZ - currentPos.z;
       const dy = targetY - currentPos.y;
-
-      currentPos.x += dx * comp.behavior.moveSpeed;
-      currentPos.z += dz * comp.behavior.moveSpeed;
-      currentPos.y += dy * comp.behavior.moveSpeed;
+      if (dx * dx + dy * dy + dz * dz > COMPANION_CATCHUP_DISTANCE_SQ) {
+        currentPos.set(targetX, targetY, targetZ);
+      } else if (frameDt > 0) {
+        // moveSpeed historically stored a per-60fps-frame interpolation
+        // factor. Convert it to an equivalent per-second response so upgrades
+        // keep their feel while following remains stable at every frame rate.
+        const perFrame = Math.max(0.001, Math.min(0.95, comp.behavior.moveSpeed));
+        const response = -Math.log(1 - perFrame) * 60;
+        const moveAlpha = 1 - Math.exp(-response * frameDt);
+        currentPos.x += dx * moveAlpha;
+        currentPos.z += dz * moveAlpha;
+        currentPos.y += dy * moveAlpha;
+      }
 
       if (comp.behavior.canAttack && enemyMeshes.length > 0) {
         comp.attackTimer -= dt;

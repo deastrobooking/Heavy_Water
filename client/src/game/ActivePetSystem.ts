@@ -53,16 +53,22 @@ interface LivePet {
   entry: ActivePetEntry;
   root: BABYLON.TransformNode;
   hitbox: BABYLON.Mesh;
-  orbitAngle: number;
   bobTimer: number;
   gaitPhase: number;
   facing: number;
-  lastPos: BABYLON.Vector3;
   anim: PetAnimParts;
 }
 
 const MAX_ACTIVE_PETS = 3;
-const PET_FOLLOW_DISTANCE = 2.5;
+const PET_FOLLOW_RESPONSE = 8;
+const PET_TURN_RESPONSE = 11;
+const PET_CATCHUP_DISTANCE_SQ = 24 * 24;
+const PET_MIN_SEPARATION = 1.35;
+const PET_FORMATION: ReadonlyArray<readonly [number, number]> = [
+  [-1.8, -2.25],
+  [1.8, -2.25],
+  [0, -3.6],
+];
 
 const LEG_NAMES = new Set(["th", "sn", "ft"]);
 const ARM_NAMES = new Set(["ua", "fa", "hd"]);
@@ -116,6 +122,10 @@ export class ActivePetSystem {
   private bus: EventBus;
   private pets: LivePet[] = [];
   private entries: ActivePetEntry[] = [];
+  /** False for old saves/new games until the player makes a choice or a
+   *  persisted activePets array is restored. Legacy mode keeps the historic
+   *  strongest-three behavior; explicit mode preserves the chosen roster. */
+  private hasExplicitLoadout = false;
 
   constructor(scene: BABYLON.Scene) {
     this.scene = scene;
@@ -130,8 +140,27 @@ export class ActivePetSystem {
     assignment: { creatureId: string; level: number }[],
     source: CapturedCreature[],
   ): void {
-    this.clearPets();
-    this.entries = [];
+    this.hasExplicitLoadout = true;
+    this.applyAssignment(this.normalizeAssignment(assignment, source, false), source);
+  }
+
+  /** Restore a persisted player-selected lineup. The saved array's presence
+   *  marks the loadout explicit even when it is empty. Invalid/duplicate saved
+   *  ids are repaired one-for-one from the strongest unused valid captures,
+   *  while intentionally unused slots remain unused. */
+  restorePets(
+    assignment: { creatureId: string; level: number }[],
+    source: CapturedCreature[],
+  ): void {
+    this.hasExplicitLoadout = true;
+    this.applyAssignment(this.normalizeAssignment(assignment, source, true), source);
+  }
+
+  private applyAssignment(
+    assignment: { creatureId: string; level: number }[],
+    source: CapturedCreature[],
+  ): void {
+    const nextEntries: ActivePetEntry[] = [];
     for (const a of assignment.slice(0, MAX_ACTIVE_PETS)) {
       const creature = source.find(c => c.id === a.creatureId);
       if (!creature) continue;
@@ -141,38 +170,75 @@ export class ActivePetSystem {
         creatureId: a.creatureId,
         speciesId: creature.speciesId,
         name: creature.name,
-        level: Math.max(1, Math.min(100, a.level)),
+        // CapturedCreature is the canonical progression record. Saved
+        // active-pet levels are retained for schema compatibility only.
+        level: Math.max(1, Math.min(100, creature.level ?? a.level ?? 1)),
         bondLevel: Math.max(0, creature.bondLevel ?? 0),
         elementalType: sp.elementalType,
       };
-      this.entries.push(entry);
+      nextEntries.push(entry);
+    }
+
+    const nextSig = nextEntries.map(e => `${e.creatureId}:${e.level}:${e.bondLevel}`).join("|");
+    const curSig = this.entries.map(e => `${e.creatureId}:${e.level}:${e.bondLevel}`).join("|");
+    if (nextSig === curSig) return;
+
+    this.clearPets();
+    this.entries = nextEntries;
+    for (const entry of this.entries) {
       this.spawnLivePet(entry);
     }
     this.bus.emit(GameEvents.INVENTORY_CHANGED);
   }
 
-  /** Active pets auto-derive from the player's strongest captured creatures
-   *  (top MAX_ACTIVE_PETS by level). This makes the whole pet-power system
-   *  reachable without a separate assignment UI: capturing better creatures
-   *  upgrades your animated robot followers, their augments, weapon element,
-   *  and armor combo. Persistence rides on capturedCreatures (already saved). */
+  /** Refresh the active roster from the canonical captured-creature records.
+   *  Legacy saves still auto-select the strongest three. Once an explicit
+   *  lineup exists, order/count are preserved and only missing selected slots
+   *  are repaired; level/bond/appearance refresh without silent reordering. */
   syncFromCaptured(captured: CapturedCreature[]): void {
-    const ranked = captured
+    const assignment = this.hasExplicitLoadout
+      ? this.normalizeAssignment(this.serialize(), captured, true)
+      : this.strongestAssignment(captured);
+    this.applyAssignment(assignment, captured);
+  }
+
+  private strongestAssignment(captured: CapturedCreature[]): { creatureId: string; level: number }[] {
+    return captured
       .filter(c => !!getSpeciesById(c.speciesId))
       .slice()
       .sort((a, b) => (b.level ?? 1) - (a.level ?? 1))
-      .slice(0, MAX_ACTIVE_PETS);
-    // Idempotent: if the resulting top-N roster matches the live one, skip the
-    // clear/respawn so this is safe to call every frame / on a throttle.
-    // Bond is part of the signature so crossing an evolution threshold (which
-    // depends on both level AND bond) respawns the follower with the new look.
-    const nextSig = ranked.map(c => `${c.id}:${c.level ?? 1}:${c.bondLevel ?? 0}`).join("|");
-    const curSig = this.entries.map(e => `${e.creatureId}:${e.level}:${e.bondLevel}`).join("|");
-    if (nextSig === curSig) return;
-    this.assignPets(
-      ranked.map(c => ({ creatureId: c.id, level: c.level ?? 1 })),
-      captured,
-    );
+      .slice(0, MAX_ACTIVE_PETS)
+      .map(c => ({ creatureId: c.id, level: c.level ?? 1 }));
+  }
+
+  private normalizeAssignment(
+    assignment: { creatureId: string; level: number }[],
+    source: CapturedCreature[],
+    repairMissing: boolean,
+  ): { creatureId: string; level: number }[] {
+    const valid = source.filter(c => !!getSpeciesById(c.speciesId));
+    const byId = new Map(valid.map(c => [c.id, c]));
+    const ranked = valid.slice().sort((a, b) => (b.level ?? 1) - (a.level ?? 1));
+    const reserved = new Set<string>();
+    const savedSlots = assignment.slice(0, MAX_ACTIVE_PETS).map(saved => {
+      const creature = byId.get(saved.creatureId);
+      if (!creature || reserved.has(creature.id)) return { saved, creature: undefined };
+      reserved.add(creature.id);
+      return { saved, creature };
+    });
+    const used = new Set(reserved);
+    const normalized: { creatureId: string; level: number }[] = [];
+
+    for (const slot of savedSlots) {
+      let creature = slot.creature;
+      if (!creature && repairMissing) {
+        creature = ranked.find(candidate => !used.has(candidate.id));
+      }
+      if (!creature) continue;
+      used.add(creature.id);
+      normalized.push({ creatureId: creature.id, level: creature.level ?? slot.saved.level ?? 1 });
+    }
+    return normalized;
   }
 
   getEntries(): ActivePetEntry[] {
@@ -181,6 +247,13 @@ export class ActivePetSystem {
 
   getMaxPets(): number {
     return MAX_ACTIVE_PETS;
+  }
+
+  /** Whether the player/save has explicitly chosen a loadout. Implicit legacy
+   *  auto-fill must remain distinguishable so saves can keep omitting
+   *  activePets until the player actually makes a selection. */
+  hasExplicitSelection(): boolean {
+    return this.hasExplicitLoadout;
   }
 
   /** Recompute augment bonuses from the active roster.
@@ -283,34 +356,69 @@ export class ActivePetSystem {
   }
 
   update(dt: number, playerPos: BABYLON.Vector3): void {
+    const frameDt = Math.max(0, Math.min(0.1, dt));
+    if (frameDt <= 0) return;
+    const moveAlpha = 1 - Math.exp(-PET_FOLLOW_RESPONSE * frameDt);
+    const turnAlpha = 1 - Math.exp(-PET_TURN_RESPONSE * frameDt);
+
     for (let i = 0; i < this.pets.length; i++) {
       const lp = this.pets[i];
-      lp.orbitAngle += dt * 0.7;
-      lp.bobTimer += dt * 2.5;
-      const targetX = playerPos.x + Math.cos(lp.orbitAngle) * (PET_FOLLOW_DISTANCE + i * 0.6);
-      const targetZ = playerPos.z + Math.sin(lp.orbitAngle) * (PET_FOLLOW_DISTANCE + i * 0.6);
+      lp.bobTimer += frameDt * 2.5;
+      const formation = PET_FORMATION[i] ?? PET_FORMATION[PET_FORMATION.length - 1];
+      let targetX = playerPos.x + formation[0];
+      let targetZ = playerPos.z + formation[1];
       const targetY = playerPos.y + 0.3 + Math.sin(lp.bobTimer) * 0.25;
       const p = lp.hitbox.position;
+
+      // Lightweight local separation keeps followers from visually merging
+      // while preserving their stable formation slots.
+      for (let j = 0; j < this.pets.length; j++) {
+        if (j === i) continue;
+        const other = this.pets[j].hitbox.position;
+        let dx = p.x - other.x;
+        let dz = p.z - other.z;
+        let distSq = dx * dx + dz * dz;
+        if (distSq >= PET_MIN_SEPARATION * PET_MIN_SEPARATION) continue;
+        if (distSq < 0.0001) {
+          const angle = (i + 1) * 2.17 + j;
+          dx = Math.cos(angle) * 0.01;
+          dz = Math.sin(angle) * 0.01;
+          distSq = dx * dx + dz * dz;
+        }
+        const dist = Math.sqrt(distSq);
+        const push = (PET_MIN_SEPARATION - dist) * 0.5;
+        targetX += (dx / dist) * push;
+        targetZ += (dz / dist) * push;
+      }
+
       const prevX = p.x, prevZ = p.z;
-      p.x += (targetX - p.x) * 0.12;
-      p.z += (targetZ - p.z) * 0.12;
-      p.y += (targetY - p.y) * 0.12;
+      const dx = targetX - p.x;
+      const dy = targetY - p.y;
+      const dz = targetZ - p.z;
+      if (dx * dx + dy * dy + dz * dz > PET_CATCHUP_DISTANCE_SQ) {
+        p.set(targetX, targetY, targetZ);
+      } else {
+        p.x += dx * moveAlpha;
+        p.z += dz * moveAlpha;
+        p.y += dy * moveAlpha;
+      }
 
       // Face direction of travel (turn smoothly toward velocity).
       const vx = p.x - prevX, vz = p.z - prevZ;
-      const speed = Math.hypot(vx, vz);
-      if (speed > 0.0008) {
+      const distanceMoved = Math.hypot(vx, vz);
+      const speed = distanceMoved / frameDt;
+      if (speed > 0.04) {
         const want = Math.atan2(vx, vz);
         let delta = want - lp.facing;
         while (delta > Math.PI) delta -= Math.PI * 2;
         while (delta < -Math.PI) delta += Math.PI * 2;
-        lp.facing += delta * 0.2;
+        lp.facing += delta * turnAlpha;
         lp.root.rotation.y = lp.facing;
       }
 
       // Gait advances with travel speed (plus a small idle shuffle) so the
       // legs/arms swing while moving and settle when hovering in place.
-      lp.gaitPhase += (speed * 14 + dt * 4);
+      lp.gaitPhase += frameDt * (4 + Math.min(16, speed) * 3);
       const swing = Math.sin(lp.gaitPhase);
       for (const l of lp.anim.legs) l.mesh.rotation.x = l.baseRotX + swing * 0.45 * l.side;
       for (const a of lp.anim.arms) a.mesh.rotation.x = a.baseRotX - swing * 0.32 * a.side;
@@ -354,9 +462,9 @@ export class ActivePetSystem {
       follower: true,
     });
     const offset = new BABYLON.Vector3(
-      Math.cos(this.pets.length * 1.2) * 3,
+      PET_FORMATION[this.pets.length]?.[0] ?? 0,
       0,
-      Math.sin(this.pets.length * 1.2) * 3,
+      PET_FORMATION[this.pets.length]?.[1] ?? -3,
     );
     const pos = offset;
     const root = this.factory.createRobot(descriptor, pos);
@@ -372,11 +480,9 @@ export class ActivePetSystem {
       entry,
       root,
       hitbox,
-      orbitAngle: this.pets.length * (Math.PI * 2 / MAX_ACTIVE_PETS),
       bobTimer: Math.random() * Math.PI * 2,
       gaitPhase: Math.random() * Math.PI * 2,
       facing: 0,
-      lastPos: pos.clone(),
       anim: this.captureAnimParts(root),
     });
   }

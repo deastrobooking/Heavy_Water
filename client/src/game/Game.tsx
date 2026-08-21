@@ -35,7 +35,7 @@ import { PrefabSystem, PrefabSummary } from "./PrefabSystem";
 import { PickupSystem } from "./PickupSystem";
 import { BaseSystem, BaseStructure } from "./BaseSystem";
 import { BioCreatureSystem, CapturedCreature } from "./BioCreatureSystem";
-import { ActivePetSystem } from "./ActivePetSystem";
+import { ActivePetSystem, type ActivePetEntry } from "./ActivePetSystem";
 import { MountainRingSystem } from "./MountainRingSystem";
 import { AlienFoliageSystem } from "./AlienFoliageSystem";
 import { EarthFoliageSystem } from "./EarthFoliageSystem";
@@ -379,6 +379,8 @@ export const Game: React.FC = () => {
   const [capturedCreatures, setCapturedCreatures] = useState<CapturedCreature[]>([]);
   const [petBondSummary, setPetBondSummary] = useState("Pet Bonds: +0% DMG, +0% FIRE, -0% DMG TAKEN");
   const [petAugmentSummary, setPetAugmentSummary] = useState("Pet Augments: none active");
+  const [activePetEntries, setActivePetEntries] = useState<ActivePetEntry[]>([]);
+  const [petComboName, setPetComboName] = useState("");
   // Persistent "ever caught" species ids for the dex completion UI. Only
   // grows; survives DEPLOY which removes a creature from the live roster.
   const [dexCaughtIds, setDexCaughtIds] = useState<string[]>([]);
@@ -2143,9 +2145,12 @@ export const Game: React.FC = () => {
             // so defense / health / stamina bonuses + the elemental
             // aura survive a reload.
             equippedArmor: armorSystem.serialize() as unknown as ProgressSnapshot["equippedArmor"],
-            // Active bio-creature pet assignments (which creatures follow
-            // the player and their active-pet levels).
-            activePets: activePetSystem.serialize(),
+            // Only persist activePets after the player has explicitly chosen
+            // a lineup (including choosing none). Omitting it preserves the
+            // strongest-three fallback for old saves and untouched new games.
+            ...(activePetSystem.hasExplicitSelection()
+              ? { activePets: activePetSystem.serialize() }
+              : {}),
             // Creator Suite designs — mirrored from the local design store
             // so player-made robots/pets/characters/enemies follow the
             // cloud save across devices.
@@ -2397,8 +2402,21 @@ export const Game: React.FC = () => {
                 player.setPetBondBoosts(petBondBoosts);
                 weapons.setPlayerBoosts(player.getPlayerBoosts());
               }
-              // Active pets auto-derive from the (now-restored) captured roster,
-              // re-pushing augments, weapon element, and the robot armor combo.
+              // The presence of activePets makes its ordered ids authoritative,
+              // including an explicitly empty lineup. Older saves omit the
+              // field and retain the strongest-three legacy auto-selection.
+              if (
+                Array.isArray(snap.activePets)
+                && bioRef.current
+                && activePetSystemRef.current
+              ) {
+                activePetSystemRef.current.restorePets(
+                  snap.activePets,
+                  bioRef.current.getCaptured(),
+                );
+              }
+              // Push augments, weapon element, combo, and React menu state from
+              // the restored/legacy roster.
               refreshActivePetsRef.current();
               // Hidden-temple looted state — keep raided temples dimmed
               // across reloads and (per-level) across deaths.
@@ -2525,7 +2543,15 @@ export const Game: React.FC = () => {
           player.setModuleBoosts(modBoosts);
           weapons.setPlayerBoosts(player.getPlayerBoosts());
         });
-        bus.on(GameEvents.CREATURE_CAPTURED, () => { void doSaveProgress(); });
+        bus.on(GameEvents.CREATURE_CAPTURED, () => {
+          // Capture changes both the canonical roster and (for legacy/implicit
+          // loadouts) the strongest-three followers. Reconcile immediately so
+          // visuals, augments, element/combo, and the PETS tab never wait for
+          // the 0.5 s inventory poll. Captures bypass the save throttle.
+          refreshActivePetsRef.current();
+          syncResourcesNowRef.current?.();
+          void doSaveProgress(true);
+        });
         // Helper-bot roster + helper-bot upgrades must persist or paid-for
         // upgrades evaporate on the next death.
         bus.on(GameEvents.COMPANION_BUILT, () => { void doSaveProgress(); });
@@ -3334,6 +3360,8 @@ export const Game: React.FC = () => {
         pvpHitCooldownRef.current.clear();
         if (bioRef.current) { try { bioRef.current.dispose(); } catch {} }
         bioRef.current = null;
+        if (activePetSystemRef.current) { try { activePetSystemRef.current.dispose(); } catch {} }
+        activePetSystemRef.current = null;
         if (mountainRingRef.current) { try { mountainRingRef.current.dispose(); } catch {} }
         mountainRingRef.current = null;
         if (alienFoliageRef.current) { try { alienFoliageRef.current.dispose(); } catch {} }
@@ -3483,6 +3511,7 @@ export const Game: React.FC = () => {
     if (meleeArsenalRef.current) { try { meleeArsenalRef.current.dispose(); } catch {} meleeArsenalRef.current = null; }
     if (megaCannonRef.current) { try { megaCannonRef.current.dispose(); } catch {} megaCannonRef.current = null; }
     if (companionRef.current) { try { companionRef.current.dispose(); } catch {} companionRef.current = null; }
+    if (activePetSystemRef.current) { try { activePetSystemRef.current.dispose(); } catch {} activePetSystemRef.current = null; }
     if (capsuleRef.current) { try { capsuleRef.current.dispose(); } catch {} capsuleRef.current = null; }
     if (shopRef.current) { try { shopRef.current.dispose(); } catch {} shopRef.current = null; }
     if (gardenRef.current) { try { gardenRef.current.dispose(); } catch {} gardenRef.current = null; }
@@ -3567,6 +3596,9 @@ export const Game: React.FC = () => {
     setArmorDefense(0);
     setCompanionCount(0);
     setCompanionInfo([]);
+    setActivePetEntries([]);
+    setPetAugmentSummary("Pet Augments: none active");
+    setPetComboName("");
     setIsFlying(false);
     setArmorEnergy(0);
     setHasFlightArmor(false);
@@ -4148,12 +4180,10 @@ export const Game: React.FC = () => {
     }
   }, [showMessage, syncResourcesNow]);
 
-  /** Re-derive the active-pet roster from the player's captured creatures and
-   *  push every pet-driven effect through one path: stat augments (incl.
-   *  defense), the imbued weapon element, and the robot armor-set combo (via
-   *  the armor module pipeline). Called on init, load, capture, and deploy so
-   *  the animated robot followers + their powers always match the roster.
-   *  All state derives from capturedCreatures, which already persists. */
+  /** Reconcile the active-pet roster against captured creatures and push every
+   *  pet-driven effect through one path: stat augments (incl. defense), imbued
+   *  weapon element, armor combo, and Upgrade Bay React state. Explicit
+   *  player-selected order/count is preserved; only legacy saves auto-rank. */
   const refreshActivePets = useCallback(() => {
     const pets = activePetSystemRef.current;
     const player = playerRef.current;
@@ -4163,10 +4193,13 @@ export const Game: React.FC = () => {
     if (!pets || !player) return;
     if (bio) pets.syncFromCaptured(bio.getCaptured());
     const augments = pets.getAugmentBonuses();
+    const entries = pets.getEntries();
     player.setPetAugmentBoosts(augments);
     const petElement = pets.getWeaponElement();
     const elementTag = petElement ? ` · ${String(petElement).toUpperCase()} weapon` : "";
-    setPetAugmentSummary(pets.getEntries().length > 0 ? `${augments.summary}${elementTag}` : "Pet Augments: none active");
+    setActivePetEntries(entries);
+    setPetComboName(pets.getComboName());
+    setPetAugmentSummary(entries.length > 0 ? `${augments.summary}${elementTag}` : "Pet Augments: none active");
     if (armor) {
       armor.setPetElement(petElement);
       armor.setRobotComboBonus(pets.getComboBonus());
@@ -4176,6 +4209,57 @@ export const Game: React.FC = () => {
     if (weapons) weapons.setPlayerBoosts(player.getPlayerBoosts());
   }, []);
   refreshActivePetsRef.current = refreshActivePets;
+
+  const handleSetPetSlot = useCallback((slotIndex: number, creatureId: string | null) => {
+    const pets = activePetSystemRef.current;
+    const bio = bioRef.current;
+    if (!pets || !bio) return;
+
+    const source = bio.getCaptured();
+    const currentEntries = pets.getEntries();
+    const next = currentEntries.map(entry => ({
+      creatureId: entry.creatureId,
+      level: entry.level,
+    }));
+    const safeSlot = Math.max(0, Math.min(2, Math.floor(slotIndex)));
+    let message = "";
+
+    if (creatureId === null) {
+      if (safeSlot >= next.length) return;
+      const removed = currentEntries[safeSlot];
+      next.splice(safeSlot, 1);
+      message = `${removed?.name?.toUpperCase() ?? "PET"} REMOVED FROM ACTIVE LOADOUT`;
+    } else {
+      const captured = source.find(creature => creature.id === creatureId);
+      if (!captured) return;
+      const assignment = { creatureId: captured.id, level: captured.level };
+      const existingIndex = next.findIndex(entry => entry.creatureId === creatureId);
+
+      if (existingIndex === safeSlot) return;
+      if (existingIndex >= 0) {
+        if (safeSlot < next.length) {
+          [next[existingIndex], next[safeSlot]] = [next[safeSlot], next[existingIndex]];
+        } else {
+          const [moved] = next.splice(existingIndex, 1);
+          next.push(moved);
+        }
+        message = `${captured.name.toUpperCase()} MOVED IN ACTIVE LOADOUT`;
+      } else if (safeSlot < next.length) {
+        next[safeSlot] = assignment;
+        message = `${captured.name.toUpperCase()} ASSIGNED TO SLOT ${safeSlot + 1}`;
+      } else if (next.length < pets.getMaxPets()) {
+        next.push(assignment);
+        message = `${captured.name.toUpperCase()} ASSIGNED TO SLOT ${next.length}`;
+      } else {
+        return;
+      }
+    }
+
+    pets.assignPets(next, source);
+    refreshActivePets();
+    showMessage(message, 1600);
+    forceSaveRef.current?.();
+  }, [refreshActivePets, showMessage]);
 
   const handleGardenCare = useCallback((id: string) => {
     const bio = bioRef.current;
@@ -4521,6 +4605,7 @@ export const Game: React.FC = () => {
       if (meleeArsenalRef.current) meleeArsenalRef.current.dispose();
       if (megaCannonRef.current) megaCannonRef.current.dispose();
       if (companionRef.current) companionRef.current.dispose();
+      if (activePetSystemRef.current) { activePetSystemRef.current.dispose(); activePetSystemRef.current = null; }
       if (capsuleRef.current) capsuleRef.current.dispose();
       if (shopRef.current) shopRef.current.dispose();
       if (gardenRef.current) gardenRef.current.dispose();
@@ -4901,10 +4986,15 @@ export const Game: React.FC = () => {
           onUnmountJewel={handleUnmountJewel}
           upgradeMenuSpecials={specialsList}
           upgradeMenuCompanionWeapons={companionWeaponInfo}
+          upgradeMenuPets={activePetEntries}
+          upgradeMenuCapturedPets={capturedCreatures}
+          upgradeMenuPetSummary={petAugmentSummary}
+          upgradeMenuPetCombo={petComboName}
           upgradeMenuTravel={travelDestinations}
           upgradeMenuCurrentLevel={currentWorldLevel}
           onUnlockSpecial={handleUnlockSpecial}
           onUpgradeCompanionWeapon={handleUpgradeCompanionWeapon}
+          onSetPetSlot={handleSetPetSlot}
           onFastTravel={handleFastTravel}
           onUpgradeMenuClose={() => setUpgradeMenuOpen(false)}
           labOpen={labOpen}

@@ -163,7 +163,8 @@ export interface ProgressSnapshot {
   armorModuleInventory?: Array<{ id: string; name: string; type: string; tier: number; level: number }>;
   /** Active bio-creature pets that follow the player and augment abilities.
    *  Up to 3; separate from companions/ allies. Each entry is a captured
-   *  creature id + its active-pet level (1-50). */
+   *  creature id + its active-pet level (1-100). Array order is the player's
+   *  chosen slot order; an explicitly empty array means no active pets. */
   activePets?: Array<{ creatureId: string; level: number }>;
   /** Player-made Creator Suite designs (robots / pets / characters /
    *  enemies). Mirrored from the local design store so designs follow the

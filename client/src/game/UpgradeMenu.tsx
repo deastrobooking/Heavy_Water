@@ -3,6 +3,9 @@ import type { WeaponUpgradeInfo } from "./WeaponsSystem";
 import type { CompanionUpgradeInfo } from "./CompanionSystem";
 import type { PlayerUpgradeInfo } from "./PlayerController";
 import type { ElementalUpgradeInfo } from "./ElementalSpecialsSystem";
+import type { ActivePetEntry } from "./ActivePetSystem";
+import type { CapturedCreature } from "./BioCreatureSystem";
+import { getSpeciesById } from "./BioSpecies";
 import { JEWEL_DEFS, JEWEL_TIERS, type JewelTier } from "./JewelSystem";
 
 /** Per-weapon Power-Jewel state surfaced into the WEAPONS tab. The menu
@@ -78,6 +81,10 @@ interface UpgradeMenuProps {
   partCounts: Record<string, number>;
   specials?: SpecialUpgradeInfo[];
   companionWeapons?: CompanionWeaponInfo[];
+  activePets?: ActivePetEntry[];
+  capturedPets?: CapturedCreature[];
+  petAugmentSummary?: string;
+  petComboName?: string;
   travelDestinations?: TravelDestinationInfo[];
   /** WorldLevel the player is currently in — used to highlight the row. */
   currentLevel?: number;
@@ -86,6 +93,7 @@ interface UpgradeMenuProps {
   onUpgradePlayer?: (id: string) => void;
   onUnlockSpecial?: (id: string) => void;
   onUpgradeCompanionWeapon?: (id: string) => void;
+  onSetPetSlot?: (slotIndex: number, creatureId: string | null) => void;
   onFastTravel?: (level: number, warpPoint?: TravelWarpPoint) => void;
   onClose: () => void;
   /** Per-weapon Power-Jewel state. When omitted the jewel slot UI is
@@ -124,6 +132,10 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
   partCounts,
   specials = [],
   companionWeapons = [],
+  activePets = [],
+  capturedPets = [],
+  petAugmentSummary = "Pet Augments: none active",
+  petComboName = "",
   travelDestinations = [],
   currentLevel = 1,
   onUpgradeWeapon,
@@ -131,18 +143,22 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
   onUpgradePlayer,
   onUnlockSpecial,
   onUpgradeCompanionWeapon,
+  onSetPetSlot,
   onFastTravel,
   onClose,
   weaponJewelInfo,
   onMountJewel,
   onUnmountJewel,
 }) => {
-  const [tab, setTab] = useState<"player" | "weapons" | "robots" | "specials" | "travel">("player");
+  const [tab, setTab] = useState<"player" | "pets" | "weapons" | "robots" | "specials" | "travel">("player");
+  // Controller/keyboard users choose a destination slot first, then activate
+  // an inactive captured-pet row to replace that slot when the lineup is full.
+  const [petTargetSlot, setPetTargetSlot] = useState(0);
   // Per-tab selected-row index for gamepad / keyboard navigation. Each
   // tab keeps its own cursor so jumping between tabs doesn't lose the
   // player's place.
   const [selectedIdx, setSelectedIdx] = useState<Record<string, number>>({
-    player: 0, weapons: 0, robots: 0, specials: 0, travel: 0,
+    player: 0, pets: 0, weapons: 0, robots: 0, specials: 0, travel: 0,
   });
   // Refs for every selectable row, keyed by stable row id, so the active
   // row can be auto-scrolled into view on cursor change.
@@ -168,6 +184,26 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
           key: `e-${e.kind}`,
           activate: () => onUpgradeElemental?.(e.kind),
           canActivate: !e.maxed && e.affordable,
+        });
+      }
+    } else if (tab === "pets") {
+      for (let slotIndex = 0; slotIndex < 3; slotIndex++) {
+        out.push({
+          key: `pet-slot-${slotIndex}`,
+          activate: () => setPetTargetSlot(slotIndex),
+          canActivate: true,
+        });
+      }
+      for (const pet of capturedPets) {
+        const activeSlot = activePets.findIndex(entry => entry.creatureId === pet.id);
+        const assignSlot = activePets.length < 3 ? activePets.length : petTargetSlot;
+        out.push({
+          key: `pet-${pet.id}`,
+          activate: () => onSetPetSlot?.(
+            activeSlot >= 0 ? activeSlot : assignSlot,
+            activeSlot >= 0 ? null : pet.id,
+          ),
+          canActivate: true,
         });
       }
     } else if (tab === "weapons") {
@@ -212,9 +248,9 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
       }
     }
     return out;
-  }, [tab, playerUpgrades, elementalUpgrades, weapons, companions, companionWeapons, specials, travelDestinations, currentLevel, onUpgradePlayer, onUpgradeElemental, onUpgradeWeapon, onUpgradeCompanion, onUpgradeCompanionWeapon, onUnlockSpecial, onFastTravel]);
+  }, [tab, playerUpgrades, elementalUpgrades, activePets, capturedPets, petTargetSlot, weapons, companions, companionWeapons, specials, travelDestinations, currentLevel, onUpgradePlayer, onUpgradeElemental, onSetPetSlot, onUpgradeWeapon, onUpgradeCompanion, onUpgradeCompanionWeapon, onUnlockSpecial, onFastTravel]);
 
-  const TAB_ORDER = ["player", "weapons", "robots", "specials", "travel"] as const;
+  const TAB_ORDER = ["player", "pets", "weapons", "robots", "specials", "travel"] as const;
   const curIdx = Math.min(selectedIdx[tab] ?? 0, Math.max(0, rows.length - 1));
   const selectedKey = rows[curIdx]?.key ?? null;
 
@@ -318,6 +354,7 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
 
         <div className="flex border-b border-zinc-700">
           <TabBtn active={tab === "player"} onClick={() => setTab("player")} label="PLAYER" />
+          <TabBtn active={tab === "pets"} onClick={() => setTab("pets")} label="PETS" />
           <TabBtn active={tab === "weapons"} onClick={() => setTab("weapons")} label="WEAPONS" />
           <TabBtn active={tab === "robots"} onClick={() => setTab("robots")} label="HELPER ROBOTS" />
           <TabBtn active={tab === "specials"} onClick={() => setTab("specials")} label="SPECIALS" />
@@ -423,6 +460,153 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
                 );
               })}
             </div>
+          )}
+
+          {tab === "pets" && (
+            <>
+              <div className="bg-gradient-to-r from-emerald-950/70 to-cyan-950/50 border border-emerald-700/70 rounded-lg p-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-emerald-300 text-xs font-bold tracking-wider">
+                      ACTIVE BIO-PET LOADOUT · {activePets.length}/3
+                    </div>
+                    <div className="text-zinc-300 text-[11px] mt-1">{petAugmentSummary}</div>
+                    <div className="text-cyan-400 text-[9px] mt-1 font-bold tracking-wider">
+                      CONTROLLER TARGET: SLOT {petTargetSlot + 1}
+                    </div>
+                  </div>
+                  <div className="text-right min-w-[130px]">
+                    <div className="text-[9px] text-zinc-500 tracking-wider">ARMOR COMBO</div>
+                    <div className={`text-xs font-bold ${petComboName ? "text-cyan-300" : "text-zinc-600"}`}>
+                      {petComboName || "NO COMBO"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 mt-3">
+                  {[0, 1, 2].map(slotIndex => {
+                    const pet = activePets[slotIndex];
+                    return (
+                      <div
+                        ref={setRowRef(`pet-slot-${slotIndex}`)}
+                        key={`pet-slot-${slotIndex}`}
+                        onClick={() => setPetTargetSlot(slotIndex)}
+                        className={`min-h-[86px] rounded border p-2 cursor-pointer transition ${
+                          petTargetSlot === slotIndex
+                            ? "bg-cyan-950/55 border-cyan-400"
+                            : pet
+                              ? "bg-emerald-950/45 border-emerald-600/70"
+                              : "bg-zinc-950/60 border-zinc-800"
+                        }${ringClass(`pet-slot-${slotIndex}`)}`}
+                      >
+                        <div className="text-[9px] text-zinc-500 font-bold tracking-widest">SLOT {slotIndex + 1}</div>
+                        {pet ? (
+                          <>
+                            <div className="text-white text-sm font-bold truncate mt-1">{pet.name}</div>
+                            <div className="flex gap-2 text-[10px] font-mono mt-0.5">
+                              <span className="text-amber-300">LVL {pet.level}</span>
+                              <span className="text-emerald-300 uppercase">{pet.elementalType}</span>
+                            </div>
+                            <button
+                              onClick={() => onSetPetSlot?.(slotIndex, null)}
+                              className="mt-2 px-2 py-0.5 rounded text-[9px] font-bold bg-red-950/70 border border-red-800 text-red-300 hover:bg-red-900"
+                            >
+                              REMOVE
+                            </button>
+                          </>
+                        ) : (
+                          <div className="text-zinc-600 text-xs italic mt-3">Empty slot</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="text-emerald-300 text-[11px] font-bold tracking-wider pt-2 px-1">
+                CAPTURED ROSTER — select a target slot, then activate a pet to assign/replace it
+              </div>
+
+              {capturedPets.length === 0 ? (
+                <div className="text-center text-zinc-400 py-8 text-sm">No captured pets yet. Capture creatures with Bio Essence.</div>
+              ) : capturedPets.map(pet => {
+                const activeSlot = activePets.findIndex(entry => entry.creatureId === pet.id);
+                const isActive = activeSlot >= 0;
+                const species = getSpeciesById(pet.speciesId);
+                const quickAssignSlot = activePets.length < 3 ? activePets.length : petTargetSlot;
+                const rowKey = `pet-${pet.id}`;
+                return (
+                  <div
+                    ref={setRowRef(rowKey)}
+                    key={pet.id}
+                    className={`border rounded-lg p-3 transition ${isActive ? "bg-emerald-950/45 border-emerald-600" : "bg-zinc-800/80 border-zinc-700 hover:border-emerald-500"}${ringClass(rowKey)}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="text-white font-bold truncate">{pet.name}</div>
+                          <div className="text-amber-300 text-xs font-mono">LVL {pet.level}</div>
+                          <div className="text-pink-300 text-[10px] font-mono">BOND {pet.bondLevel}</div>
+                          <div className="text-cyan-300 text-[10px] uppercase">{species?.elementalType ?? "unknown"}</div>
+                          {isActive && (
+                            <div className="text-emerald-300 text-[9px] font-bold tracking-wider">ACTIVE · SLOT {activeSlot + 1}</div>
+                          )}
+                        </div>
+                        <div className="text-zinc-500 text-[10px] mt-1">
+                          {species?.name ?? pet.speciesId} · HP {Math.round(pet.hp)} · ATK {Math.round(pet.attackPower)} · SPD {pet.speed.toFixed(1)}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col items-end gap-1">
+                        <button
+                          onClick={() => onSetPetSlot?.(
+                            isActive ? activeSlot : quickAssignSlot,
+                            isActive ? null : pet.id,
+                          )}
+                          className={`px-3 py-1 rounded text-[10px] font-bold tracking-wider ${
+                            isActive
+                              ? "bg-red-950/70 border border-red-800 text-red-300 hover:bg-red-900"
+                              : "bg-emerald-500 hover:bg-emerald-400 text-black"
+                          }`}
+                        >
+                          {isActive
+                            ? "REMOVE"
+                            : activePets.length < 3
+                              ? "ASSIGN"
+                              : `REPLACE S${petTargetSlot + 1}`}
+                        </button>
+                        <div className="flex gap-1">
+                          {[0, 1, 2].map(slotIndex => {
+                            const occupant = activePets[slotIndex];
+                            const inThisSlot = occupant?.creatureId === pet.id;
+                            const slotReachable = isActive
+                              ? slotIndex < activePets.length
+                              : slotIndex <= activePets.length;
+                            return (
+                              <button
+                                key={slotIndex}
+                                disabled={inThisSlot || !slotReachable}
+                                title={occupant ? `Replace ${occupant.name} in slot ${slotIndex + 1}` : `Assign to slot ${slotIndex + 1}`}
+                                onClick={() => onSetPetSlot?.(slotIndex, pet.id)}
+                                className={`w-7 py-0.5 rounded text-[9px] font-bold border ${
+                                  inThisSlot
+                                    ? "bg-emerald-900/70 text-emerald-300 border-emerald-600 cursor-default"
+                                    : !slotReachable
+                                      ? "bg-zinc-950 text-zinc-700 border-zinc-900 cursor-not-allowed"
+                                    : "bg-zinc-900 text-zinc-300 border-zinc-700 hover:border-cyan-500 hover:text-cyan-300"
+                                }`}
+                              >
+                                S{slotIndex + 1}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
           )}
 
           {tab === "weapons" && weapons.map(w => {
@@ -719,7 +903,7 @@ const Resource: React.FC<{ label: string; value: number; color: string }> = ({ l
 const TabBtn: React.FC<{ active: boolean; onClick: () => void; label: string }> = ({ active, onClick, label }) => (
   <button
     onClick={onClick}
-    className={`px-5 py-2 text-sm font-bold tracking-wider transition ${active ? "bg-cyan-600/30 text-cyan-200 border-b-2 border-cyan-400" : "text-zinc-500 hover:text-zinc-300"}`}
+    className={`flex-1 px-3 py-2 text-xs font-bold tracking-wider transition ${active ? "bg-cyan-600/30 text-cyan-200 border-b-2 border-cyan-400" : "text-zinc-500 hover:text-zinc-300"}`}
   >
     {label}
   </button>

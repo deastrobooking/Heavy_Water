@@ -7,6 +7,7 @@ import { BlockType, BlockDefinition } from "./BuildingSystem";
 import { PrefabSummary } from "./PrefabSystem";
 import { CompanionUpgradeInfo } from "./CompanionSystem";
 import { CapturedCreature } from "./BioCreatureSystem";
+import type { ActivePetEntry } from "./ActivePetSystem";
 import { UpgradeMenu, type SpecialUpgradeInfo, type CompanionWeaponInfo, type TravelDestinationInfo, type TravelWarpPoint, type WeaponJewelInfo } from "./UpgradeMenu";
 import type { JewelTier } from "./JewelSystem";
 import type { PlayerUpgradeInfo } from "./PlayerController";
@@ -79,10 +80,15 @@ interface GameUIProps {
   upgradeMenuPartCounts?: Record<string, number>;
   upgradeMenuSpecials?: SpecialUpgradeInfo[];
   upgradeMenuCompanionWeapons?: CompanionWeaponInfo[];
+  upgradeMenuPets?: ActivePetEntry[];
+  upgradeMenuCapturedPets?: CapturedCreature[];
+  upgradeMenuPetSummary?: string;
+  upgradeMenuPetCombo?: string;
   upgradeMenuTravel?: TravelDestinationInfo[];
   upgradeMenuCurrentLevel?: number;
   onUnlockSpecial?: (id: string) => void;
   onUpgradeCompanionWeapon?: (id: string) => void;
+  onSetPetSlot?: (slotIndex: number, creatureId: string | null) => void;
   onFastTravel?: (level: number, warpPoint?: TravelWarpPoint) => void;
   onUpgradeMenuClose?: () => void;
   onUpgradeWeapon?: (type: string) => void;
@@ -213,10 +219,15 @@ export const GameUI: React.FC<GameUIProps> = ({
   upgradeMenuPartCounts = {},
   upgradeMenuSpecials = [],
   upgradeMenuCompanionWeapons = [],
+  upgradeMenuPets = [],
+  upgradeMenuCapturedPets = [],
+  upgradeMenuPetSummary = "Pet Augments: none active",
+  upgradeMenuPetCombo = "",
   upgradeMenuTravel = [],
   upgradeMenuCurrentLevel = 1,
   onUnlockSpecial,
   onUpgradeCompanionWeapon,
+  onSetPetSlot,
   onFastTravel,
   onUpgradeMenuClose,
   weaponJewelInfo,
@@ -959,6 +970,10 @@ export const GameUI: React.FC<GameUIProps> = ({
         partCounts={upgradeMenuPartCounts}
         specials={upgradeMenuSpecials}
         companionWeapons={upgradeMenuCompanionWeapons}
+        activePets={upgradeMenuPets}
+        capturedPets={upgradeMenuCapturedPets}
+        petAugmentSummary={upgradeMenuPetSummary}
+        petComboName={upgradeMenuPetCombo}
         travelDestinations={upgradeMenuTravel}
         currentLevel={upgradeMenuCurrentLevel}
         onUpgradeWeapon={(t) => onUpgradeWeapon?.(t)}
@@ -966,6 +981,7 @@ export const GameUI: React.FC<GameUIProps> = ({
         onUpgradePlayer={(id) => onUpgradePlayer?.(id)}
         onUnlockSpecial={(id) => onUnlockSpecial?.(id)}
         onUpgradeCompanionWeapon={(id) => onUpgradeCompanionWeapon?.(id)}
+        onSetPetSlot={(slotIndex, creatureId) => onSetPetSlot?.(slotIndex, creatureId)}
         onFastTravel={(lvl, warpPoint) => onFastTravel?.(lvl, warpPoint)}
         onClose={() => onUpgradeMenuClose?.()}
         weaponJewelInfo={weaponJewelInfo}
