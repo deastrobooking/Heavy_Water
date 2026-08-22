@@ -146,10 +146,10 @@ export class CompanionSystem {
   // the same synchronous frame (Game.tsx iterates then discards), so we can
   // safely clear + refill it each update instead of allocating a fresh array.
   private attackHits: { mesh: BABYLON.AbstractMesh; damage: number }[] = [];
-  // One shared projectile material for the whole system — projectiles set the
-  // emissive color per-shot, but they no longer each own a StandardMaterial.
-  // Never disposed per-projectile; released in dispose().
-  private sharedProjectileMat: BABYLON.StandardMaterial | null = null;
+  // Projectile materials are shared by color, not by projectile. This keeps
+  // allocations bounded by the maximum companion roster while ensuring a
+  // later shot cannot recolor projectiles that are already in flight.
+  private projectileMaterials: Map<string, BABYLON.StandardMaterial> = new Map();
   // One shared particle texture reused by every heal effect (avoids a fresh
   // Texture allocation per heal tick).
   private sharedHealTexture: BABYLON.Texture | null = null;
@@ -164,13 +164,18 @@ export class CompanionSystem {
     this.bus = EventBus.getInstance();
   }
 
-  private getProjectileMaterial(): BABYLON.StandardMaterial {
-    if (!this.sharedProjectileMat) {
-      const mat = new BABYLON.StandardMaterial("compProjMat", this.scene);
-      mat.diffuseColor = new BABYLON.Color3(0.05, 0.05, 0.05);
-      this.sharedProjectileMat = mat;
+  private getProjectileMaterial(color: BABYLON.Color3): BABYLON.StandardMaterial {
+    // Color3 values are normalized in the robot designer, but using the
+    // actual component values also keeps custom assembled designs distinct.
+    const key = `${color.r}|${color.g}|${color.b}`;
+    let material = this.projectileMaterials.get(key);
+    if (!material) {
+      material = new BABYLON.StandardMaterial(`compProjMat_${this.projectileMaterials.size}`, this.scene);
+      material.diffuseColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+      material.emissiveColor = color.clone();
+      this.projectileMaterials.set(key, material);
     }
-    return this.sharedProjectileMat;
+    return material;
   }
 
   setMaxCompanions(n: number): void {
@@ -428,12 +433,9 @@ export class CompanionSystem {
     const proj = BABYLON.MeshBuilder.CreateSphere("compProj", { diameter, segments: 6 }, this.scene);
     proj.position.copyFrom(from);
 
-    // Shared system-owned material — no per-projectile StandardMaterial
-    // allocation (which previously leaked proportional to fire rate). The
-    // emissive tint is set from the firing companion's color.
-    const mat = this.getProjectileMaterial();
-    mat.emissiveColor = color;
-    proj.material = mat;
+    // Reuse the material for this color. It is never mutated after creation,
+    // so concurrent projectiles retain the firing companion's tint.
+    proj.material = this.getProjectileMaterial(color);
 
     const dir = to.subtract(from).normalize();
     const speed = 38 + 8 * weaponLevel;
@@ -728,10 +730,10 @@ export class CompanionSystem {
       try { ps.dispose(false); } catch {}
     });
     this.healEffects.clear();
-    if (this.sharedProjectileMat) {
-      try { this.sharedProjectileMat.dispose(); } catch {}
-      this.sharedProjectileMat = null;
-    }
+    this.projectileMaterials.forEach(material => {
+      try { material.dispose(); } catch {}
+    });
+    this.projectileMaterials.clear();
     if (this.sharedHealTexture) {
       try { this.sharedHealTexture.dispose(); } catch {}
       this.sharedHealTexture = null;
