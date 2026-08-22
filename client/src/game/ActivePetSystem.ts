@@ -56,10 +56,13 @@ interface LivePet {
   bobTimer: number;
   gaitPhase: number;
   facing: number;
+  supportCooldown: number;
   anim: PetAnimParts;
 }
 
 const MAX_ACTIVE_PETS = 3;
+const PET_SUPPORT_RANGE_SQ = 26 * 26;
+const PET_SUPPORT_INTERVAL = 2.8;
 const PET_FOLLOW_RESPONSE = 8;
 const PET_TURN_RESPONSE = 11;
 const PET_CATCHUP_DISTANCE_SQ = 24 * 24;
@@ -73,6 +76,10 @@ const PET_FORMATION: ReadonlyArray<readonly [number, number]> = [
 const LEG_NAMES = new Set(["th", "sn", "ft"]);
 const ARM_NAMES = new Set(["ua", "fa", "hd"]);
 const GLOW_NAMES = new Set(["v", "antTip", "cg", "core", "wt", "tl", "lg", "mz", "eye", "chk"]);
+
+type PetTarget = BABYLON.Mesh;
+type PetDamageRouter = (mesh: BABYLON.AbstractMesh, damage: number) => void;
+type PetHealRouter = (amount: number) => void;
 
 export type PetAssignment = { creatureId: string; level: number };
 
@@ -270,7 +277,12 @@ export class ActivePetSystem {
   }
 
   private strongestAssignment(captured: CapturedCreature[]): { creatureId: string; level: number }[] {
-    return strongestPetAssignment(captured);
+    return captured
+      .filter(c => !!getSpeciesById(c.speciesId))
+      .slice()
+      .sort((a, b) => (b.level ?? 1) - (a.level ?? 1))
+      .slice(0, MAX_ACTIVE_PETS)
+      .map(c => ({ creatureId: c.id, level: c.level ?? 1 }));
   }
 
   private normalizeAssignment(
@@ -278,7 +290,29 @@ export class ActivePetSystem {
     source: CapturedCreature[],
     repairMissing: boolean,
   ): { creatureId: string; level: number }[] {
-    return normalizePetAssignment(assignment, source, repairMissing);
+    const valid = source.filter(c => !!getSpeciesById(c.speciesId));
+    const byId = new Map(valid.map(c => [c.id, c]));
+    const ranked = valid.slice().sort((a, b) => (b.level ?? 1) - (a.level ?? 1));
+    const reserved = new Set<string>();
+    const savedSlots = assignment.slice(0, MAX_ACTIVE_PETS).map(saved => {
+      const creature = byId.get(saved.creatureId);
+      if (!creature || reserved.has(creature.id)) return { saved, creature: undefined };
+      reserved.add(creature.id);
+      return { saved, creature };
+    });
+    const used = new Set(reserved);
+    const normalized: { creatureId: string; level: number }[] = [];
+
+    for (const slot of savedSlots) {
+      let creature = slot.creature;
+      if (!creature && repairMissing) {
+        creature = ranked.find(candidate => !used.has(candidate.id));
+      }
+      if (!creature) continue;
+      used.add(creature.id);
+      normalized.push({ creatureId: creature.id, level: creature.level ?? slot.saved.level ?? 1 });
+    }
+    return normalized;
   }
 
   getEntries(): ActivePetEntry[] {
@@ -395,9 +429,20 @@ export class ActivePetSystem {
     return this.getComboBonus().name;
   }
 
-  update(dt: number, playerPos: BABYLON.Vector3): void {
+  /** Move followers and let each one fire a modest family-specific support
+   * action. Targets are supplied by Game so pets use the same live enemy list
+   * and damage router as player weapons and companion helpers. */
+  update(
+    dt: number,
+    playerPos: BABYLON.Vector3,
+    targets: PetTarget[] = [],
+    routeDamage?: PetDamageRouter,
+    healPlayer?: PetHealRouter,
+  ): void {
     const frameDt = Math.max(0, Math.min(0.1, dt));
     if (frameDt <= 0) return;
+    this.updateSupportActions(frameDt, playerPos, targets, routeDamage, healPlayer);
+    const moveAlpha = 1 - Math.exp(-PET_FOLLOW_RESPONSE * frameDt);
     const turnAlpha = 1 - Math.exp(-PET_TURN_RESPONSE * frameDt);
 
     for (let i = 0; i < this.pets.length; i++) {
@@ -431,12 +476,16 @@ export class ActivePetSystem {
       }
 
       const prevX = p.x, prevZ = p.z;
-      const nextPosition = calculatePetFollowStep(
-        p,
-        new BABYLON.Vector3(targetX, targetY, targetZ),
-        frameDt,
-      );
-      p.copyFrom(nextPosition);
+      const dx = targetX - p.x;
+      const dy = targetY - p.y;
+      const dz = targetZ - p.z;
+      if (dx * dx + dy * dy + dz * dz > PET_CATCHUP_DISTANCE_SQ) {
+        p.set(targetX, targetY, targetZ);
+      } else {
+        p.x += dx * moveAlpha;
+        p.z += dz * moveAlpha;
+        p.y += dy * moveAlpha;
+      }
 
       // Face direction of travel (turn smoothly toward velocity).
       const vx = p.x - prevX, vz = p.z - prevZ;
@@ -466,6 +515,108 @@ export class ActivePetSystem {
         g.mesh.scaling.set(g.baseScale.x * pulse, g.baseScale.y * pulse, g.baseScale.z * pulse);
       }
     }
+  }
+
+  private updateSupportActions(
+    dt: number,
+    playerPos: BABYLON.Vector3,
+    targets: PetTarget[],
+    routeDamage?: PetDamageRouter,
+    healPlayer?: PetHealRouter,
+  ): void {
+    for (const lp of this.pets) {
+      lp.supportCooldown -= dt;
+      if (lp.supportCooldown > 0) continue;
+
+      const isVerdant = lp.entry.elementalType === "grass";
+      let target: PetTarget | null = null;
+      let nearestSq = PET_SUPPORT_RANGE_SQ;
+      if (!isVerdant) {
+        for (const candidate of targets) {
+          if (!candidate || candidate.isDisposed() || !candidate.isEnabled()) continue;
+          // The shared target scratch also contains props, ore, and structures.
+          // Only enemy metadata is eligible for pet support attacks.
+          const meta = candidate.metadata as any;
+          if (!meta?.isEnemy && !meta?.aerialUnit) continue;
+          const d = BABYLON.Vector3.DistanceSquared(lp.hitbox.position, candidate.position);
+          if (d < nearestSq) {
+            nearestSq = d;
+            target = candidate;
+          }
+        }
+      }
+
+      // Missing targets do not consume the pet's shot opportunity; this keeps
+      // a pet from firing into empty space while the player is exploring.
+      if (!target && !isVerdant) {
+        lp.supportCooldown = 0.2;
+        continue;
+      }
+
+      const levelPower = Math.max(1, lp.entry.level);
+      if (isVerdant) {
+        const amount = 2.5 + levelPower * 0.08;
+        healPlayer?.(amount);
+        this.showSupportPulse(lp.hitbox.position, new BABYLON.Color3(0.25, 1, 0.4));
+      } else if (target && routeDamage) {
+        const damage = 7 + levelPower * 0.32;
+        routeDamage(target, damage);
+        const color = this.supportColor(lp.entry.elementalType);
+        this.showSupportBolt(lp.hitbox.position, target.position, color);
+      }
+      // A small deterministic stagger prevents three active pets from
+      // producing simultaneous flashes and keeps their cadence readable.
+      lp.supportCooldown = PET_SUPPORT_INTERVAL + (this.pets.indexOf(lp) * 0.22);
+    }
+  }
+
+  private supportColor(elementalType: string): BABYLON.Color3 {
+    switch (elementalType) {
+      case "flame":
+      case "dragon":
+      case "evil":
+        return new BABYLON.Color3(1, 0.3, 0.08);
+      case "ice":
+      case "water":
+        return new BABYLON.Color3(0.25, 0.8, 1);
+      case "electric":
+      case "psychic":
+        return new BABYLON.Color3(0.8, 0.35, 1);
+      case "crystal":
+        return new BABYLON.Color3(1, 0.75, 0.25);
+      case "steel":
+        return new BABYLON.Color3(0.65, 0.75, 0.85);
+      default:
+        return new BABYLON.Color3(1, 1, 1);
+    }
+  }
+
+  private showSupportBolt(from: BABYLON.Vector3, to: BABYLON.Vector3, color: BABYLON.Color3): void {
+    const line = BABYLON.MeshBuilder.CreateLines("petSupportBolt", {
+      points: [from.add(new BABYLON.Vector3(0, 0.25, 0)), to.clone()],
+      colors: [color.toColor4(0.9), color.toColor4(0.9)],
+    }, this.scene);
+    window.setTimeout(() => {
+      if (!line.isDisposed()) line.dispose();
+    }, 140);
+  }
+
+  private showSupportPulse(position: BABYLON.Vector3, color: BABYLON.Color3): void {
+    const ring = BABYLON.MeshBuilder.CreateTorus("petSupportPulse", {
+      diameter: 1.5, thickness: 0.06, tessellation: 16,
+    }, this.scene);
+    ring.position.copyFrom(position);
+    ring.position.y += 0.08;
+    ring.rotation.x = Math.PI / 2;
+    const material = new BABYLON.StandardMaterial("petSupportPulseMat", this.scene);
+    material.emissiveColor = color;
+    material.diffuseColor = color;
+    material.alpha = 0.75;
+    ring.material = material;
+    window.setTimeout(() => {
+      if (!ring.isDisposed()) ring.dispose();
+      material.dispose();
+    }, 220);
   }
 
   private captureAnimParts(root: BABYLON.TransformNode): PetAnimParts {
@@ -518,6 +669,9 @@ export class ActivePetSystem {
       bobTimer: Math.random() * Math.PI * 2,
       gaitPhase: Math.random() * Math.PI * 2,
       facing: 0,
+      // Stagger the opening volley so a full lineup reads as three helpers,
+      // not one combined effect.
+      supportCooldown: 0.8 + this.pets.length * 0.22,
       anim: this.captureAnimParts(root),
     });
   }

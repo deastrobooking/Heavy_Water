@@ -2783,8 +2783,6 @@ export const Game: React.FC = () => {
           // spin and per-frame land-check see the up-to-date isGrounded
           // state.
           smashAttackRef.current?.update(dt);
-          // Active pets follow the player every frame.
-          activePetSystemRef.current?.update(dt, player.getPosition());
           // Amplify weapons while mounted in a vehicle (1.5x size/damage/explosion).
           const mounted = player.isMounted();
           weapons.setVehicleMode(mounted);
@@ -2805,6 +2803,21 @@ export const Game: React.FC = () => {
           propSystem.appendHitboxMeshes(enemyMeshes);
           if (versusModeRef.current.active && multiplayerRef.current) {
             multiplayerRef.current.appendRemoteHitMeshes(enemyMeshes);
+          }
+          // Pets use the same live target list and hit router as the player's
+          // weapons. Keep them out of arena matches, where damage must remain
+          // server-validated, and let Verdant pets route healing through the
+          // normal player health path.
+          if (!versusModeRef.current.active) {
+            activePetSystemRef.current?.update(
+              dt,
+              playerPos,
+              enemyMeshes,
+              routeHit,
+              (amount) => player.heal(amount),
+            );
+          } else {
+            activePetSystemRef.current?.update(dt, playerPos);
           }
           const specialTargets = specialTargetScratch;
           specialTargets.length = 0;
