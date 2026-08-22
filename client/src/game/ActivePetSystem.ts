@@ -74,6 +74,73 @@ const LEG_NAMES = new Set(["th", "sn", "ft"]);
 const ARM_NAMES = new Set(["ua", "fa", "hd"]);
 const GLOW_NAMES = new Set(["v", "antTip", "cg", "core", "wt", "tl", "lg", "mz", "eye", "chk"]);
 
+export type PetAssignment = { creatureId: string; level: number };
+
+/** Legacy saves have no activePets field, so they retain the historic
+ * strongest-three selection. Kept pure so save migration behavior is easy to
+ * cover without constructing a Babylon scene. */
+export function strongestPetAssignment(captured: CapturedCreature[]): PetAssignment[] {
+  return captured
+    .filter(c => !!getSpeciesById(c.speciesId))
+    .slice()
+    .sort((a, b) => (b.level ?? 1) - (a.level ?? 1))
+    .slice(0, MAX_ACTIVE_PETS)
+    .map(c => ({ creatureId: c.id, level: c.level ?? 1 }));
+}
+
+/** Preserve each saved slot while repairing only invalid/duplicate slots.
+ * Valid selections reserve their ids before repair, so a replacement can
+ * never displace or reorder a surviving selection. */
+export function normalizePetAssignment(
+  assignment: PetAssignment[],
+  source: CapturedCreature[],
+  repairMissing: boolean,
+): PetAssignment[] {
+  const valid = source.filter(c => !!getSpeciesById(c.speciesId));
+  const byId = new Map(valid.map(c => [c.id, c]));
+  const ranked = valid.slice().sort((a, b) => (b.level ?? 1) - (a.level ?? 1));
+  const reserved = new Set<string>();
+  const savedSlots = assignment.slice(0, MAX_ACTIVE_PETS).map(saved => {
+    const creature = byId.get(saved.creatureId);
+    if (!creature || reserved.has(creature.id)) return { saved, creature: undefined };
+    reserved.add(creature.id);
+    return { saved, creature };
+  });
+  const used = new Set(reserved);
+  const normalized: PetAssignment[] = [];
+
+  for (const slot of savedSlots) {
+    let creature = slot.creature;
+    if (!creature && repairMissing) {
+      creature = ranked.find(candidate => !used.has(candidate.id));
+    }
+    if (!creature) continue;
+    used.add(creature.id);
+    normalized.push({ creatureId: creature.id, level: creature.level ?? slot.saved.level ?? 1 });
+  }
+  return normalized;
+}
+
+/** Frame-rate independent follower movement with a bounded catch-up snap. */
+export function calculatePetFollowStep(
+  current: BABYLON.Vector3,
+  target: BABYLON.Vector3,
+  dt: number,
+): BABYLON.Vector3 {
+  const frameDt = Math.max(0, Math.min(0.1, dt));
+  if (frameDt <= 0) return current.clone();
+  const dx = target.x - current.x;
+  const dy = target.y - current.y;
+  const dz = target.z - current.z;
+  if (dx * dx + dy * dy + dz * dz > PET_CATCHUP_DISTANCE_SQ) return target.clone();
+  const moveAlpha = 1 - Math.exp(-PET_FOLLOW_RESPONSE * frameDt);
+  return new BABYLON.Vector3(
+    current.x + dx * moveAlpha,
+    current.y + dy * moveAlpha,
+    current.z + dz * moveAlpha,
+  );
+}
+
 /** Map a creature's bio elemental type to an ArmorSystem weapon element.
  *  Returns null for families that don't map to a combat element. */
 function elementalToWeaponElement(el: string): ElementType | null {
@@ -203,12 +270,7 @@ export class ActivePetSystem {
   }
 
   private strongestAssignment(captured: CapturedCreature[]): { creatureId: string; level: number }[] {
-    return captured
-      .filter(c => !!getSpeciesById(c.speciesId))
-      .slice()
-      .sort((a, b) => (b.level ?? 1) - (a.level ?? 1))
-      .slice(0, MAX_ACTIVE_PETS)
-      .map(c => ({ creatureId: c.id, level: c.level ?? 1 }));
+    return strongestPetAssignment(captured);
   }
 
   private normalizeAssignment(
@@ -216,29 +278,7 @@ export class ActivePetSystem {
     source: CapturedCreature[],
     repairMissing: boolean,
   ): { creatureId: string; level: number }[] {
-    const valid = source.filter(c => !!getSpeciesById(c.speciesId));
-    const byId = new Map(valid.map(c => [c.id, c]));
-    const ranked = valid.slice().sort((a, b) => (b.level ?? 1) - (a.level ?? 1));
-    const reserved = new Set<string>();
-    const savedSlots = assignment.slice(0, MAX_ACTIVE_PETS).map(saved => {
-      const creature = byId.get(saved.creatureId);
-      if (!creature || reserved.has(creature.id)) return { saved, creature: undefined };
-      reserved.add(creature.id);
-      return { saved, creature };
-    });
-    const used = new Set(reserved);
-    const normalized: { creatureId: string; level: number }[] = [];
-
-    for (const slot of savedSlots) {
-      let creature = slot.creature;
-      if (!creature && repairMissing) {
-        creature = ranked.find(candidate => !used.has(candidate.id));
-      }
-      if (!creature) continue;
-      used.add(creature.id);
-      normalized.push({ creatureId: creature.id, level: creature.level ?? slot.saved.level ?? 1 });
-    }
-    return normalized;
+    return normalizePetAssignment(assignment, source, repairMissing);
   }
 
   getEntries(): ActivePetEntry[] {
@@ -358,7 +398,6 @@ export class ActivePetSystem {
   update(dt: number, playerPos: BABYLON.Vector3): void {
     const frameDt = Math.max(0, Math.min(0.1, dt));
     if (frameDt <= 0) return;
-    const moveAlpha = 1 - Math.exp(-PET_FOLLOW_RESPONSE * frameDt);
     const turnAlpha = 1 - Math.exp(-PET_TURN_RESPONSE * frameDt);
 
     for (let i = 0; i < this.pets.length; i++) {
@@ -392,16 +431,12 @@ export class ActivePetSystem {
       }
 
       const prevX = p.x, prevZ = p.z;
-      const dx = targetX - p.x;
-      const dy = targetY - p.y;
-      const dz = targetZ - p.z;
-      if (dx * dx + dy * dy + dz * dz > PET_CATCHUP_DISTANCE_SQ) {
-        p.set(targetX, targetY, targetZ);
-      } else {
-        p.x += dx * moveAlpha;
-        p.z += dz * moveAlpha;
-        p.y += dy * moveAlpha;
-      }
+      const nextPosition = calculatePetFollowStep(
+        p,
+        new BABYLON.Vector3(targetX, targetY, targetZ),
+        frameDt,
+      );
+      p.copyFrom(nextPosition);
 
       // Face direction of travel (turn smoothly toward velocity).
       const vx = p.x - prevX, vz = p.z - prevZ;
