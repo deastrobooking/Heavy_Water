@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as BABYLON from "@babylonjs/core";
 import {
+  ActivePetSystem,
   calculatePetFollowStep,
   normalizePetAssignment,
   strongestPetAssignment,
@@ -59,6 +60,54 @@ test("missing selected pets repair only vacant slots", () => {
   assert.deepEqual(ids(repaired), ["low", "high", "mid"]);
   assert.equal(repaired[0].creatureId, "low");
   assert.equal(repaired[2].creatureId, "mid");
+});
+
+test("rapid loadout changes undo only the immediately previous ordered lineup", () => {
+  const engine = new BABYLON.NullEngine({ renderWidth: 1, renderHeight: 1 });
+  const scene = new BABYLON.Scene(engine);
+  const pets = new ActivePetSystem(scene);
+
+  try {
+    const initial = [
+      { creatureId: "low", level: 1 },
+      { creatureId: "high", level: 1 },
+      { creatureId: "mid", level: 1 },
+    ];
+    const reorderedAndRemoved = [
+      { creatureId: "mid", level: 1 },
+      { creatureId: "low", level: 1 },
+    ];
+    const replacement = [
+      { creatureId: "extra", level: 1 },
+      { creatureId: "high", level: 1 },
+    ];
+
+    pets.assignPets(initial, roster);
+    pets.assignPets(reorderedAndRemoved, roster);
+    pets.assignPets(replacement, roster);
+
+    // A rapid second assignment must not overwrite the one-step undo target.
+    assert.deepEqual(ids(pets.getEntries()), ["extra", "high"]);
+    assert.equal(pets.undoPreviousLoadout(roster), true);
+    assert.deepEqual(ids(pets.getEntries()), ["mid", "low"]);
+    assert.equal(pets.hasPreviousLoadout(), false);
+
+    // Repeated changes continue to replace the buffer with the latest lineup.
+    pets.assignPets([], roster);
+    pets.assignPets(replacement, roster);
+    assert.equal(pets.undoPreviousLoadout(roster), true);
+    assert.deepEqual(ids(pets.getEntries()), []);
+
+    // An intentionally empty lineup is meaningful and can itself be undone to.
+    pets.assignPets([{ creatureId: "low", level: 1 }], roster);
+    assert.equal(pets.undoPreviousLoadout(roster), true);
+    assert.deepEqual(ids(pets.getEntries()), []);
+    assert.equal(pets.undoPreviousLoadout(roster), false);
+  } finally {
+    pets.dispose();
+    scene.dispose();
+    engine.dispose();
+  }
 });
 
 test("follower smoothing responds to delta time and snaps after a large gap", () => {
