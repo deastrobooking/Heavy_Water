@@ -196,6 +196,9 @@ export class ActivePetSystem {
   private bus: EventBus;
   private pets: LivePet[] = [];
   private entries: ActivePetEntry[] = [];
+  /** One-step, session-only undo buffer. An empty array is meaningful: it
+   * represents the player's intentionally empty lineup. */
+  private previousLoadout: { creatureId: string; level: number }[] | null = null;
   /** False for old saves/new games until the player makes a choice or a
    *  persisted activePets array is restored. Legacy mode keeps the historic
    *  strongest-three behavior; explicit mode preserves the chosen roster. */
@@ -215,7 +218,11 @@ export class ActivePetSystem {
     source: CapturedCreature[],
   ): void {
     this.hasExplicitLoadout = true;
-    this.applyAssignment(this.normalizeAssignment(assignment, source, false), source);
+    const next = this.normalizeAssignment(assignment, source, false);
+    if (this.assignmentSignature(next) !== this.assignmentSignature(this.serialize())) {
+      this.previousLoadout = this.serialize();
+    }
+    this.applyAssignment(next, source);
   }
 
   /** Restore a persisted player-selected lineup. The saved array's presence
@@ -323,11 +330,31 @@ export class ActivePetSystem {
     return MAX_ACTIVE_PETS;
   }
 
+  /** Whether a previous lineup can be restored during this session. */
+  hasPreviousLoadout(): boolean {
+    return this.previousLoadout !== null;
+  }
+
+  /** Restore the most recent lineup once. The buffer is consumed so repeated
+   * undo presses cannot unexpectedly toggle between two lineups. */
+  undoPreviousLoadout(source: CapturedCreature[]): boolean {
+    if (this.previousLoadout === null) return false;
+    const previous = this.previousLoadout;
+    this.previousLoadout = null;
+    this.hasExplicitLoadout = true;
+    this.applyAssignment(this.normalizeAssignment(previous, source, false), source);
+    return true;
+  }
+
   /** Whether the player/save has explicitly chosen a loadout. Implicit legacy
    *  auto-fill must remain distinguishable so saves can keep omitting
    *  activePets until the player actually makes a selection. */
   hasExplicitSelection(): boolean {
     return this.hasExplicitLoadout;
+  }
+
+  private assignmentSignature(assignment: { creatureId: string; level: number }[]): string {
+    return assignment.map(a => `${a.creatureId}:${a.level}`).join("|");
   }
 
   /** Recompute augment bonuses from the active roster.

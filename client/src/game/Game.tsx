@@ -380,6 +380,7 @@ export const Game: React.FC = () => {
   const [petBondSummary, setPetBondSummary] = useState("Pet Bonds: +0% DMG, +0% FIRE, -0% DMG TAKEN");
   const [petAugmentSummary, setPetAugmentSummary] = useState("Pet Augments: none active");
   const [activePetEntries, setActivePetEntries] = useState<ActivePetEntry[]>([]);
+  const [petUndoAvailable, setPetUndoAvailable] = useState(false);
   const [petComboName, setPetComboName] = useState("");
   // Persistent "ever caught" species ids for the dex completion UI. Only
   // grows; survives DEPLOY which removes a creature from the live roster.
@@ -4269,8 +4270,19 @@ export const Game: React.FC = () => {
     }
 
     pets.assignPets(next, source);
+    setPetUndoAvailable(pets.hasPreviousLoadout());
     refreshActivePets();
     showMessage(message, 1600);
+    forceSaveRef.current?.();
+  }, [refreshActivePets, showMessage]);
+
+  const handleUndoPetLoadout = useCallback(() => {
+    const pets = activePetSystemRef.current;
+    const bio = bioRef.current;
+    if (!pets || !bio || !pets.undoPreviousLoadout(bio.getCaptured())) return;
+    setPetUndoAvailable(pets.hasPreviousLoadout());
+    refreshActivePets();
+    showMessage("PREVIOUS PET LOADOUT RESTORED", 1600);
     forceSaveRef.current?.();
   }, [refreshActivePets, showMessage]);
 
@@ -5001,6 +5013,7 @@ export const Game: React.FC = () => {
           upgradeMenuCompanionWeapons={companionWeaponInfo}
           upgradeMenuPets={activePetEntries}
           upgradeMenuCapturedPets={capturedCreatures}
+          upgradeMenuPetUndoAvailable={petUndoAvailable}
           upgradeMenuPetSummary={petAugmentSummary}
           upgradeMenuPetCombo={petComboName}
           upgradeMenuTravel={travelDestinations}
@@ -5008,6 +5021,7 @@ export const Game: React.FC = () => {
           onUnlockSpecial={handleUnlockSpecial}
           onUpgradeCompanionWeapon={handleUpgradeCompanionWeapon}
           onSetPetSlot={handleSetPetSlot}
+          onUndoPetLoadout={handleUndoPetLoadout}
           onFastTravel={handleFastTravel}
           onUpgradeMenuClose={() => setUpgradeMenuOpen(false)}
           labOpen={labOpen}

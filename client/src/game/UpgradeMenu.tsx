@@ -83,6 +83,7 @@ interface UpgradeMenuProps {
   companionWeapons?: CompanionWeaponInfo[];
   activePets?: ActivePetEntry[];
   capturedPets?: CapturedCreature[];
+  petUndoAvailable?: boolean;
   petAugmentSummary?: string;
   petComboName?: string;
   travelDestinations?: TravelDestinationInfo[];
@@ -94,6 +95,7 @@ interface UpgradeMenuProps {
   onUnlockSpecial?: (id: string) => void;
   onUpgradeCompanionWeapon?: (id: string) => void;
   onSetPetSlot?: (slotIndex: number, creatureId: string | null) => void;
+  onUndoPetLoadout?: () => void;
   onFastTravel?: (level: number, warpPoint?: TravelWarpPoint) => void;
   onClose: () => void;
   /** Per-weapon Power-Jewel state. When omitted the jewel slot UI is
@@ -134,6 +136,7 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
   companionWeapons = [],
   activePets = [],
   capturedPets = [],
+  petUndoAvailable = false,
   petAugmentSummary = "Pet Augments: none active",
   petComboName = "",
   travelDestinations = [],
@@ -144,6 +147,7 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
   onUnlockSpecial,
   onUpgradeCompanionWeapon,
   onSetPetSlot,
+  onUndoPetLoadout,
   onFastTravel,
   onClose,
   weaponJewelInfo,
@@ -482,6 +486,18 @@ export const UpgradeMenu: React.FC<UpgradeMenuProps> = ({
                     </div>
                   </div>
                 </div>
+
+                <button
+                  onClick={() => onUndoPetLoadout?.()}
+                  disabled={!petUndoAvailable}
+                  className={`mt-3 w-full rounded border px-3 py-1.5 text-[10px] font-bold tracking-wider transition ${
+                    petUndoAvailable
+                      ? "border-amber-500/80 bg-amber-950/60 text-amber-300 hover:bg-amber-900/70"
+                      : "border-zinc-800 bg-zinc-950/50 text-zinc-600 cursor-not-allowed"
+                  }`}
+                >
+                  {petUndoAvailable ? "UNDO LAST LOADOUT CHANGE" : "NO RECENT LOADOUT CHANGE TO UNDO"}
+                </button>
 
                 <div className="grid grid-cols-3 gap-2 mt-3">
                   {[0, 1, 2].map(slotIndex => {

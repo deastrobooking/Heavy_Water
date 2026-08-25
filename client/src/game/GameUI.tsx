@@ -82,6 +82,7 @@ interface GameUIProps {
   upgradeMenuCompanionWeapons?: CompanionWeaponInfo[];
   upgradeMenuPets?: ActivePetEntry[];
   upgradeMenuCapturedPets?: CapturedCreature[];
+  upgradeMenuPetUndoAvailable?: boolean;
   upgradeMenuPetSummary?: string;
   upgradeMenuPetCombo?: string;
   upgradeMenuTravel?: TravelDestinationInfo[];
@@ -89,6 +90,7 @@ interface GameUIProps {
   onUnlockSpecial?: (id: string) => void;
   onUpgradeCompanionWeapon?: (id: string) => void;
   onSetPetSlot?: (slotIndex: number, creatureId: string | null) => void;
+  onUndoPetLoadout?: () => void;
   onFastTravel?: (level: number, warpPoint?: TravelWarpPoint) => void;
   onUpgradeMenuClose?: () => void;
   onUpgradeWeapon?: (type: string) => void;
@@ -221,6 +223,7 @@ export const GameUI: React.FC<GameUIProps> = ({
   upgradeMenuCompanionWeapons = [],
   upgradeMenuPets = [],
   upgradeMenuCapturedPets = [],
+  upgradeMenuPetUndoAvailable = false,
   upgradeMenuPetSummary = "Pet Augments: none active",
   upgradeMenuPetCombo = "",
   upgradeMenuTravel = [],
@@ -228,6 +231,7 @@ export const GameUI: React.FC<GameUIProps> = ({
   onUnlockSpecial,
   onUpgradeCompanionWeapon,
   onSetPetSlot,
+  onUndoPetLoadout,
   onFastTravel,
   onUpgradeMenuClose,
   weaponJewelInfo,
@@ -972,6 +976,7 @@ export const GameUI: React.FC<GameUIProps> = ({
         companionWeapons={upgradeMenuCompanionWeapons}
         activePets={upgradeMenuPets}
         capturedPets={upgradeMenuCapturedPets}
+        petUndoAvailable={upgradeMenuPetUndoAvailable}
         petAugmentSummary={upgradeMenuPetSummary}
         petComboName={upgradeMenuPetCombo}
         travelDestinations={upgradeMenuTravel}
@@ -982,6 +987,7 @@ export const GameUI: React.FC<GameUIProps> = ({
         onUnlockSpecial={(id) => onUnlockSpecial?.(id)}
         onUpgradeCompanionWeapon={(id) => onUpgradeCompanionWeapon?.(id)}
         onSetPetSlot={(slotIndex, creatureId) => onSetPetSlot?.(slotIndex, creatureId)}
+        onUndoPetLoadout={() => onUndoPetLoadout?.()}
         onFastTravel={(lvl, warpPoint) => onFastTravel?.(lvl, warpPoint)}
         onClose={() => onUpgradeMenuClose?.()}
         weaponJewelInfo={weaponJewelInfo}
