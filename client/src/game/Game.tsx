@@ -4310,6 +4310,10 @@ export const Game: React.FC = () => {
       if (shopRef.current?.isOpen()) shopRef.current.closeShop();
     };
     const onKey = (e: KeyboardEvent) => {
+      // Controller Y is remapped to KeyE for easier Beam Saber access. Its
+      // non-zero synthetic location distinguishes it from controller B's
+      // KeyE interaction event and from a real keyboard E press.
+      const isControllerBeamKey = e.code === "KeyE" && !e.isTrusted && e.location === 1;
       if (e.code === "Escape") {
         if (isAnyModalOpen()) closeAllModals();
         return;
@@ -4341,7 +4345,7 @@ export const Game: React.FC = () => {
         MusicSystem.next();
       } else if (e.code === "Backslash") {
         MusicSystem.togglePlay();
-      } else if (e.code === "KeyE") {
+      } else if (e.code === "KeyE" && !isControllerBeamKey) {
         if (!playerRef.current) return;
         const pos = playerRef.current.getPosition();
         // Priority: ghost-ride (controller B mid-boost) > exit vehicle
@@ -4416,9 +4420,10 @@ export const Game: React.FC = () => {
           const fired = meleeArsenalRef.current.fireSpecial();
           if (!fired) showMessage("SPECIAL ON COOLDOWN", 1000);
         }
-      } else if (e.code === "KeyY" || e.code === "KeyJ") {
-        // The Beam Sabre is always active. Y (keyboard) and J (controller LT)
-        // both trigger a slash. KeyB cycles the equipped MELEE weapon (sabre /
+      } else if (e.code === "KeyY" || e.code === "KeyJ" || isControllerBeamKey) {
+        // The Beam Sabre is always active. Controller Y (remapped to the
+        // synthetic E binding), keyboard Y, and controller LT (J) trigger a
+        // slash. KeyB cycles the equipped MELEE weapon (sabre /
         // glaive / daggers / axe / whip); KeyG stays reserved for build mode.
         // startCharge only matters once the Spinning Blade upgrade is owned —
         // otherwise it just calls attack() like before.
@@ -4504,7 +4509,8 @@ export const Game: React.FC = () => {
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === "KeyY" || e.code === "KeyJ") {
+      const isControllerBeamKey = e.code === "KeyE" && !e.isTrusted && e.location === 1;
+      if (e.code === "KeyY" || e.code === "KeyJ" || isControllerBeamKey) {
         beamHeldRef.current = false;
         // The beam-sabre release is essential for air combat (Spinning
         // Blade), so it always fires alongside the smash combo's

@@ -1,14 +1,15 @@
 import * as BABYLON from "@babylonjs/core";
 
 interface ButtonMap {
-  [buttonIndex: number]: { code: string; key?: string };
+  [buttonIndex: number]: { code: string; key?: string; location?: number };
 }
 
 // Controller bindings (Xbox-style indices):
 //  0 (A) → Space (jump / fly)
 //  1 (B) → KeyE (interact: enter vehicle, talk, mount)
 //  2 (X) → KeyV (capture)        — but if LT is held → Quote (Smash Lash combo)
-//  3 (Y) → KeyY (beam-sabre slash) — but if LT is held → Semicolon (Fury Slash combo)
+//  3 (Y) → KeyE (beam-sabre slash) — tagged with keyboard location 1 so it
+//               stays distinct from B's KeyE interaction binding; LT held → Semicolon
 //  4 (LB) → KeyL (boost dash with i-frames)
 //  5 (RB) → KeyK (cast currently-selected elemental special)
 //  8 (Select / View) → Tab (upgrade menu)
@@ -23,7 +24,7 @@ const BUTTON_TO_KEY: ButtonMap = {
   0: { code: "Space", key: " " },
   1: { code: "KeyE", key: "e" },
   2: { code: "KeyV", key: "v" },
-  3: { code: "KeyY", key: "y" },
+  3: { code: "KeyE", key: "e", location: 1 },
   4: { code: "KeyL", key: "l" },
   5: { code: "KeyK", key: "k" },
   8: { code: "Tab", key: "Tab" },
@@ -54,7 +55,7 @@ export class GamepadInput {
   // dispatch a combo key (KeyU / KeyI). We must remember which combo key
   // was sent on the press so the matching key-up is sent on release even
   // if LT was released first.
-  private comboOverride: Record<number, { code: string; key?: string } | null> = {
+  private comboOverride: Record<number, { code: string; key?: string; location?: number } | null> = {
     2: null,
     3: null,
   };
@@ -163,11 +164,11 @@ export class GamepadInput {
     for (const fn of this.listeners) fn(connected, id);
   }
 
-  private dispatchKeyDown(code: string, key?: string): void {
-    window.dispatchEvent(new KeyboardEvent("keydown", { code, key: key ?? code, bubbles: true }));
+  private dispatchKeyDown(code: string, key?: string, location = 0): void {
+    window.dispatchEvent(new KeyboardEvent("keydown", { code, key: key ?? code, location, bubbles: true }));
   }
-  private dispatchKeyUp(code: string, key?: string): void {
-    window.dispatchEvent(new KeyboardEvent("keyup", { code, key: key ?? code, bubbles: true }));
+  private dispatchKeyUp(code: string, key?: string, location = 0): void {
+    window.dispatchEvent(new KeyboardEvent("keyup", { code, key: key ?? code, location, bubbles: true }));
   }
 
   private dispatchMouseButton(down: boolean, button: 0 | 2): void {
@@ -255,6 +256,7 @@ export class GamepadInput {
         // if LT is released before the face button.
         let dispatchCode = map.code;
         let dispatchKey = map.key;
+        let dispatchLocation = map.location ?? 0;
         const isComboButton = (i === 3 || i === 2) && footCtxNow === "foot";
         if (isComboButton) {
           // On press: if LT is held now, route to combo key. On release:
@@ -263,7 +265,8 @@ export class GamepadInput {
             if (ltHeldNow) {
               dispatchCode = i === 3 ? "Semicolon" : "Quote";
               dispatchKey = i === 3 ? ";" : "'";
-              this.comboOverride[i] = { code: dispatchCode, key: dispatchKey };
+              dispatchLocation = 0;
+              this.comboOverride[i] = { code: dispatchCode, key: dispatchKey, location: dispatchLocation };
             } else {
               this.comboOverride[i] = null;
             }
@@ -272,12 +275,13 @@ export class GamepadInput {
             if (ov) {
               dispatchCode = ov.code;
               dispatchKey = ov.key;
+              dispatchLocation = ov.location ?? 0;
               this.comboOverride[i] = null;
             }
           }
         }
-        if (pressed && !wasPressed) this.dispatchKeyDown(dispatchCode, dispatchKey);
-        else if (!pressed && wasPressed) this.dispatchKeyUp(dispatchCode, dispatchKey);
+        if (pressed && !wasPressed) this.dispatchKeyDown(dispatchCode, dispatchKey, dispatchLocation);
+        else if (!pressed && wasPressed) this.dispatchKeyUp(dispatchCode, dispatchKey, dispatchLocation);
       }
     }
     this.prevButtons.set(activePad.index, next);
